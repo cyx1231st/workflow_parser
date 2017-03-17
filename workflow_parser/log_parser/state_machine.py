@@ -1,66 +1,54 @@
 import abc
+from collections import defaultdict
 
-from state_graph import LeafGraph
 from state_graph import MasterGraph
 from state_graph import Node
 
+from workflow_parser.log_parser.exception import WFException
+from workflow_parser.log_parser.state_graph import LeafGraph
+from workflow_parser.log_parser.state_graph import Node
+from workflow_parser.log_parser.state_graph import Edge
+from workflow_parser.log_parser.log_parser import LogLine
 
-class ParseError(Exception):
+
+class PException(WFException):
     pass
 
 
-class PaceBase(object):
+class Pace(object):
     """ Pace is relative to transition. """
-    def __init__(self, content, transition, from_node, to_node, from_pace):
-        self.transition = transition
-        self.content = content
-        self.from_node = from_node
-        self.to_node = to_node
+    def __init__(self, log, from_node, edge, i_thread):
+        assert isinstance(log, LogLine)
+        assert isinstance(from_node, Node)
+        assert isinstance(edge, Edge)
+        assert isinstance(i_thread, ThreadInstance)
 
+        self.log = log
+        self.from_node = from_node
+        self.to_node = edge.node
+        self.edge = edge
+        self.i_thread = i_thread
+
+        self.prv = None
         self.nxt = None
-        self.bfo = None
-        if from_pace is not None:
-            from_pace.connect(self)
 
     @property
     def state(self):
         return self.to_node
 
     @property
-    def ident(self):
-        return self.content.ident
-
-    def connect(self, p):
-        assert isinstance(p, self.__class__)
-        assert self.nxt is None
-        assert p.bfo is None
-
-        self.nxt = p
-        p.bfo = self
-
-    @abc.abstractproperty
-    def assume_host(self):
-        return None
-
-    @abc.abstractproperty
     def from_seconds(self):
-        return None
+        return self.log.seconds
 
-    @abc.abstractproperty
+    @property
     def to_seconds(self):
-        return None
+        return self.log.seconds
+
 
     @abc.abstractmethod
     def confirm_pace(self, content):
         assert isinstance(content, self.content.__class__)
         return None
-
-
-class LeafPace(PaceBase):
-    """ LeafPace is relative to edge/log. """
-    def __init__(self, log, from_node, edge, from_pace=None):
-        super(LeafPace, self).__init__(
-            log, edge, from_node, edge.node, from_pace)
 
     @property
     def assume_host(self):
@@ -70,39 +58,17 @@ class LeafPace(PaceBase):
         else:
             return None
 
-    @property
-    def log(self):
-        return self.content
+    def __str__(self):
+        return "<Pace %.3f %s-%s-%s, %s %s>" % (
+                self.log.seconds,
+                self.from_node.name,
+                self.edge.name,
+                self.to_node.name,
+                self.log.thread,
+                self.log.request)
 
-    @property
-    def from_seconds(self):
-        return self.log.seconds
-
-    @property
-    def to_seconds(self):
-        return self.log.seconds
-
-    @property
-    def edge(self):
-        return self.transition
-
-    def confirm_pace(self, log):
-        super(LeafPace, self).confirm_pace(log)
-        edge = self.to_node.decide_edge(log)
-        if edge:
-            p = LeafPace(log, self.to_node, edge, self)
-            return p
-        else:
-            return None
-
-    def __repr__(self):
-        return "<LeafPace (rid)%s (sec)%s %s>" % (self.log.request_id,
-                                                  self.log.seconds,
-                                                  self.log.action)
-
-
-class NestedPace(PaceBase):
-    """ NestedPace is relative to subgraph/subinstance. """
+"""
+class RemotePace(PaceBase):
     def __init__(self, sub_instance, from_pace=None):
         super(NestedPace, self).__init__(
             sub_instance, sub_instance.graph, sub_instance.from_node,
@@ -149,6 +115,7 @@ class NestedPace(PaceBase):
         ret_str = "%r:" % self
         ret_str += "\n%s" % self.sub_instance
         return ret_str
+"""
 
 
 class InstanceBase(object):
@@ -247,84 +214,206 @@ class InstanceBase(object):
         return ret_str
 
 
-class LeafInstance(InstanceBase):
-    def __init__(self, graph, ident, host):
+class ThreadInstance(object):
+    def __init__(self, thread, graph, loglines, s_index):
+        assert isinstance(thread, str)
         assert isinstance(graph, LeafGraph)
-        super(LeafInstance, self).__init__(graph, ident)
+        assert isinstance(loglines, list)
+        assert isinstance(s_index, int)
+        s_log = loglines[s_index]
 
-        self.host = host
-        self.extra_logs = {}
+        self.thread = thread
+        self.request = None
 
-    @property
-    def from_edge(self):
-        return self.from_pace.edge
+        self.graph = graph
+        self.loglines = loglines
 
-    @property
-    def sort_key(self):
-        return self.from_pace.log.seconds
+        self.component = s_log.component
+        self.host = s_log.host
+        self.target = s_log.target
 
-    @property
-    def service(self):
-        return self.graph.service
+        self.s_index = s_index
+        self.f_index = None
 
-    @property
-    def start_leaf_pace(self):
-        return self.from_pace
+        self.paces = []
 
-    def connect(self, ins):
-        self.to_pace.connect(ins.from_pace)
+        # init
+        node = graph.decide_node(s_log)
+        index = s_index
+        while index != len(loglines):
+            log = loglines[index]
+            edge = node.decide_edge(log)
+            if not edge:
+                break
+            pace = Pace(log, node, edge, self)
+            self.paces.append(pace)
+            if log.request is not None:
+                if self.request is not None:
+                    assert self.request == log.request
+                else:
+                    self.request = log.request
+            node = edge.node
+            index += 1
 
-    def confirm(self, log):
-        assert self.host == log.host
-
-        if self.ident != log.ident:
-            return False
-
-        if not self.is_end:
-            p = None
-            if self.to_pace is None:
-                node, edge = self.graph.decide_node_edge(log)
-                if node and edge:
-                    p = LeafPace(log, node, edge, None)
-                    self.from_pace = p
+        # check
+        if not self.paces or not self.paces[-1].to_node.is_end:
+            print "(ThreadInstance) parse error: partial parse"
+            print "-------- Thread --------"
+            print "%r" % self
+            print "-------- LogLines ------"
+            from_ = s_index
+            to_ = index - 1
+            from_t = s_index - 3
+            to_t = index + 7
+            if from_t < 0:
+                print "  <start>"
+                from_t = 0
             else:
-                p = self.to_pace.confirm_pace(log)
-
-            if p:
-                self.to_pace = p
-                return True
-
-        # extra edges handling
-        edge = self.graph.decide_edge_ignored(log)
-        if edge is not None:
-            if edge not in self.extra_logs:
-                assert self.host == log.host
-                self.extra_logs[edge] = log
-                return True
+                print "  ..."
+            for i in range(from_t, from_):
+                print "  %s" % loglines[i]
+            for i in range(from_, to_-1):
+                print "| %s" % loglines[i]
+            print "|>%s" % loglines[to_]
+            for i in range(to_+1, min(to_t, len(loglines))):
+                print "  %s" % loglines[i]
+            if to_t >= len(loglines):
+                print "  <end>"
             else:
-                return False
+                print "  ..."
+            print "-------- end -----------"
+            raise PException("(ThreadInstance) parse error")
+
+        # set others
+        self.f_index = index
+        prv = None
+        for pace in self.paces:
+            pace.prv = prv
+            if prv:
+                prv.nxt = pace
+            prv = pace
+
+        # check and set thread vars
+        v_dict = defaultdict(set)
+        for pace in self.paces:
+            log = pace.log
+            keys = log.f_get_keys(res=True)
+            for key in keys:
+                v_dict[key].add(log[key])
+
+        for name in ("keyword", "time", "seconds"):
+            v_dict.pop(name)
+        for name in ("component", "target", "host", "thread"):
+            values = v_dict.pop(name)
+            if not len(values) == 1 or values.pop() != getattr(self, name):
+                print("(ThreadInstance) parse error: variable mismatch")
+                print("-------- Thread --------")
+                print("%r" % self)
+                print("-------- Desc ----------")
+                print("key %s not match: [%r] %r" % (
+                    name, getattr(self, name), values))
+                print("-------- end -----------")
+                raise PException("(ThreadInstance) parse error: variable mismatch")
+
+        requests = v_dict.pop("request")
+        fail = False
+        if len(requests) == 1:
+            self.request = requests.pop()
+        elif len(requests) == 2 and None in requests:
+            requests.discard(None)
+            self.request = requests.pop()
         else:
-            return False
+            print("(ThreadInstance) parse error: variable mismatch")
+            print("-------- Thread --------")
+            print("%r" % self)
+            print("-------- Desc ----------")
+            print("key request not match: [%r] %r" % (self.request, requests))
+            print("-------- end -----------")
+            raise PException("(ThreadInstance) parse error: variable mismatch")
 
-    def __repr__(self):
-        ret_str = "<LeafIns ident:%s graph:%s end:%s state:%s host:%s>" \
-                  % (self.ident, self.graph.name,
-                     self.is_end, self.state, self.host)
-        return ret_str
+        self.thread_vars = {}
+        self.thread_vars_1 = {}
+        for k, v in v_dict.iteritems():
+            if len(v) == 0:
+                pass
+            elif len(v) == 1:
+                self.thread_vars[k] = v.pop()
+            else:
+                self.thread_vars_1[k] = v
 
     def __str__(self):
-        ret_str = super(LeafInstance, self).__str__()
+        return "<ThIns#%s(%s, %s) [%s %s %s]: graph %s, %d paces>" % (
+                self.thread,
+                self.s_index,
+                self.f_index,
+                self.component,
+                self.host,
+                self.target,
+                self.graph.name,
+                len(self.paces))
 
-        if self.extra_logs:
-            ret_str += "\nExtra_logs:"
-            for log in self.extra_logs.itervalues():
-                ret_str += "\n    %s" % log
-
-        ret_str += "\n"
+    def __repr__(self):
+        ret_str = str(self)
+        ret_str += "\n%r" % self.graph
+        ret_str += "\nPaces:"
+        for pace in self.paces:
+            ret_str += "\n| %s" % pace
         return ret_str
 
+    # @property
+    # def from_edge(self):
+    #     return self.from_pace.edge
 
-class NestedInstance(InstanceBase):
+    # @property
+    # def sort_key(self):
+    #     return self.from_pace.log.seconds
+
+    # @property
+    # def service(self):
+    #     return self.graph.service
+
+    # @property
+    # def start_leaf_pace(self):
+    #     return self.from_pace
+
+    # def connect(self, ins):
+    #     self.to_pace.connect(ins.from_pace)
+
+    # def confirm(self, log):
+    #     assert self.host == log.host
+
+    #     if self.ident != log.ident:
+    #         return False
+
+    #     if not self.is_end:
+    #         p = None
+    #         if self.to_pace is None:
+    #             node, edge = self.graph.decide_node_edge(log)
+    #             if node and edge:
+    #                 p = LeafPace(log, node, edge, None)
+    #                 self.from_pace = p
+    #         else:
+    #             p = self.to_pace.confirm_pace(log)
+
+    #         if p:
+    #             self.to_pace = p
+    #             return True
+
+    #     # extra edges handling
+    #     edge = self.graph.decide_edge_ignored(log)
+    #     if edge is not None:
+    #         if edge not in self.extra_logs:
+    #             assert self.host == log.host
+    #             self.extra_logs[edge] = log
+    #             return True
+    #         else:
+    #             return False
+    #     else:
+    #         return False
+
+
+
+class RequestInstance(InstanceBase):
     def __init__(self, graph, ident):
         assert isinstance(graph, MasterGraph)
         super(NestedInstance, self).__init__(graph, ident)

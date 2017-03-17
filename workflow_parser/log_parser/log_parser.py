@@ -102,7 +102,8 @@ class DriverPlugin(object):
 
         try:
             if self.filter_logfile(f_dir, f_name):
-                print("(LogDriver) loaded: %s" % f_dir)
+                # NOTE
+                # print("(LogDriver) loaded: %s" % f_dir)
                 return f_name
             else:
                 return None
@@ -283,7 +284,7 @@ class LogLine(object):
                         self)
 
     def __str__(self):
-        ret = "%s %s [%s %s %s] %s %s: <%s>" % (
+        ret = "%.3f %s [%s %s %s] %s %s: <%s>" % (
               self.seconds,
               self.time,
               self.component,

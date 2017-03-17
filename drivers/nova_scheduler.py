@@ -42,6 +42,11 @@ class NovaScheduler(DriverBase):
         e  = build( 3, 21, cond, "failed: attempt")
         e  = build( 3,  4, cond, "attempts")
         f2 = build( 4,  5, cond, "sent scheduler")
+
+        # case 3000
+        e  = build( 5, 40, cond, "failed: Timed out")
+        f6 = build( 40, 5, cond, "sent scheduler")
+
         j3 = build( 5, 22, cond, "failed: NoValidHost")
         j4 = build( 5, 13, cond, "decided")
         f5 = build(13, 14, cond, "sent")
@@ -58,9 +63,10 @@ class NovaScheduler(DriverBase):
         e  = build(15, 24, comp, "success")
         e  = build(24, 25, comp, "finished: active")
         e  = build(15, 16, comp, "fail: retry")
-        e  = build(15, 23, comp, "fail:")
-        e  = build(15, 26, comp, "finished: None")
         f6 = build(16, 31, comp, "sent/retried")
+        e  = build(31, 32, comp, "finished: rescheduled")
+        e  = build(15, 23, comp, "fail:")
+        e  = build(23, 26, comp, "finished:")
 
         f1.join(j1)
         f6.join(j1)
@@ -68,11 +74,11 @@ class NovaScheduler(DriverBase):
         f3.join(j3)
         f4.join(j4)
         f5.join(j5)
+        f6.join(j2)
 
         graph.set_state(20, "API FAIL")
         graph.set_state(21, "RETRY FAIL")
         graph.set_state(22, "NO VALID HOST")
-        graph.set_state(23, "COMPUTE FAIL")
         graph.set_state(25, "SUCCESS")
         graph.set_state(26, "COMPUTE FAIL")
 
@@ -179,7 +185,8 @@ class NovaScheduler(DriverBase):
             i_name = line_obj["instance_name"]
             i_id = relations.get(i_name)
             if not i_id:
-                assert str(line_obj.component) == "api"
+                if str(line_obj.component) != "api":
+                    return i_name
                 line_obj.request = i_name
                 line_obj.thread = i_name
             else:

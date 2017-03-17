@@ -17,6 +17,7 @@ from __future__ import print_function
 import argparse
 
 from workflow_parser.log_parser.log_parser import LogCollector
+from workflow_parser.log_parser.state_engine import ParserEngine
 
 
 def main1(driver):
@@ -54,7 +55,9 @@ def main1(driver):
     #     print("%s" % log_collector.logfiles_by_component[comp][0])
 
     # build states
-    # engine = parser_engine.ParserEngine(master_graph, log_collector)
+    engine = ParserEngine(master, log_collector)
+    engine.parse()
+    print("Parse threads ok..\n")
     # instances = engine.parse()
 
     # for ins in instances.itervalues():

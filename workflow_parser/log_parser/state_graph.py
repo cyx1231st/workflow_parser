@@ -1,7 +1,10 @@
 from __future__ import print_function
+
+from collections import defaultdict
 from orderedset import OrderedSet
 
 from workflow_parser.log_parser.service_registry import Component
+from workflow_parser.log_parser.log_parser import LogLine
 
 # Node(id_, name, component, state, is_end, is_start, graph, master_graph)
 #   append_edge(edge)
@@ -20,6 +23,8 @@ from workflow_parser.log_parser.service_registry import Component
 #
 #   build_edge(from_id, to_id, component, keyword)
 #   build_from_driver(driver)
+
+seen_edges  = set()
 
 
 class Node(object):
@@ -61,15 +66,14 @@ class Node(object):
         assert edge.component == self.component
         self.edges.add(edge)
 
-
-    # def decide_edge(self, log):
-    #     for edge in self.edges:
-    #         if edge.accept(log):
-    #             return edge
-    #     return None
-
-    # def accept_edge(self, edge):
-    #     return edge in self.edges
+########
+    def decide_edge(self, log):
+        assert isinstance(log, LogLine)
+        for edge in self.edges:
+            if edge.decide(log):
+                seen_edges.add(edge)
+                return edge
+        return None
 
 
 class Edge(object):
@@ -116,8 +120,8 @@ class Edge(object):
         edge.joined.add(self)
         self.master_graph.add_join(self, edge)
 
-    # def accept(self, log):
-    #     return self.service == log.service and self.keyword in log.action
+    def decide(self, log):
+        return self.keyword in log.keyword
 
 
 class LeafGraph(object):
@@ -211,24 +215,26 @@ class LeafGraph(object):
     def remove(self):
         self.master_graph.remove_graph(self)
 
-    # def decide_node_edge(self, log):
-    #     for node in self.start_nodes:
-    #         edge = node.decide_edge(log)
-    #         if edge is not None:
-    #             return node, edge
-    #     return None, None
+########
+    def accept(self, log):
+        assert isinstance(log, LogLine)
+        if log.component is not self.component:
+            return False
 
-    # def accept(self, log):
-    #     node, edge = self.decide_node_edge(log)
-    #     if node is not None and edge is not None:
-    #         return True
-    #     else:
-    #         return False
+    def decide_node(self, log):
+        assert isinstance(log, LogLine)
+        for node in self.start_nodes:
+            edge = node.decide_edge(log)
+            if edge is not None:
+                return node
+        return None
 
 
 class MasterGraph(object):
     def __init__(self, name):
         self.name = name
+
+        self.edges = set()
         self.edges_by_from_to = {}
         self.nodes_by_id = {}
         self.graphs = set()
@@ -236,6 +242,9 @@ class MasterGraph(object):
 
         self._graph_index = 0
         self._edge_index = 0
+
+        # after check
+        self.graphs_by_component = defaultdict(list)
 
     @property
     def components(self):
@@ -327,6 +336,7 @@ class MasterGraph(object):
         from_node.append_edge(edge)
         from_node.graph.add_edge(from_node, edge)
         self.edges_by_from_to[(from_id, to_id)] = edge
+        self.edges.add(edge)
         return edge
 
     def set_state(self, node_id, state_str):
@@ -339,6 +349,9 @@ class MasterGraph(object):
         node.state = state_str
 
     def check(self):
+        for graph in self.graphs:
+            self.graphs_by_component[graph.component].append(graph)
+
         print("\n>>-------------->>")
         print("%r\n" % self)
         print("Graphs:\n")
@@ -346,10 +359,16 @@ class MasterGraph(object):
             print("%r\n" % sub)
         print("<<--------------<<\n")
 
+########
+    def decide_subgraph(self, log):
+        assert len(self.graphs_by_component) > 0
+        assert isinstance(log, LogLine)
+        graphs = self.graphs_by_component.get(log.component)
+        for graph in graphs:
+            node = graph.decide_node(log)
+            if node:
+                return graph
+        return None
+
     # def get_edge(self, from_, to):
     #     return self.edges_by_from_to.get((from_, to))
-    # def decide_subgraph(self, log):
-    #     for sub in self.graphs:
-    #         if sub.accept(log):
-    #             return sub
-    #     return None
