@@ -57,7 +57,6 @@ def main1(driver):
     # build states
     engine = ParserEngine(master, log_collector)
     engine.parse()
-    print("Parse threads ok..\n")
     # instances = engine.parse()
 
     # for ins in instances.itervalues():

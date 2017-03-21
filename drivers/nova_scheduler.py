@@ -33,7 +33,7 @@ class NovaScheduler(DriverBase):
         sche = nova.scheduler
         comp = nova.compute
 
-        e  = build( 0,  1, api,  "received")
+        e  = build( 0,  1, api,  "received", True)
         e  = build( 1, 20, api,  "failed:")
         f1 = build( 1,  2, api,  "sent/retried", )
         e  = build( 2, 27, api,  "api returned")
@@ -63,18 +63,18 @@ class NovaScheduler(DriverBase):
         e  = build(15, 24, comp, "success")
         e  = build(24, 25, comp, "finished: active")
         e  = build(15, 16, comp, "fail: retry")
-        f6 = build(16, 31, comp, "sent/retried")
+        f7 = build(16, 31, comp, "sent/retried")
         e  = build(31, 32, comp, "finished: rescheduled")
         e  = build(15, 23, comp, "fail:")
         e  = build(23, 26, comp, "finished:")
 
         f1.join(j1)
-        f6.join(j1)
+        f6.join(j2)
         f2.join(j2)
         f3.join(j3)
-        f4.join(j4)
+        f4.join(j4, [("t_host", "host")])
         f5.join(j5)
-        f6.join(j2)
+        f7.join(j1)
 
         graph.set_state(20, "API FAIL")
         graph.set_state(21, "RETRY FAIL")
@@ -160,7 +160,11 @@ class NovaScheduler(DriverBase):
 
         # request_id, action
         ret.append(("request_id", pieces[index-3][5:]))
-        ret.append((r_vars.keyword, " ".join(pieces[index+2:])))
+        keyword = " ".join(pieces[index+2:])
+        ret.append((r_vars.keyword, keyword))
+
+        if "selected" in keyword:
+            ret.append(("t_host", " ".join(keyword.split(" ")[1:])))
 
         return ret
 

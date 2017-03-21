@@ -11,61 +11,57 @@ from workflow_parser.log_parser.state_graph import Edge
 from workflow_parser.log_parser.log_parser import LogLine
 
 
+empty_join = object()
+
+
 class PException(WFException):
     pass
 
 
 class Pace(object):
     """ Pace is relative to transition. """
-    def __init__(self, log, from_node, edge, i_thread):
+    def __init__(self, log, from_node, edge, thread_obj):
         assert isinstance(log, LogLine)
         assert isinstance(from_node, Node)
         assert isinstance(edge, Edge)
-        assert isinstance(i_thread, ThreadInstance)
+        assert isinstance(thread_obj, ThreadInstance)
 
         self.log = log
         self.from_node = from_node
         self.to_node = edge.node
         self.edge = edge
-        self.i_thread = i_thread
+        self.thread_obj = thread_obj
 
         self.prv = None
         self.nxt = None
 
-    @property
-    def state(self):
-        return self.to_node
+        self.joined_prv = None
+        self.joined_nxt = None
 
-    @property
-    def from_seconds(self):
-        return self.log.seconds
-
-    @property
-    def to_seconds(self):
-        return self.log.seconds
-
-
-    @abc.abstractmethod
-    def confirm_pace(self, content):
-        assert isinstance(content, self.content.__class__)
-        return None
-
-    @property
-    def assume_host(self):
-        f_assume_host = self.edge.f_assume_host
-        if f_assume_host is not None:
-            return f_assume_host(self.log.action)
+    def __getitem__(self, item):
+        if item in self.log.f_get_keys(True):
+            return self.log[item]
+        elif item in self.thread_obj.thread_vars:
+            return self.thread_obj.thread_vars[item]
+        elif item in self.thread_obj.thread_vars_1:
+            raise PException("(Pace) got multiple %s: %s" %
+                    (item, self.thread_obj.thread_vars_1[item]))
         else:
-            return None
+            raise PException("(Pace) %s not exist!" % item)
 
     def __str__(self):
-        return "<Pace %.3f %s-%s-%s, %s %s>" % (
+        return "<Pace %.3f [%s %s %s], %s %s>" % (
                 self.log.seconds,
                 self.from_node.name,
                 self.edge.name,
                 self.to_node.name,
                 self.log.thread,
                 self.log.request)
+
+    def __repr__(self):
+        ret_str = str(self)
+        ret_str += "\n  %s" % self.log.ll_line
+        return ret_str
 
 """
 class RemotePace(PaceBase):
@@ -223,10 +219,16 @@ class ThreadInstance(object):
         s_log = loglines[s_index]
 
         self.thread = thread
-        self.request = None
-
         self.graph = graph
         self.loglines = loglines
+
+        self.is_shared = graph.is_shared
+        if self.is_shared:
+            self.requests = set()
+            self.request_objs = set()
+        else:
+            self.request = None
+            self.request_obj = None
 
         self.component = s_log.component
         self.host = s_log.host
@@ -237,6 +239,9 @@ class ThreadInstance(object):
 
         self.paces = []
 
+        self.joins = []
+        self.joined = []
+
         # init
         node = graph.decide_node(s_log)
         index = s_index
@@ -246,12 +251,16 @@ class ThreadInstance(object):
             if not edge:
                 break
             pace = Pace(log, node, edge, self)
+            if edge.joins:
+                self.joins.append(pace)
+            if edge.joined:
+                self.joined.append(pace)
             self.paces.append(pace)
-            if log.request is not None:
-                if self.request is not None:
-                    assert self.request == log.request
-                else:
-                    self.request = log.request
+            # if log.request is not None:
+            #     if self.request is not None:
+            #         assert self.request == log.request
+            #     else:
+            #         self.request = log.request
             node = edge.node
             index += 1
 
@@ -316,21 +325,19 @@ class ThreadInstance(object):
                 raise PException("(ThreadInstance) parse error: variable mismatch")
 
         requests = v_dict.pop("request")
-        fail = False
-        if len(requests) == 1:
-            self.request = requests.pop()
-        elif len(requests) == 2 and None in requests:
+        if None in requests:
             requests.discard(None)
-            self.request = requests.pop()
+        if self.is_shared:
+            self.requests.update(requests)
         else:
-            print("(ThreadInstance) parse error: variable mismatch")
-            print("-------- Thread --------")
-            print("%r" % self)
-            print("-------- Desc ----------")
-            print("key request not match: [%r] %r" % (self.request, requests))
-            print("-------- end -----------")
-            raise PException("(ThreadInstance) parse error: variable mismatch")
+            if len(requests) == 0:
+                pass
+            elif len(requests) == 1:
+                self.request = requests.pop()
+            else:
+                raise PException("(ThreadInstance) thread is not shared!")
 
+        # generate vars
         self.thread_vars = {}
         self.thread_vars_1 = {}
         for k, v in v_dict.iteritems():
@@ -340,6 +347,10 @@ class ThreadInstance(object):
                 self.thread_vars[k] = v.pop()
             else:
                 self.thread_vars_1[k] = v
+
+    @property
+    def is_start(self):
+       return self.paces[0].from_node.is_g_start
 
     def __str__(self):
         return "<ThIns#%s(%s, %s) [%s %s %s]: graph %s, %d paces>" % (
@@ -414,9 +425,14 @@ class ThreadInstance(object):
 
 
 class RequestInstance(InstanceBase):
-    def __init__(self, graph, ident):
+    def __init__(self, graph, start_thread_obj):
         assert isinstance(graph, MasterGraph)
-        super(NestedInstance, self).__init__(graph, ident)
+        assert isinstance(start_thread_obj, ThreadInstance)
+        self.start_thread = start_thread_obj
+        self.graph = graph
+        self.instances = set()
+        self.thread = None
+
 
     @property
     def start_leaf_pace(self):

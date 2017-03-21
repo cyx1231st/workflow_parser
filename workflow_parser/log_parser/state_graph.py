@@ -49,6 +49,10 @@ class Node(object):
     def is_start(self):
         return self in self.graph.start_nodes
 
+    @property
+    def is_g_start(self):
+        return self in self.master_graph.start_nodes
+
     def __str__(self):
         state_str = ""
         if self.state:
@@ -76,6 +80,28 @@ class Node(object):
         return None
 
 
+join_id = 0
+
+class Join(object):
+    def __init__(self, from_edge, to_edge, schemas, is_shared):
+        assert isinstance(from_edge, Edge)
+        assert isinstance(to_edge, Edge)
+        global join_id
+        join_id += 1
+        self.name = "j-%d" % join_id
+        self.from_edge = from_edge
+        self.to_edge = to_edge
+        if not schemas:
+            self.schemas = []
+        else:
+            self.schemas = schemas
+        self.is_shared = is_shared
+
+    def __repr__(self):
+        return "<Join#%s: %s -> %s, %s>" % (
+                self.name, self.from_edge, self.to_edge, self.schemas)
+
+
 class Edge(object):
     def __init__(self, node, keyword):
         self.component = node.component
@@ -95,7 +121,7 @@ class Edge(object):
         if self.joined:
             join_str += ", %d joined" % len(self.joined)
         return "<Edge#%s: Node#%s, `%s`, in %s|%s%s>" \
-               % (self.name, self.name, self.keyword,
+               % (self.name, self.node.name, self.keyword,
                   self.component, self.graph.name, join_str)
 
     def __repr__(self):
@@ -104,21 +130,24 @@ class Edge(object):
         ret_str += "\n  %s" % self.graph
         if self.joins:
             ret_str += "\n  joins:"
-            for edge in self.joins:
-                ret_str += "\n    %s" % edge
+            for join in self.joins:
+                ret_str += "\n    %s" % join
         if self.joined:
             ret_str += "\n  joined:"
-            for edge in self.joined:
-                ret_str += "\n    %s" % edge
+            for join in self.joined:
+                ret_str += "\n    %s" % join
         return ret_str
 
-    def join(self, edge):
+    def join(self, edge, schemas=None, is_shared=False):
         assert isinstance(edge, Edge)
-        assert edge not in self.joins
-        assert self not in edge.joined
-        self.joins.add(edge)
-        edge.joined.add(self)
-        self.master_graph.add_join(self, edge)
+        # assert edge not in self.joins
+        # assert self not in edge.joined
+        join = Join(self, edge, schemas, is_shared)
+        self.joins.add(join)
+        edge.joined.add(join)
+        self.master_graph.add_join(join)
+        if is_shared:
+            edge.graph.is_shared = True
 
     def decide(self, log):
         return self.keyword in log.keyword
@@ -133,17 +162,19 @@ class LeafGraph(object):
         self.start_nodes = set((node,))
         self.end_nodes = set((node,))
         self.edges = set()
+        self.is_shared = False
 
         self.master_graph.add_graph(self)
 
     def __str__(self):
-        return ("<LeafGraph#%s: %d(%d, %d) nodes, %d edges, in %s>"
+        return ("<LeafGraph#%s: %d(%d, %d) nodes, %d edges, in %s, is_shared %s>"
                     % (self.name,
                        len(self.nodes),
                        len(self.start_nodes),
                        len(self.end_nodes),
                        len(self.edges),
-                       self.component))
+                       self.component,
+                       self.is_shared))
 
     def __repr__(self):
         included = set()
@@ -239,6 +270,7 @@ class MasterGraph(object):
         self.nodes_by_id = {}
         self.graphs = set()
         self.joins = []
+        self.start_nodes = set()
 
         self._graph_index = 0
         self._edge_index = 0
@@ -288,8 +320,8 @@ class MasterGraph(object):
         for state in self.states:
             ret_str += " %s," % state
         ret_str += "\n  Joins:"
-        for (from_edge, to_edge) in self.joins:
-            ret_str += "\n    %s -> %s" % (from_edge, to_edge)
+        for join in self.joins:
+            ret_str += "\n    %s" % join
         return ret_str
 
     def _generate_graph_name(self):
@@ -310,8 +342,8 @@ class MasterGraph(object):
         self._edge_index += 1
         return "e-%d" % self._edge_index
 
-    def add_join(self, from_edge, to_edge):
-        self.joins.append((from_edge, to_edge))
+    def add_join(self, join):
+        self.joins.append(join)
 
     def _track_node(self, node_id, component):
         """ Get node from tracked nodes. """
@@ -323,7 +355,7 @@ class MasterGraph(object):
         assert component == node.component
         return node
 
-    def build_edge(self, from_id, to_id, component, keyword):
+    def build_edge(self, from_id, to_id, component, keyword, start=False):
         assert isinstance(from_id, int)
         assert isinstance(from_id, int)
         assert isinstance(component, Component)
@@ -337,6 +369,9 @@ class MasterGraph(object):
         from_node.graph.add_edge(from_node, edge)
         self.edges_by_from_to[(from_id, to_id)] = edge
         self.edges.add(edge)
+
+        if start:
+            self.start_nodes.add(from_node)
         return edge
 
     def set_state(self, node_id, state_str):
