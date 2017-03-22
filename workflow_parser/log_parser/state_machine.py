@@ -5,10 +5,11 @@ from state_graph import MasterGraph
 from state_graph import Node
 
 from workflow_parser.log_parser.exception import WFException
-from workflow_parser.log_parser.state_graph import LeafGraph
+from workflow_parser.log_parser.state_graph import ThreadGraph
 from workflow_parser.log_parser.state_graph import Node
 from workflow_parser.log_parser.state_graph import Edge
 from workflow_parser.log_parser.log_parser import LogLine
+from workflow_parser.log_parser.state_graph import Join
 
 
 empty_join = object()
@@ -32,11 +33,26 @@ class Pace(object):
         self.edge = edge
         self.thread_obj = thread_obj
 
-        self.prv = None
-        self.nxt = None
+        self.prv_pace = None
+        self.nxt_pace = None
 
-        self.joined_prv = None
-        self.joined_nxt = None
+        self.joins_pace = None
+        self.joined_pace = None
+
+        self.joins_relation = None
+        self.joined_relation = None
+
+    @property
+    def state(self):
+        return self.to_node.state
+
+    @property
+    def joins_objs(self):
+        return self.edge.joins
+
+    @property
+    def joined_objs(self):
+        return self.edge.joined
 
     def __getitem__(self, item):
         if item in self.log.f_get_keys(True):
@@ -48,10 +64,6 @@ class Pace(object):
                     (item, self.thread_obj.thread_vars_1[item]))
         else:
             raise PException("(Pace) %s not exist!" % item)
-
-    @property
-    def state(self):
-        return self.to_node.state
 
     def __str__(self):
         return "<Pace %.3f [%s %s %s], %s %s>" % (
@@ -66,6 +78,36 @@ class Pace(object):
         ret_str = str(self)
         ret_str += "\n  %s" % self.log.ll_line
         return ret_str
+
+    def join_pace(self, next_pace, join_obj):
+        assert isinstance(next_pace, Pace)
+        assert isinstance(join_obj, Join)
+        assert join_obj in self.edge.joins
+        relation = JoinRelation(join_obj, self, to_pace)
+        assert self.joined_nxt is None
+        assert to_pace.joined_prv is None
+        self.joined_nxt = relation
+        to_pace.joined_prv = relation
+        return relation
+
+
+class JoinRelation(object):
+    def __init__(self, join_obj, from_pace, to_pace):
+        assert isinstance(join_obj, Join)
+        assert isinstance(from_pace, Pace)
+        assert isinstance(to_pace, Pace)
+        self.join = join_obj
+        self.from_pace = from_pace
+        self.to_pace = to_pace
+
+    @property
+    def from_thread_obj(self):
+        return self.from_pace.thread_obj
+
+    @property
+    def to_thread_obj(self):
+        return self.to_pace.thread_obj
+
 
 """
 class RemotePace(PaceBase):
@@ -217,7 +259,7 @@ class RemotePace(PaceBase):
 class ThreadInstance(object):
     def __init__(self, thread, graph, loglines, s_index):
         assert isinstance(thread, str)
-        assert isinstance(graph, LeafGraph)
+        assert isinstance(graph, ThreadGraph)
         assert isinstance(loglines, list)
         assert isinstance(s_index, int)
         s_log = loglines[s_index]
@@ -243,8 +285,8 @@ class ThreadInstance(object):
 
         self.paces = []
 
-        self.joins = []
-        self.joined = []
+        self.joined_paces = []
+        self.joins_paces = []
 
         self.marks = []
         self.thread_vars = {}
@@ -263,9 +305,9 @@ class ThreadInstance(object):
             if state and state[1]:
                 self.marks.append((state[0], pace))
             if edge.joins:
-                self.joins.append(pace)
+                self.joins_paces.append(pace)
             if edge.joined:
-                self.joined.append(pace)
+                self.joined_paces.append(pace)
             self.paces.append(pace)
             # if log.request is not None:
             #     if self.request is not None:

@@ -1,10 +1,15 @@
 class Component(object):
     def __init__(self, component, service):
+        assert isinstance(component, str)
+
         self.name = component
         self.service = service
 
     def __str__(self):
         return self.name
+
+    def __repr__(self):
+        return "<Component: %s>" % self.name
 
 
 class Service(object):
@@ -16,6 +21,9 @@ class Service(object):
 
     def __str__(self):
         return self._name
+
+    def __repr__(self):
+        return "<Service: %s>" % self._name
 
     def __getattr__(self, attr):
         return self._components[attr]
@@ -41,6 +49,9 @@ class ServiceRegistry(object):
                 ret.add(component)
         return ret
 
+    def __getattr__(self, attr):
+        return self._services[attr]
+
     def f_to_component(self, comp):
         if isinstance(comp, Component):
             assert comp in self.sr_components
@@ -52,9 +63,7 @@ class ServiceRegistry(object):
                     return ret
         return None
 
-
-    def __getattr__(self, attr):
-        return self._services[attr]
-
     def f_register(self, service, *components):
+        assert isinstance(service, str)
+
         self._services[service] = Service(service, components)

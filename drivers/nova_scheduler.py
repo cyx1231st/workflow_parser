@@ -13,25 +13,25 @@
 # under the License.
 
 from workflow_parser.log_parser.driver import DriverBase
-from workflow_parser.log_parser.driver import r_vars
+from workflow_parser.log_parser.driver import rv
+from workflow_parser.log_parser.driver import ServiceRegistry
 
+
+sr = ServiceRegistry()
+sr.f_register("nova", "api", "conductor", "scheduler", "compute")
+
+api = sr.nova.api
+cond = sr.nova.conductor
+sche = sr.nova.scheduler
+comp = sr.nova.compute
 
 # name -> id
 relations = {}
 
 
 class NovaScheduler(DriverBase):
-    def register_service(self, sr):
-        sr.f_register("nova", "api", "conductor", "scheduler", "compute")
-
-    def build_graph(self, services, graph):
+    def build_graph(self, graph):
         build = graph.build_edge
-
-        nova = services.nova
-        api = nova.api
-        cond = nova.conductor
-        sche = nova.scheduler
-        comp = nova.compute
 
         e  = build( 0,  1, api,  "received", True)
         e  = build( 1, 20, api,  "failed:")
@@ -68,13 +68,13 @@ class NovaScheduler(DriverBase):
         e  = build(15, 23, comp, "fail:")
         e  = build(23, 26, comp, "finished:")
 
-        f1.join(j1)
-        f6.join(j2)
-        f2.join(j2)
-        f3.join(j3)
-        f4.join(j4, [("t_host", "t_host")])
-        f5.join(j5, [("t_host", "host")])
-        f7.join(j1)
+        f1.join_edge(j1)
+        f6.join_edge(j2)
+        f2.join_edge(j2)
+        f3.join_edge(j3)
+        f4.join_edge(j4, {("t_host", "t_host")})
+        f5.join_edge(j5, {("t_host", "host")})
+        f7.join_edge(j1)
 
         graph.set_state(20, "API FAIL")
         graph.set_state(21, "RETRY FAIL")
@@ -89,15 +89,14 @@ class NovaScheduler(DriverBase):
             return False
         return True
 
-    def parse_logfilename(self, f_name):
-        ret = []
+    def parse_logfilename(self, f_name, var_dict):
         pieces = f_name.split("-")
         component = pieces[1]
         host = "-".join(pieces[2:])
-        ret.append((r_vars.component, component))
-        ret.append((r_vars.host, host))
-        ret.append((r_vars.target, component+"@"+host))
-        return ret
+
+        var_dict[rv.COMPONENT] = component
+        var_dict[rv.HOST] = host
+        var_dict[rv.TARGET] = component+"@"+host
 
     def filter_logline(self, line):
         if "BENCH-" not in line:
@@ -107,8 +106,7 @@ class NovaScheduler(DriverBase):
         else:
             return True
 
-    def parse_logline(self, line):
-        ret = []
+    def parse_logline(self, line, var_dict):
         pieces = line.split()
 
         # seconds
@@ -116,8 +114,8 @@ class NovaScheduler(DriverBase):
         seconds = int(time_pieces[0]) * 3600 + \
             int(time_pieces[1]) * 60 + \
             float(time_pieces[2])
-        ret.append((r_vars.time, pieces[1]))
-        ret.append((r_vars.seconds, seconds))
+        var_dict[rv.TIME] = pieces[1]
+        var_dict[rv.SECONDS] = seconds
 
         # component, host
         pieces7 = None
@@ -130,8 +128,8 @@ class NovaScheduler(DriverBase):
         pieces7 = pieces7.split('-')
         host_pieces = pieces7[2:]
         host_pieces[-1] = pieces7[-1][:-1]
-        ret.append((r_vars.host, '-'.join(host_pieces)))
-        ret.append((r_vars.component, pieces7[1]))
+        var_dict[rv.HOST] = '-'.join(host_pieces)
+        var_dict[rv.COMPONENT] = pieces7[1]
 
         # instance_id, instance_name
         instance_info = pieces[index+1]
@@ -141,10 +139,10 @@ class NovaScheduler(DriverBase):
             instance_info = instance_info.split(",")
             i_name = instance_info[0]
             i_id = instance_info[1]
-            ret.append(("instance_name", i_name))
-            ret.append(("instance_id", i_id))
-            ret.append((r_vars.thread, i_id))
-            ret.append((r_vars.request, i_id))
+            var_dict["instance_name"] = i_name
+            var_dict["instance_id"] = i_id
+            var_dict[rv.THREAD] = i_id
+            var_dict[rv.REQUEST] = i_id
 
             other_id = relations.get(i_name)
             if other_id:
@@ -152,52 +150,50 @@ class NovaScheduler(DriverBase):
             else:
                 relations[i_name] = i_id
         elif len(instance_info) is 36:
-            ret.append(("instance_id", instance_info))
-            ret.append((r_vars.thread, instance_info))
-            ret.append((r_vars.request, instance_info))
+            var_dict["instance_id"] = instance_info
+            var_dict[rv.THREAD] = instance_info
+            var_dict[rv.REQUEST] = instance_info
         else:
-            ret.append(("instance_name", instance_info))
+            var_dict["instance_name"] = instance_info
 
         # request_id, action
-        ret.append(("request_id", pieces[index-3][5:]))
+        var_dict["request_id"] = pieces[index-3][5:]
         keyword = " ".join(pieces[index+2:])
-        ret.append((r_vars.keyword, keyword))
+        var_dict[rv.KEYWORD] = keyword
 
         if "selected" in keyword:
-            ret.append(("t_host", " ".join(keyword.split(" ")[1:])))
+            var_dict["t_host"] = " ".join(keyword.split(" ")[1:])
         if "decided" in keyword:
-            ret.append(("t_host", " ".join(keyword.split(" ")[1:])))
+            var_dict["t_host"] = " ".join(keyword.split(" ")[1:])
 
-        return ret
+    def preprocess_logline(self, logline):
+        if "start_db" in logline.keyword:
+            assert "start scheduling" in logline.prv_logline.keyword
+            assert "instance_id" not in logline
+            i_id = logline.prv_logline["instance_id"]
+            logline.request = i_id
+            logline.thread = i_id
+            logline["instance_id"] = i_id
+        elif "finish_db" in logline.keyword:
+            assert "finish scheduling" in logline.nxt_logline.keyword
+            assert "instance_id" not in logline
+            i_id = logline.nxt_logline["instance_id"]
+            logline.request = i_id
+            logline.thread = i_id
+            logline["instance_id"] = i_id
 
-    def preprocess_logline(self, line_obj):
-        if "start_db" in line_obj.keyword:
-            assert "start scheduling" in line_obj.ll_prv.keyword
-            assert "instance_id" not in line_obj
-            i_id = line_obj.ll_prv["instance_id"]
-            line_obj.request = i_id
-            line_obj.thread = i_id
-            line_obj["instance_id"] = i_id
-        elif "finish_db" in line_obj.keyword:
-            assert "finish scheduling" in line_obj.ll_nxt.keyword
-            assert "instance_id" not in line_obj
-            i_id = line_obj.ll_nxt["instance_id"]
-            line_obj.request = i_id
-            line_obj.thread = i_id
-            line_obj["instance_id"] = i_id
-
-        if not line_obj.request:
-            assert "instance_id" not in line_obj
-            i_name = line_obj["instance_name"]
+        if not logline.request:
+            assert "instance_id" not in logline
+            i_name = logline["instance_name"]
             i_id = relations.get(i_name)
             if not i_id:
-                if str(line_obj.component) != "api":
+                if str(logline.component) != "api":
                     return i_name
-                line_obj.request = i_name
-                line_obj.thread = i_name
+                logline.request = i_name
+                logline.thread = i_name
             else:
-                line_obj.request = i_id
-                line_obj.thread = i_id
+                logline.request = i_id
+                logline.thread = i_id
         return True
 
     def build_statistics(self, s_engine, report):
@@ -338,5 +334,5 @@ class NovaScheduler(DriverBase):
 
 
 if __name__ == "__main__":
-    driver = NovaScheduler()
+    driver = NovaScheduler(sr)
     driver.cmdrun()
