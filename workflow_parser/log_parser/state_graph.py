@@ -56,7 +56,9 @@ class Node(object):
     def __str__(self):
         state_str = ""
         if self.state:
-            state_str += ", at %s" % self.state
+            state_str += ", @%s" % self.state[0]
+            if self.state[1]:
+                state_str += "(mark)"
         return "<Node#%s: %d edges, in %s|%s%s>" \
                % (self.name, len(self.edges), self.component, self.graph.name, state_str)
 
@@ -83,7 +85,7 @@ class Node(object):
 join_id = 0
 
 class Join(object):
-    def __init__(self, from_edge, to_edge, schemas, is_shared):
+    def __init__(self, from_edge, to_edge, schemas, is_remote, is_shared):
         assert isinstance(from_edge, Edge)
         assert isinstance(to_edge, Edge)
         global join_id
@@ -96,10 +98,16 @@ class Join(object):
         else:
             self.schemas = schemas
         self.is_shared = is_shared
+        self.is_remote = is_remote
 
     def __repr__(self):
-        return "<Join#%s: %s -> %s, %s>" % (
-                self.name, self.from_edge, self.to_edge, self.schemas)
+        marks = ""
+        if self.is_shared:
+            marks += "shared "
+        if self.is_remote:
+            marks += "remote "
+        return "<Join#%s: %s -> %s, %s%s>" % (
+                self.name, self.from_edge, self.to_edge, marks, self.schemas)
 
 
 class Edge(object):
@@ -113,6 +121,10 @@ class Edge(object):
         self.graph = node.graph
         self.master_graph = node.master_graph
         self.name = self.master_graph.generate_edge_name()
+
+    @property
+    def state(self):
+        return self.node.state
 
     def __str__(self):
         join_str=""
@@ -138,11 +150,11 @@ class Edge(object):
                 ret_str += "\n    %s" % join
         return ret_str
 
-    def join(self, edge, schemas=None, is_shared=False):
+    def join(self, edge, schemas=None, is_remote=True, is_shared=False):
         assert isinstance(edge, Edge)
         # assert edge not in self.joins
         # assert self not in edge.joined
-        join = Join(self, edge, schemas, is_shared)
+        join = Join(self, edge, schemas, is_remote, is_shared)
         self.joins.add(join)
         edge.joined.add(join)
         self.master_graph.add_join(join)
@@ -195,7 +207,9 @@ class LeafGraph(object):
                 blank[1] = "-"
             state_str = ""
             if node.state:
-                state_str += ", `%s`" % node.state
+                state_str += ", @%s@" % node.state[0]
+                if node.state[1]:
+                    state_str += "(mark)"
             ret_str[0] += "\n%s<Node#%s%s>" %("".join(blank), node.name, state_str)
             for edge in node.edges:
                 assert edge.graph is self
@@ -277,6 +291,8 @@ class MasterGraph(object):
 
         # after check
         self.graphs_by_component = defaultdict(list)
+        self.states = []
+        self.marks = []
 
     @property
     def components(self):
@@ -292,21 +308,12 @@ class MasterGraph(object):
             names.add(sub.name)
         return names
 
-    @property
-    def states(self):
-        states = set()
-        for graph in self.graphs:
-            for node in graph.end_nodes:
-                if node.state is not None:
-                    states.add(node.state)
-        return states
-
     def __str__(self):
         return ("<Master#%s: %d nodes, %d edges, %d graphs, "
-                "%d components, %d states, %d joins>" %
+                "%d components, %d states, %d marks, %d joins>" %
                 (self.name, len(self.nodes_by_id),
                  len(self.edges_by_from_to), len(self.graphs),
-                 len(self.components), len(self.states), len(self.joins)))
+                 len(self.components), len(self.states), len(self.marks), len(self.joins)))
 
     def __repr__(self):
         ret_str = str(self)
@@ -319,6 +326,9 @@ class MasterGraph(object):
         ret_str += "\n  States:    "
         for state in self.states:
             ret_str += " %s," % state
+        ret_str += "\n  Marks:    "
+        for mark in self.marks:
+            ret_str += " %s," % mark
         ret_str += "\n  Joins:"
         for join in self.joins:
             ret_str += "\n    %s" % join
@@ -374,14 +384,18 @@ class MasterGraph(object):
             self.start_nodes.add(from_node)
         return edge
 
-    def set_state(self, node_id, state_str):
+    def set_state(self, node_id, state_str, is_mark=False):
         assert isinstance(node_id, int)
         assert isinstance(state_str, str)
 
         node = self.nodes_by_id.get(node_id)
         assert node
-        assert node.is_end is True
-        node.state = state_str
+        if not is_mark:
+            assert node.is_end is True
+            self.states.append(state_str)
+        else:
+            self.marks.append(state_str)
+        node.state = (state_str, is_mark)
 
     def check(self):
         for graph in self.graphs:

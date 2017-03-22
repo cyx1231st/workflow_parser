@@ -44,11 +44,8 @@ def main1(driver):
     log_collector = LogCollector(driver.services,
                                  driver.log_parser_plugin)
     log_collector.load_files(args.folder)
-    print("Load logs ok..\n")
     log_collector.read_files()
-    print("Read logs ok..\n")
     log_collector.build_threads()
-    print("Build threads ok..\n")
 
     # debug
     # for comp in driver.services.sr_components:

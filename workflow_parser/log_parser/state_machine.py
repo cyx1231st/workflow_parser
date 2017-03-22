@@ -49,6 +49,10 @@ class Pace(object):
         else:
             raise PException("(Pace) %s not exist!" % item)
 
+    @property
+    def state(self):
+        return self.to_node.state
+
     def __str__(self):
         return "<Pace %.3f [%s %s %s], %s %s>" % (
                 self.log.seconds,
@@ -114,100 +118,100 @@ class RemotePace(PaceBase):
 """
 
 
-class InstanceBase(object):
-    def __init__(self, graph, ident):
-        self.graph = graph
-        self.ident = ident
+# class InstanceBase(object):
+#     def __init__(self, graph, ident):
+#         self.graph = graph
+#         self.ident = ident
 
-        self.from_pace = None
-        self.to_pace = None
+#         self.from_pace = None
+#         self.to_pace = None
 
-        self.fail_message = ""
+#         self.fail_message = ""
 
-    @property
-    def from_node(self):
-        return self.from_pace.from_node
+#     @property
+#     def from_node(self):
+#         return self.from_pace.from_node
 
-    @property
-    def to_node(self):
-        if self.to_pace is None:
-            return None
-        else:
-            return self.to_pace.to_node
+#     @property
+#     def to_node(self):
+#         if self.to_pace is None:
+#             return None
+#         else:
+#             return self.to_pace.to_node
 
-    @property
-    def start_leaf_pace(self):
-        return None
+#     @property
+#     def start_leaf_pace(self):
+#         return None
 
-    @property
-    def from_seconds(self):
-        return self.from_pace.from_seconds
+#     @property
+#     def from_seconds(self):
+#         return self.from_pace.from_seconds
 
-    @property
-    def to_seconds(self):
-        return self.to_pace.to_seconds
+#     @property
+#     def to_seconds(self):
+#         return self.to_pace.to_seconds
 
-    @property
-    def is_end(self):
-        if self.to_pace and self.to_pace.to_node in self.graph.end_nodes:
-            return True
-        else:
-            return False
+#     @property
+#     def is_end(self):
+#         if self.to_pace and self.to_pace.to_node in self.graph.end_nodes:
+#             return True
+#         else:
+#             return False
 
-    @property
-    def is_failed(self):
-        return bool(self.fail_message) or not self.is_end
+#     @property
+#     def is_failed(self):
+#         return bool(self.fail_message) or not self.is_end
 
-    @property
-    def state(self):
-        if not self.to_node:
-            return "UNKNOWN"
-        else:
-            state = self.to_node.state
-            if state is Node.UNKNOWN_STATE:
-                return "-"
-            else:
-                return state
+#     @property
+#     def state(self):
+#         if not self.to_node:
+#             return "UNKNOWN"
+#         else:
+#             state = self.to_node.state
+#             if state is Node.UNKNOWN_STATE:
+#                 return "-"
+#             else:
+#                 return state
 
-    @property
-    def assume_host(self):
-        if not self.is_end or self.to_pace is None:
-            return None
-        else:
-            return self.to_pace.assume_host
+#     @property
+#     def assume_host(self):
+#         if not self.is_end or self.to_pace is None:
+#             return None
+#         else:
+#             return self.to_pace.assume_host
 
-    @property
-    def name(self):
-        return self.graph.name
+#     @property
+#     def name(self):
+#         return self.graph.name
 
-    def iterall(self):
-        p = self.start_leaf_pace
-        while p:
-            yield p
-            if p.to_node in self.graph.end_nodes:
-                break
-            p = p.nxt
+#     def iterall(self):
+#         p = self.start_leaf_pace
+#         while p:
+#             yield p
+#             if p.to_node in self.graph.end_nodes:
+#                 break
+#             p = p.nxt
 
-    def __iter__(self):
-        p = self.from_pace
-        while p:
-            yield p.content
-            if p is self.to_pace:
-                break
-            p = p.nxt
+#     def __iter__(self):
+#         p = self.from_pace
+#         while p:
+#             yield p.content
+#             if p is self.to_pace:
+#                 break
+#             p = p.nxt
 
-    def __str__(self):
-        ret_str = "%r:" % self
+#     def __str__(self):
+#         ret_str = "%r:" % self
 
-        ret_str += "\nPaces:"
-        p = self.from_pace
-        while p:
-            ret_str += "\n    %r" % p
-            if p is self.to_pace:
-                break
-            p = p.nxt
-        ret_str += "\n"
-        return ret_str
+#         ret_str += "\nPaces:"
+#         p = self.from_pace
+#         while p:
+#             ret_str += "\n    %r" % p
+#             if p is self.to_pace:
+#                 break
+#             p = p.nxt
+#         ret_str += "\n"
+#         return ret_str
 
 
 class ThreadInstance(object):
@@ -242,6 +246,10 @@ class ThreadInstance(object):
         self.joins = []
         self.joined = []
 
+        self.marks = []
+        self.thread_vars = {}
+        self.thread_vars_1 = {}
+
         # init
         node = graph.decide_node(s_log)
         index = s_index
@@ -251,6 +259,9 @@ class ThreadInstance(object):
             if not edge:
                 break
             pace = Pace(log, node, edge, self)
+            state = edge.state
+            if state and state[1]:
+                self.marks.append((state[0], pace))
             if edge.joins:
                 self.joins.append(pace)
             if edge.joined:
@@ -338,8 +349,6 @@ class ThreadInstance(object):
                 raise PException("(ThreadInstance) thread is not shared!")
 
         # generate vars
-        self.thread_vars = {}
-        self.thread_vars_1 = {}
         for k, v in v_dict.iteritems():
             if len(v) == 0:
                 pass
@@ -351,6 +360,22 @@ class ThreadInstance(object):
     @property
     def is_start(self):
        return self.paces[0].from_node.is_g_start
+
+    @property
+    def is_complete(self):
+        return self.paces[-1].to_node in self.graph.end_nodes
+
+    @property
+    def start_pace(self):
+        return self.paces[0]
+
+    @property
+    def end_pace(self):
+        return self.paces[-1]
+
+    @property
+    def len_paces(self):
+        return len(self.paces)
 
     def __str__(self):
         return "<ThIns#%s(%s, %s) [%s %s %s]: graph %s, %d paces>" % (
@@ -421,77 +446,213 @@ class ThreadInstance(object):
     #             return False
     #     else:
     #         return False
+class NestedRequest(object):
+    def __init__(self, s_thread, request_obj):
+        assert isinstance(s_thread, ThreadInstance)
+        assert s_thread.is_shared == True
+        assert isinstance(request_obj, RequestInstance)
 
+        self.thread_obj = s_thread
+        self.request_obj = request_obj
+        self.request = request_obj.request
 
+        self.thread = s_thread.thread
 
-class RequestInstance(InstanceBase):
-    def __init__(self, graph, start_thread_obj):
-        assert isinstance(graph, MasterGraph)
-        assert isinstance(start_thread_obj, ThreadInstance)
-        self.start_thread = start_thread_obj
-        self.graph = graph
-        self.instances = set()
-        self.thread = None
+        self.component = s_thread.component
+        self.host = s_thread.host
+        self.target = s_thread.target
 
+        self.paces = []
+        self.len_paces = 2
+        self.joins = []
+        self.joined = []
 
-    @property
-    def start_leaf_pace(self):
-        return self.from_pace.content.from_pace
+        self.marks = []
+        self.thread_vars = s_thread.thread_vars
+        self.thread_vars_1 = s_thread.thread_vars_1
 
-    def confirm(self, ins):
-        if self.ident != ins.ident:
-            return False
+        self.is_complete = True
+        self.is_start = False
 
-        if not self.is_end:
-            p = None
-            if self.to_pace is None:
-                # TODO self.graph.
-                for node in self.graph.start_nodes:
-                    if node.accept_edge(ins.from_edge):
-                        p = NestedPace(ins)
-                        self.from_pace = p
-                        break
-            else:
-                p = self.to_pace.confirm_pace(ins)
+        dummy_pace1 = None
+        for pace in s_thread.joined:
+            if pace.thread_obj.request_obj is request_obj:
+                dummy_pace1 = Pace(pace.log, pace.from_node, pace.edge, self)
+                pace.joined_prv.joined_nxt = dummy_pace1
+                dummy_pace1.joined_prv = pace.joined_prv
 
-            if p:
-                self.to_pace = p
-                if not ins.is_end:
-                    raise ParseError("Instance %r is not complete!" % ins)
-                else:
-                    return True
-
-        return False
-
-    def assume_graphs(self):
-        """ Acceptable graphs """
-        graphs = set()
-        if self.is_end:
-            return graphs
-
-        if self.to_pace is None:
-            for node in self.graph.start_nodes:
-                for edge in node.edges:
-                    graphs.add(edge.graph)
-        else:
-            node = self.to_pace.to_node
-            for edge in node.edges:
-                graphs.add(edge.graph)
-        return graphs
-
-    def __repr__(self):
-        ret_str = "<NestedIns ident:%s graph:%s end:%s state:%s>" \
-                  % (self.ident, self.graph.name, self.is_end, self.state)
-        return ret_str
-
-    def __str__(self):
-        ret_str = ">>------------\n"
-        ret_str += super(NestedInstance, self).__str__()
-
-        p = self.from_pace
-        while p:
-            ret_str += "\n%s" % p.sub_instance
-            if p is self.to_pace:
+                self.joined.append(dummy_pace1)
+                self.paces.append(dummy_pace1)
                 break
-            p = p.nxt
-        return ret_str
+        if not dummy_pace1:
+            raise PException("(NestedRequest) dummy_pace1 failed")
+
+        dummy_pace2 = None
+        for pace in s_thread.joins:
+            if pace.thread_obj.request_obj is request_obj:
+                dummy_pace2 = Pace(pace.log, pace.from_node, pace.edge, self)
+                pace.joined_nxt.joined_prv = dummy_pace2
+                dummy_pace2.joined_nxt = pace.joined_nxt
+
+                self.joins.append(dummy_pace2)
+                self.paces.append(dummy_pace2)
+
+                dummy_pace1.nxt = dummy_pace2
+                dummy_pace2.prv = dummy_pace1
+                break
+        if not dummy_pace2:
+            raise PException("(NestedRequest) dummy_pace2 failed")
+
+        self.start_pace = dummy_pace1
+        self.end_pace = dummy_pace2
+
+
+class RequestInstance(object):
+    def __init__(self, graph, request, thread_objs):
+        assert isinstance(graph, MasterGraph)
+        assert isinstance(request, str)
+        assert isinstance(thread_objs, set)
+
+        self.request = request
+        self.graph = graph
+
+        self.start_thread = None
+        self.request_vars = defaultdict(set)
+        self.state = None
+        self.marks = defaultdict(set)
+
+        self.threadinstances = set()
+        self.nestedrequests = set()
+        self.len_paces = 0
+
+        self.remote_joins = []
+        self.remote_l_joins = []
+        self.local_joins = []
+
+        # for error report
+        self.incomplete_threads = set()
+        self.cnt_unjoined_by_edgename = defaultdict(lambda:0)
+
+        # init
+        shared_ti = set()
+        for thread_obj in thread_objs:
+            assert isinstance(thread_obj, ThreadInstance)
+            if thread_obj.is_shared:
+                assert not thread_obj.is_start
+                shared_ti.add(thread_obj)
+                thread_obj.request_objs.add(self)
+                thread_obj.requests.add(request)
+            else:
+                self.threadinstances.add(thread_obj)
+                thread_obj.request_obj = self
+                thread_obj.request = request
+                if thread_obj.is_start:
+                    if self.start_thread is not None:
+                        raise PException("(RequestInstance) multiple start threads!")
+                    else:
+                        self.start_thread = thread_obj
+        if self.start_thread is None:
+            raise PException("(RequestInstance) no start thread!")
+        for shared in shared_ti:
+            self.nestedrequests.add(NestedRequest(shared, self))
+
+        seen_threads = set()
+
+        def _process(thread):
+            if thread in seen_threads:
+                return
+            seen_threads.add(thread)
+            if not thread.is_complete:
+                self.incomplete_threads.add(thread)
+            # state
+            state = thread.end_pace.state
+            if state and not state[1]:
+                if self.state:
+                    raise PException("(RequestInstance) multiple states %s, %s"
+                            % (self.state, state[0]))
+                else:
+                    self.state = state[0]
+            # marks
+            if thread.marks:
+                for mark, pace in thread.marks:
+                    self.marks[mark].add(pace)
+            # vars
+            self.request_vars["thread"].add(thread.target + "^" + thread.thread)
+            self.request_vars["host"].add(thread.host)
+            self.request_vars["component"].add(thread.component)
+            self.request_vars["target"].add(thread.target)
+            for key, val in thread.thread_vars.iteritems():
+                self.request_vars[key].add(val)
+            for key, vals in thread.thread_vars_1.iteritems():
+                self.request_vars[key].update(vals)
+            self.len_paces += thread.len_paces
+            # joins
+            for join in thread.joins:
+                if join.joined_nxt is empty_join:
+                    self.cnt_unjoined_by_edgename[join.edge.name] += 1
+                else:
+                    assert join.joined_nxt.joined_prv is join
+                    # self.join_paces.append(join)
+                    _process(join.joined_nxt.thread_obj)
+
+        _process(self.start_thread)
+        error_threads = (self.threadinstances | self.nestedrequests) - seen_threads
+        if error_threads:
+            raise PException("(RequestInstance) unexcepted threads")
+    # def confirm(self, ins):
+    #     if self.ident != ins.ident:
+    #         return False
+
+    #     if not self.is_end:
+    #         p = None
+    #         if self.to_pace is None:
+    #             # TODO self.graph.
+    #             for node in self.graph.start_nodes:
+    #                 if node.accept_edge(ins.from_edge):
+    #                     p = NestedPace(ins)
+    #                     self.from_pace = p
+    #                     break
+    #         else:
+    #             p = self.to_pace.confirm_pace(ins)
+
+    #         if p:
+    #             self.to_pace = p
+    #             if not ins.is_end:
+    #                 raise ParseError("Instance %r is not complete!" % ins)
+    #             else:
+    #                 return True
+
+    #     return False
+
+    # def assume_graphs(self):
+    #     """ Acceptable graphs """
+    #     graphs = set()
+    #     if self.is_end:
+    #         return graphs
+
+    #     if self.to_pace is None:
+    #         for node in self.graph.start_nodes:
+    #             for edge in node.edges:
+    #                 graphs.add(edge.graph)
+    #     else:
+    #         node = self.to_pace.to_node
+    #         for edge in node.edges:
+    #             graphs.add(edge.graph)
+    #     return graphs
+
+    # def __repr__(self):
+    #     ret_str = "<NestedIns ident:%s graph:%s end:%s state:%s>" \
+    #               % (self.ident, self.graph.name, self.is_end, self.state)
+    #     return ret_str
+
+    # def __str__(self):
+    #     ret_str = ">>------------\n"
+    #     ret_str += super(NestedInstance, self).__str__()
+
+    #     p = self.from_pace
+    #     while p:
+    #         ret_str += "\n%s" % p.sub_instance
+    #         if p is self.to_pace:
+    #             break
+    #         p = p.nxt
+    #     return ret_str

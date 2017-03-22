@@ -79,11 +79,9 @@ class DriverPlugin(object):
         self.occur = 0
 
     def do_report(self):
-        if not self.occur:
-            print("(LogDriver) no error.")
-        else:
-            print("(LogDriver) errors: %d\n%s" % (len(self.errors), self.errors))
-            print("(LogDriver) count: %d\n" % self.occur)
+        if self.occur:
+            print("(LogDriver) WARN! error types: %d\n  %s" % (len(self.errors), self.errors))
+            print("(LogDriver) WARN! occur: %d" % self.occur)
         self.errors = set()
         self.occur = 0
 
@@ -519,13 +517,15 @@ class LogCollector(object):
                 continue
             f_obj = LogFile(f_name, f_dir, self.sr, self.plugin)
             self.logfiles.append(f_obj)
+        print("(LogCollector) collected %d files" % len(self.logfiles))
+        print("Load logs ok..\n")
 
     def read_files(self):
         for f_obj in self.logfiles:
             f_obj.read()
 
         self.logfiles = [f_obj for f_obj in self.logfiles if len(f_obj) > 0]
-        print("(LogCollector) detected %d files" % len(self.logfiles))
+        print("(LogCollector) %d legal files" % len(self.logfiles))
 
         len_lines = 0
         len_t_lines = 0
@@ -557,6 +557,7 @@ class LogCollector(object):
         for f_obj in self.logfiles:
             self.logfiles_by_host[f_obj.host].append(f_obj)
         print("(LogCollector) detected %d hosts" % len(self.logfiles_by_host))
+        print("Read logs ok..\n")
 
     def build_threads(self):
         requests = set()
@@ -566,6 +567,7 @@ class LogCollector(object):
         self.plugin.do_report()
         print("(LogCollector) detected %d requests" % len(requests))
 
+        sum_t = 0
         for (comp, f_objs) in self.logfiles_by_component.iteritems():
             cnt = 0
             sum_ = 0
@@ -577,5 +579,8 @@ class LogCollector(object):
                 sum_ += lent
                 min_ = min(min_, lent)
                 max_ = max(max_, lent)
+            sum_t += sum_
             print("(LogCollector) %s has %.3f[%d, %d] threads"
                   % (comp, sum_/float(cnt), min_, max_))
+        print("(LogCollector) detected %d threads" % sum_t)
+        print("Build threads ok..\n")

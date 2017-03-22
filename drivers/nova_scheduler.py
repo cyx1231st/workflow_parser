@@ -72,8 +72,8 @@ class NovaScheduler(DriverBase):
         f6.join(j2)
         f2.join(j2)
         f3.join(j3)
-        f4.join(j4, [("t_host", "host")])
-        f5.join(j5)
+        f4.join(j4, [("t_host", "t_host")])
+        f5.join(j5, [("t_host", "host")])
         f7.join(j1)
 
         graph.set_state(20, "API FAIL")
@@ -164,6 +164,8 @@ class NovaScheduler(DriverBase):
         ret.append((r_vars.keyword, keyword))
 
         if "selected" in keyword:
+            ret.append(("t_host", " ".join(keyword.split(" ")[1:])))
+        if "decided" in keyword:
             ret.append(("t_host", " ".join(keyword.split(" ")[1:])))
 
         return ret
