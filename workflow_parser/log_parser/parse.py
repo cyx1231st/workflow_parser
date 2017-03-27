@@ -16,8 +16,8 @@ from __future__ import print_function
 
 import argparse
 
-from workflow_parser.log_parser.log_engine import parse as log_parse
-from workflow_parser.log_parser.state_engine import parse as state_parse
+from workflow_parser.log_parser.log_engine import TargetsEngine
+from workflow_parser.log_parser.state_engine import parse
 
 
 def main1(driver):
@@ -41,17 +41,19 @@ def main1(driver):
     master = driver.graph
     master.check()
 
-    # build log objects
-    log_collector = log_parse(args.folder,
-                              driver.services,
-                              driver)
+    # build targets
+    tgs_engine = TargetsEngine(driver.services, driver)
+    tgs_engine.loadfiles(args.folder)
+    tgs_engine.readfiles()
+    tgs_engine.buildthreads()
+
 
     # debug
     # for comp in driver.services.sr_components:
     #     print("%s" % log_collector.logfiles_by_component[comp][0])
 
     # build states
-    # instance_collector = state_parse(log_collector, master)
+    parse(tgs_engine, master)
 
 
 

@@ -71,7 +71,7 @@ class Node(object):
         self.edges = OrderedSet()
 
         self.request_state = None
-        self.marks = []
+        self.marks = set()
 
         self.thread_graph = None
         self.master_graph = master_graph
@@ -92,7 +92,7 @@ class Node(object):
         return self in self.master_graph.start_nodes
 
     @property
-    def is_reqeust_end(self):
+    def is_request_end(self):
         return self.request_state is not None
 
     def __str__(self):
@@ -142,11 +142,7 @@ class Join(object):
         self.name = "j-%d" % join_id
         self.from_edge = from_edge
         self.to_edge = to_edge
-        if not schemas:
-            self.schemas = set()
-        else:
-            assert isinstance(schemas, set)
-            self.schemas = schemas
+        self.schemas = schemas
         self.is_shared = is_shared
         self.is_remote = is_remote
 
@@ -168,6 +164,24 @@ class Join(object):
                 self.to_edge.name,
                 marks_str,
                 schema_str)
+
+    @property
+    def schemas(self):
+        schemas = self.__dict__.get("schemas", set())
+        if not self.is_remote:
+            schemas.add(("host", "host"))
+        else:
+            assert ("host", "host") not in schemas
+        if not self.is_shared:
+            schemas.add(("request", "request"))
+        return schemas
+
+    @schemas.setter
+    def schemas(self, value):
+        if value is None:
+            value = set()
+        assert isinstance(value, set)
+        self.__dict__["schemas"] = value
 
 
 class Edge(object):

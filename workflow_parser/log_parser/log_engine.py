@@ -9,94 +9,151 @@ from workflow_parser.log_parser.log_parser import LogFile
 from workflow_parser.log_parser.service_registry import ServiceRegistry
 
 
-class LogCollector(object):
+class TargetsCollector(object):
     def __init__(self):
-        self._targets = set()
-        self.logfiles = []
-        self.logfiles_by_target = {}
-        self.logfiles_by_component = defaultdict(list)
-        self.logfiles_by_host = defaultdict(list)
+        # statistics
+        self.total_files = 0
+        self.total_files_hascontent = 0
+        self.total_loglines = 0
+        self.total_lines_loglines = 0
+        self.total_lines = 0
 
-    def collect_logfile(self, logfile):
+        # indexes
+        self.targets_by_component = defaultdict(lambda: set())
+        self.targets_by_host = defaultdict(lambda: set())
+        self.hosts_by_component = defaultdict(lambda: set())
+
+        # entities
+        self.logfiles_by_target = {}
+
+    def __len__(self):
+        return len(self.logfiles_by_target)
+
+    def iteritems(self, targets=None):
+        if targets is None:
+            # yield from
+            for item in self.logfiles_by_target.iteritems():
+                yield item
+        else:
+            for target in targets:
+                yield (target, self.logfiles_by_target[target])
+
+    def iterkeys(self):
+        # yield from
+        for key in self.logfiles_by_target.iterkeys():
+            yield key
+
+    def itervalues(self, targets=None):
+        if targets is None:
+            # yield from
+            for value in self.logfiles_by_target.itervalues():
+                yield value
+        else:
+            for target in targets:
+                yield self.logfiles_by_target[target]
+
+    def collect(self, logfile):
         assert isinstance(logfile, LogFile)
 
         if len(logfile) == 0:
             return
-        target = logfile.target
-        if target in self.logfiles_by_target:
-            raise LogError("(LogCollector) target '%s' duplicate in "
-                           "files: %s, %s" % (target, logfile.name,
-                           self.logfiles_by_target[target].name))
+        if logfile.target in self.logfiles_by_target:
+            raise LogError("(TargetsCollector) target '%s' collition "
+                           "from files: %s, %s" % (
+                               logfile.target,
+                               logfile.filename,
+                               self.logfiles_by_target[logfile.target].filename))
 
-        self.logfiles.append(logfile)
-        self.logfiles_by_target[target] = logfile
-        self.logfiles_by_component[logfile.component].append(logfile)
-        self.logfiles_by_host[logfile.host].append(logfile)
+        self.logfiles_by_target[logfile.target] = logfile
+        self.targets_by_component[logfile.component].add(logfile.target)
+        self.targets_by_host[logfile.host].add(logfile.target)
+        self.hosts_by_component[logfile.component].add(logfile.host)
 
 
-def parse(log_folder, sr, plugin):
-    assert isinstance(log_folder, str)
-    assert isinstance(sr, ServiceRegistry)
-    assert isinstance(plugin, DriverPlugin)
+class TargetsEngine(TargetsCollector):
+    def __init__(self, sr, plugin):
+        assert isinstance(sr, ServiceRegistry)
+        assert isinstance(plugin, DriverPlugin)
 
-    collector = LogCollector()
+        self.sr = sr
+        self.plugin = plugin
 
-    # step 1: load log files
-    logfiles = []
-    # current_path = path.dirname(os.path.realpath(__file__))
-    current_path = os.getcwd()
-    log_folder = path.join(current_path, log_folder)
-    for f_name in os.listdir(log_folder):
-        f_dir = path.join(log_folder, f_name)
-        f_name = plugin.do_filter_logfile(f_dir, f_name)
-        if not f_name:
-            continue
-        logfile = LogFile(f_name, f_dir, sr, plugin)
-        logfiles.append(logfile)
-    print("(LogEngine) detected %d files" % len(logfiles))
-    print("Load logfiles ok..\n")
+        # other collections
+        self.logfiles = []
+        self.requests = set()
 
-    # step 2: read log files
-    for logfile in logfiles:
-        logfile.read()
-        collector.collect_logfile(logfile)
-    print("(LogEngine) %d legal files" % len(collector.logfiles))
-    len_lines = sum(len(logfile) for logfile in collector.logfiles)
-    len_t_lines = sum(logfile.total_lines for logfile in collector.logfiles)
-    print("(LogEngine) detected %d(%d) lines" % (len_lines, len_t_lines))
-    for comp in sr.sr_components:
-        t_len = len(collector.logfiles_by_component[comp])
-        if t_len == 0:
-            raise LogError("(LogCollector) missing component %s" % comp)
-        else:
-            hosts = set()
-            for logfile in collector.logfiles_by_component[comp]:
-                hosts.add(logfile.host)
-            print("(LogEngine) Component#%s has %d files, with %d hosts"
-                  % (comp, t_len, len(hosts)))
-    print("(LogEngine) detected %d hosts" % len(collector.logfiles_by_host))
-    print("Read logs ok..\n")
+        super(TargetsEngine, self).__init__()
 
-    # step 3: build threads
-    requests = set()
-    for logfile in collector.logfiles:
-        ret = logfile.prepare()
-        # NOTE: for debug
-        # print("%s:  %s" % (logfile.name, logfile.loglines_by_thread.keys()))
-        requests.update(ret)
-    plugin.do_report()
-    print("(LogEngine) detected %d requests" % len(requests))
-    sum_t = 0
-    for (comp, logfiles) in collector.logfiles_by_component.iteritems():
-        cnt, sum_, min_, max_ = 0, 0, sys.maxint, 0
-        for logfile in logfiles:
-            lent = len(logfile.loglines_by_thread)
-            cnt += 1
-            sum_ += lent
-            min_ = min(min_, lent)
-            max_ = max(max_, lent)
-        sum_t += sum_
-        print("(LogEngine) %s has %.3f[%d, %d] threads"
-              % (comp, sum_/float(cnt), min_, max_))
-    print("(LogEngine) detected %d threads" % sum_t)
-    print("Build threads ok..\n")
+    def loadfiles(self, log_folder):
+        assert isinstance(log_folder, str)
+
+        # current_path = path.dirname(os.path.realpath(__file__))
+        current_path = os.getcwd()
+        log_folder = path.join(current_path, log_folder)
+        for f_name in os.listdir(log_folder):
+            f_dir = path.join(log_folder, f_name)
+            f_name = self.plugin.do_filter_logfile(f_dir, f_name)
+            if not f_name:
+                continue
+            logfile = LogFile(f_name, f_dir, self.sr, self.plugin)
+            self.logfiles.append(logfile)
+        self.total_files = len(self.logfiles)
+        print("(TargetsEngine) detected %d targets" % self.total_files)
+        print("Load targets(logfiles) ok..\n")
+
+    def readfiles(self):
+        for logfile in self.logfiles:
+            logfile.read()
+            # ready line vars: time, seconds, keyword
+            # ready target vars: component, host, target
+            self.collect(logfile)
+
+        self.total_files_hascontent = len(self)
+        print("(TargetsEngine) %d targets has loglines, discarded %d targets" %
+                (self.total_files_hascontent,
+                 self.total_files - self.total_files_hascontent))
+
+
+        self.total_lines = sum(logfile.total_lines for logfile in self.logfiles)
+        self.total_loglines = sum(len(logfile) for logfile in self.itervalues())
+        self.total_lines_loglines = sum(logfile.total_lines for logfile in self.itervalues())
+        print("(TargetsEngine) built %d loglines from %d lines, total %d lines" %
+                (self.total_loglines,
+                 self.total_lines_loglines,
+                 self.total_lines))
+
+        print("(TargetEngine) components:")
+        for comp in self.sr.sr_components:
+            targets = self.targets_by_component.get(comp, [])
+            if not targets:
+                raise LogError("(TargetsEngine) targets miss component %s" % comp)
+            else:
+                hosts = self.hosts_by_component[comp]
+                print("  %s has %d targets, and %d hosts"
+                      % (comp, len(targets), len(hosts)))
+        print("(TargetsEngine) detected %d hosts" % len(self.targets_by_host))
+        print("Read targets ok..\n")
+
+    def buildthreads(self):
+        for logfile in self.itervalues():
+            requests = logfile.prepare()
+            # NOTE: for debug
+            # print("%s:  %s" % (logfile.name, logfile.loglines_by_thread.keys()))
+            # NOTE: requests collector?
+            self.requests.update(requests)
+        self.plugin.do_report()
+        print("(TargetsEngine) detected %d requests" % len(self.requests))
+        sum_t = 0
+        for (comp, targets) in self.targets_by_component.iteritems():
+            cnt, sum_, min_, max_ = 0, 0, sys.maxint, 0
+            for logfile in self.itervalues(targets):
+                lent = len(logfile.loglines_by_thread)
+                cnt += 1
+                sum_ += lent
+                min_ = min(min_, lent)
+                max_ = max(max_, lent)
+            sum_t += sum_
+            print("(TargetsEngine) %s has %.3f[%d, %d] threads"
+                  % (comp, sum_/float(cnt), min_, max_))
+        print("(TargetsEngine) detected %d threads" % sum_t)
+        print("Build threads ok..\n")

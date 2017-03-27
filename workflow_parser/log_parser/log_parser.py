@@ -1,6 +1,7 @@
 from abc import ABCMeta
 from abc import abstractmethod
 from collections import defaultdict
+from functools import total_ordering
 from os import path
 
 from workflow_parser.log_parser.service_registry import ServiceRegistry
@@ -139,6 +140,8 @@ class DriverPlugin(object):
         pass
 
 
+# TODO: merge with Pace
+@total_ordering
 class LogLine(object):
     def __init__(self, line, logfile, plugin):
         assert isinstance(line, str)
@@ -148,7 +151,7 @@ class LogLine(object):
         # required immediately:
         self.time = None
         self.seconds = None
-        self.keywork = None
+        self.keyword = None
         # required after 1st pass:
         self.thread = None
         # required after 2nd pass:
@@ -230,6 +233,10 @@ class LogLine(object):
 
         return item in self.get_keys(True)
 
+    # total ordering
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
+
     @property
     def seconds(self):
         seconds = self.__dict__.get(rv.SECONDS)
@@ -292,6 +299,7 @@ class LogLine(object):
         return ret
 
 
+# TODO: Rename to Target
 class LogFile(object):
     def __init__(self, f_name, f_dir, sr, plugin):
         assert isinstance(f_name, str)

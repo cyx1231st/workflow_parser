@@ -1,300 +1,399 @@
 from collections import defaultdict
 from collections import deque
 
-from workflow_parser.log_parser.log_engine import LogCollector
+from workflow_parser.log_parser.log_engine import TargetsCollector
 from workflow_parser.log_parser.state_graph import MasterGraph
 from workflow_parser.log_parser.state_graph import seen_edges
 from workflow_parser.log_parser.state_machine import empty_join
-from workflow_parser.log_parser.state_machine import PException
+from workflow_parser.log_parser.state_machine import JoinRelation
+from workflow_parser.log_parser.state_machine import StateError
 from workflow_parser.log_parser.state_machine import RequestInstance
 from workflow_parser.log_parser.state_machine import ThreadInstance
+from workflow_parser.log_parser.utils import report_loglines
 
 
-class InstanceCollector(object):
+class PacesCollector(object):
     def __init__(self):
-        self.threadinstances = set()
-
-        self.start_threads = []
-
         self.joins_paces = []
         self.joined_paces = []
-        self.joined_paces_by_join = defaultdict(list)
+        self.joined_paces_by_jo = defaultdict(list)
 
-        self.requestinstances = {}
-        self.incompletedrequests = {}
-        self.cnt_unjoined_by_edgename = defaultdict(lambda:0)
+        self.joins_edges = set()
+        self.joinspaces_by_edge = defaultdict(list)
+        self.unjoinspaces_by_edge = defaultdict(list)
 
-        self.c_vars = defaultdict(set)
+        self.joined_edges = set()
+        self.joinedpaces_by_edge = defaultdict(list)
+        self.unjoinedpaces_by_edge = defaultdict(list)
 
-    def collect_thread(self, thread):
-        assert isinstance(thread, ThreadInstance)
+        self.r_unjoinspaces_by_edge = defaultdict(set)
 
-        self.threadinstances.add(thread)
-        if thread.is_start:
-            self.start_threads.append(thread)
+    def collect_join(self, threadins):
+        assert isinstance(threadins, ThreadInstance)
 
-        self.joins_paces.extend(thread.joins_paces)
-        self.joined_paces.extend(thread.joined_paces)
-        for pace in thread.joined_paces:
+        self.joins_paces.extend(threadins.joins_paces)
+        self.joined_paces.extend(threadins.joined_paces)
+        for pace in threadins.joined_paces:
             for joined_obj in pace.joined_objs:
-                self.joined_paces_by_join[joined_obj].append(pace)
-        if thread.joined:
-            for pace in thread.joined:
-                for join in pace.edge.joined:
-                    self.tobejoined_paces_by_join[join].append(pace)
-            self.tobejoined_paces.extend(thread.joined)
+                self.joined_paces_by_jo[joined_obj].append(pace)
 
-    def collect_request(self, request):
-        assert isinstance(thread, ThreadInstance)
+    def collect_unjoin(self):
+        for pace in self.joins_paces:
+            self.joins_edges.add(pace.edge)
+            if pace.joins_relation is empty_join:
+                self.unjoinspaces_by_edge[pace.edge].append(pace)
+            elif isinstance(pace.joins_relation, JoinRelation):
+                self.joinspaces_by_edge[pace.edge].append(pace)
+            else:
+                assert False
 
-        if request.incomplete_threads:
-            self.incompletedrequests[reqeust.request] = request
-        elif request.state is None:
-            self.incompletedrequests[request.request] = request
+        for pace in self.joined_paces:
+            self.joined_edges.add(pace.edge)
+            if pace.joined_relation is empty_join:
+                self.unjoinedpaces_by_edge[pace.edge].append(pace)
+            elif isinstance(pace.joined_relation, JoinRelation):
+                self.joinedpaces_by_edge[pace.edge].append(pace)
+            else:
+                assert False
+
+    def collect_request(self, requestins):
+        assert isinstance(requestins, RequestInstance)
+
+        if requestins.e_unjoins_paces_by_edge:
+            for edge, paces in requestins.e_unjoins_paces_by_edge.iteritems():
+                self.r_unjoinspaces_by_edge[edge].update(paces)
+
+
+class ThreadInssCollector(object):
+    def __init__(self, pcs_collector):
+        assert isinstance(pcs_collector, PacesCollector)
+
+        self.pcs_collector = pcs_collector
+
+        self.incomplete_threadinss = []
+        self.start_threadinss = []
+        self.duplicated_vars = set()
+
+        self.threadinss = []
+
+        self.threadgroup_by_request = defaultdict(set)
+        self.threadgroups_with_multiple_requests = {}
+        self.threadgroups_without_request = []
+
+        self.r_threadinss = set()
+        self.r_incomplete_threadinss = set()
+        self.r_extra_start_threadinss = set()
+        self.r_extra_end_threadinss = set()
+        self.r_stray_threadinss = set()
+
+    def collect_thread(self, threadins):
+        assert isinstance(threadins, ThreadInstance)
+
+        if not threadins.is_complete:
+            self.incomplete_threadinss.append(threadins)
+
+        if threadins.is_request_start:
+            self.start_threadinss.append(threadins)
+
+        self.threadinss.append(threadins)
+
+        self.duplicated_vars.update(threadins.thread_vars_dup.keys())
+
+        self.pcs_collector.collect_join(threadins)
+
+    def collect_thread_group(self, requests, tgroup):
+        assert isinstance(requests, set)
+        assert isinstance(tgroup, set)
+
+        len_req = len(requests)
+        if len_req > 1:
+            self.threadgroups_with_multiple_requests[tgroup] = requests
+        elif len_req == 1:
+            self.threadgroup_by_request[requests.pop()].update(tgroup)
         else:
-            self.requestinstances[request.request] = request
-            for edgename, cnt in request.cnt_unjoined_by_edgename.iteritems():
-                self.cnt_unjoined_by_edgename[edgename] += cnt
-            self.c_vars["request"].add(request.request)
-            for k, vs in request.request_vars.iteritems():
-                self.c_vars[k].update(vs)
+            self.threadgroups_without_request.append(tgroup)
+
+    def collect_request(self, requestins):
+        assert isinstance(requestins, RequestInstance)
+
+        self.r_threadinss.update(requestins.threadinss)
+        if requestins.e_incomplete_threadinss:
+            self.r_incomplete_threadinss.update(requestins.e_incomplete_threadinss)
+        if requestins.e_extra_s_threadinss:
+            self.r_extra_start_threadinss.update(requestins.e_extra_s_threadinss)
+        if requestins.e_extra_e_threadinss:
+            self.r_extra_end_threadinss.update(requestins.e_extra_e_threadinss)
+        if requestins.e_stray_threadinss:
+            self.r_stray_threadinss.update(requestins.e_stray_threadinss)
 
 
-def parse(log_collector, master_graph):
+class RequestsCollector(object):
+    def __init__(self, tis_collector, pcs_collector):
+        assert isinstance(tis_collector, ThreadInssCollector)
+        assert isinstance(pcs_collector, PacesCollector)
+
+        self.tis_collector = tis_collector
+        self.pcs_collector = pcs_collector
+
+        self.requestinss = {}
+        self.requests_vars = defaultdict(set)
+
+        # error report
+        self.error_requestinss = []
+        self.requests_by_errortype = defaultdict(list)
+
+        # warn report
+        self.warn_requestinss = []
+        self.requests_by_warntype = defaultdict(list)
+
+    def collect_request(self, requestins):
+        assert isinstance(requestins, RequestInstance)
+        if requestins.warns:
+            self.warn_requestinss.append(requestins)
+            for warn in requestins.warns.keys():
+                self.requests_by_warntype[warn].append(requestins)
+
+        if requestins.errors:
+            self.error_requestinss.append(requestins)
+            for error in requestins.errors.keys():
+                self.requests_by_errortype[error].append(requestins)
+        else:
+            assert requestins.request not in self.requestinss
+            self.requestinss[requestins.request] = requestins
+            self.requests_vars["request"].add(requestins.request)
+            for k, vs in requestins.request_vars.iteritems():
+                self.requests_vars[k].update(vs)
+
+        self.tis_collector.collect_request(requestins)
+        self.pcs_collector.collect_request(requestins)
+
+
+# TODO: add count checks
+def parse(tgs_collector, master_graph):
     assert isinstance(master_graph, MasterGraph)
-    assert isinstance(log_collector, LogCollector)
+    assert isinstance(tgs_collector, TargetsCollector)
 
-    collector = InstanceCollector()
+    pcs_collector = PacesCollector()
+    tis_collector = ThreadInssCollector(pcs_collector)
+    rqs_collector = RequestsCollector(tis_collector, pcs_collector)
+
     # step 1: build thread instances
-    not_completed = []
-    for f_obj in self.log_collector.logfiles:
+    for f_obj in tgs_collector.itervalues():
         for (thread, loglines) in f_obj.loglines_by_thread.iteritems():
             c_index = 0
             len_index = len(loglines)
             assert len_index > 0
             while c_index != len_index:
                 logline = loglines[c_index]
-                graph = master_graph.decide_subgraph(logline)
+                graph = master_graph.decide_threadgraph(logline)
 
                 if not graph:
                     # error
                     print("(ParserEngine) parse error: cannot decide graph")
-                    print "-------- LogLines ------"
-                    from_t = c_index - 3
-                    to_t = c_index + 7
-                    if from_t < 0:
-                        print "   <start>"
-                        from_t = 0
-                    else:
-                        print "   ..."
-                    for i in range(from_t, c_index):
-                        print "   %s" % loglines[i]
-                    print " > %s" % loglines[c_index]
-                    for i in range(c_index+1, min(to_t, len(loglines))):
-                        print "   %s" % loglines[i]
-                    if to_t >= len(loglines):
-                        print "   <end>"
-                    else:
-                        print "   ..."
+                    report_loglines(loglines, c_index)
                     print "-------- end -----------"
-                    raise PException("(ParserEngine) parse error: cannot decide graph")
+                    raise StateError("(ParserEngine) parse error: cannot decide graph")
 
-                thread_obj = ThreadInstance(thread, graph, loglines, c_index)
-                if not thread_obj.is_complete:
-                    not_completed.append(thread_obj)
-                    # NOTE: collect incompleted threads
-                    collector.collect_thread(thread_obj)
-                else:
-                    collector.collect_thread(thread_obj)
-                assert c_index < thread_obj.f_index
-                c_index = thread_obj.f_index
-    print("(ParserEngine) parsed %d thread objects" % len(collector.threadinstances))
-    if len(not_completed):
+                threadins = ThreadInstance(thread, graph, loglines, c_index)
+                tis_collector.collect_thread(threadins)
+                assert c_index < threadins.f_index
+                c_index = threadins.f_index
+
+    print("(ParserEngine) parsed %d thread instances" % len(tis_collector.threadinss))
+    if tis_collector.incomplete_threadinss:
         print("(ParserEngine) WARN! incompleted threads: %d" %
-                len(not_completed))
+                len(tis_collector.incomplete_threadinss))
 
     edges = master_graph.edges - seen_edges
     if edges:
-        print_str = "(ParserEngine) WARN! unused edges:"
-        for edge in edges:
-            print_str += " %s," % edge.name
-        print(print_str)
+        print("(ParserEngine) WARN! unused edges: %s" %
+                " ".join(edge.name for edge in edges))
 
-    m_vars = set()
-    for thread in collector.threadinstances:
-        m_keys = thread.thread_vars_1.keys()
-        m_vars.update(m_keys)
-    if m_vars:
-        print_str = "(ParserEngine) WARN! duplicated vars:"
-        for m_var in m_vars:
-            print_str += " %s," % m_var
-        print(print_str)
-    print("(ParserEngine) start_threads: %d" % len(collector.start_threads))
-    print("(ParserEngine) tojoin_paces: %d" % len(collector.tojoin_paces))
-    print("(ParserEngine) tobejoined_paces: %d" % len(collector.tobejoined_paces))
+    if tis_collector.duplicated_vars:
+        print("(ParserEngine) WARN! duplicated vars: %s" %
+                " ".join(tis_collector.duplicated_vars))
+    print("(ParserEngine) request_start_threads: %d" %
+            len(tis_collector.start_threadinss))
+    print("(ParserEngine) joins_paces: %d" % len(pcs_collector.joins_paces))
+    print("(ParserEngine) joined_paces: %d" % len(pcs_collector.joined_paces))
     print("Parse threads ok..\n")
 
-    # step 2: join threads by schema
-    collector.tojoin_paces.sort(key=lambda p: p["seconds"])
-    collector.tobejoined_paces.sort(key=lambda p: p["seconds"])
+    # step 2: join paces by schema
+    pcs_collector.joins_paces.sort()
+    pcs_collector.joined_paces.sort()
+    for jo, p_list in pcs_collector.joined_paces_by_jo.iteritems():
+        p_list.sort()
+        pcs_collector.joined_paces_by_jo[jo] = deque(p_list)
 
-    for join, p_list in collector.tobejoined_paces_by_join.iteritems():
-        p_list.sort(key=lambda p: p["seconds"])
-        collector.tobejoined_paces_by_join[join] = deque(p_list)
-
-    not_joined = []
-    join_cnt = defaultdict(lambda: [0, 0])
-    for tojoin_pace in collector.tojoin_paces:
-        join_objs = tojoin_pace.edge.joins
+    for joins_pace in pcs_collector.joins_paces:
+        join_objs = joins_pace.edge.joins_objs
         assert len(join_objs) == 1
         join_obj = list(join_objs)[0]
-        schemas = join_obj.schemas[:]
-        target_paces = collector.tobejoined_paces_by_join[join_obj]
-        assert isinstance(target_paces, deque)
-
-        while target_paces and target_paces[0].joined_prv is not None:
-            target_paces.popleft()
+        schemas = join_obj.schemas
+        target_paces = pcs_collector.joined_paces_by_jo[join_obj]
 
         target_pace = None
+
         from_schema = {}
-        to_schema = defaultdict(set)
-        from_schema["request"] = tojoin_pace["request"]
-        # FIXME is shared?
-        if not join_obj.is_remote:
-            schemas.append(("host", "host"))
-        if schemas:
-            for schema in schemas:
-                from_schema[schema[0]] = tojoin_pace[schema[0]]
+        for schema in schemas:
+            from_schema[schema[0]] = joins_pace[schema[0]]
+
+        to_schemas = defaultdict(set)
+
+        new_deque = deque()
         for pace in target_paces:
-            if pace.joined_prv is not None:
+            if pace.joined_relation is not None:
                 continue
 
-            if schemas:
+            if not target_pace:
                 match = True
                 for schema in schemas:
-                    to_schema[schema[1]].add(pace[schema[1]])
-                    if tojoin_pace[schema[0]] != pace[schema[1]]:
+                    from_schema_key = schema[0]
+                    from_schema_val = from_schema[from_schema_key]
+                    to_schema_key = schema[1]
+                    to_schema_val = pace[to_schema_key]
+
+                    to_schemas[to_schema_key].add(to_schema_val)
+                    if from_schema_key == "request":
+                        assert to_schema_key == "request"
+                        if from_schema_val and to_schema_val and from_schema_val != to_schema_val:
+                            match = False
+                            break
+                    elif from_schema[from_schema_key] != to_schema_val:
+                        assert from_schema_val is not None
+                        assert to_schema_val is not None
                         match = False
                         break
-                if not match:
-                    continue
 
-            from_req = tojoin_pace["request"]
-            to_req = pace["request"]
-            to_schema["request"].add(to_req)
-            if not from_req or not to_req or from_req == to_req:
-                target_pace = pace
-                break
+                if not match:
+                    new_deque.append(pace)
+                else:
+                    target_pace = pace
+            else:
+                new_deque.append(pace)
+        pcs_collector.joined_paces_by_jo[join_obj] = new_deque
 
         if target_pace:
-            tojoin_pace.join(target_pace, join_obj)
-            join_cnt[join_obj.name][0] += 1
+            joins_pace.join_pace(target_pace, join_obj)
         else:
             # debug joins
             # print("from_schema: %s" % from_schema)
-            # print("to_schema:")
-            # for k, v in to_schema.iteritems():
+            # print("to_schemas:")
+            # for k, v in to_schemas.iteritems():
             #     print("  %s: %s" % (k, v))
             # import pdb; pdb.set_trace()
-            tojoin_pace.joined_nxt = empty_join
-            not_joined.append(tojoin_pace)
-            # FIXME: show join name instead of edge name
-            join_cnt[join_obj.name][1] += 1
+            joins_pace.joins_relation = empty_join
 
-    not_beenjoined = []
-    for tobejoin in collector.tobejoined_paces:
-        if tobejoin.joined_prv is None:
-            not_beenjoined.append(tobejoin)
-            tobejoin.joined_prv = empty_join
+    for joined_pace in pcs_collector.joined_paces:
+        if joined_pace.joined_relation is None:
+            joined_pace.joined_relation = empty_join
 
-    print("(ParserEngine) join summary:")
-    for k, (cnt1, cnt2) in join_cnt.iteritems():
-        unjoined_str = ""
-        if cnt2:
-            unjoined_str += ", WARN! %d unjoined" % cnt2
-        print("  %s: %d joined%s" % (k, cnt1, unjoined_str))
+    pcs_collector.collect_unjoin()
+    print("(ParserEngine) joins edges summary:")
+    for edge in pcs_collector.joins_edges:
+        joins_paces = pcs_collector.joinspaces_by_edge[edge]
+        notjoins_paces = pcs_collector.unjoinspaces_by_edge[edge]
+        warn_str = ""
+        if notjoins_paces:
+            warn_str += ", WARN! %d unjoins paces" % len(notjoins_paces)
+        print("  %s: %d%s" % (edge.name, len(joins_paces), warn_str))
 
-    if not_joined or not_beenjoined:
-        print("(ParserEngine) WARN! not join: %d paces" % len(not_joined))
-        print("(ParserEngine) WARN! not been joined: %d paces"
-                % len(not_beenjoined))
-        join_cnt = defaultdict(lambda:0)
-        for n_j in not_beenjoined:
-            for j in n_j.edge.joined:
-                join_cnt[j.name] += 1
-        for name, cnt in join_cnt.iteritems():
-            print("  Join#%s has %d unjoined!" % (name, cnt))
-    print("Join threads ok..\n")
+    print("(ParserEngine) joined edges summary:")
+    for edge in pcs_collector.joined_edges:
+        joined_paces = pcs_collector.joinedpaces_by_edge[edge]
+        notjoined_paces = pcs_collector.unjoinedpaces_by_edge[edge]
+        warn_str = ""
+        if notjoined_paces:
+            warn_str += ", WARN! %d unjoined paces" % len(notjoined_paces)
+        print("  %s: %d%s" % (edge.name, len(joined_paces), warn_str))
+    print("Join paces ok..\n")
 
-    # step 3: group requests
-    seen_thread = set()
-    def group(thread, t_set):
-        if thread.is_shared:
-            t_set.add(thread)
+    # step 3: group threads by request
+    seen_threadinss = set()
+    def group(threadins, t_set):
+        assert isinstance(threadins, ThreadInstance)
+        if threadins.is_shared:
+            t_set.add(threadins)
             return set()
 
-        if thread in seen_thread:
+        if threadins in seen_threadinss:
             return set()
-        seen_thread.add(thread)
-        t_set.add(thread)
+        seen_threadinss.add(threadins)
+        t_set.add(threadins)
         ret = set()
-        if thread.request:
-            ret.add(thread.request)
+        if threadins.request:
+            ret.add(threadins.request)
 
-        for pace in thread.joins:
-            if pace.joined_nxt and pace.joined_nxt is not empty_join:
-                ret.update(group(pace.joined_nxt.to_thread_obj, t_set))
-        for pace in thread.joined:
-            if pace.joined_prv and pace.joined_prv is not empty_join:
-                ret.update(group(pace.joined_prv[0].from_thread_obj, t_set))
+        for pace in threadins.joins_paces:
+            if pace.joins_pace:
+                ret.update(group(pace.joins_pace.threadins, t_set))
+        for pace in threadins.joined_paces:
+            if pace.joined_pace:
+                ret.update(group(pace.joined_pace.threadins, t_set))
         return ret
 
-    threads_by_request = defaultdict(set)
-    unidentified_group = []
-    cnt_unidentified_threads = 0
-    for thread in collector.threadinstances:
-        if not thread.is_shared and thread not in seen_thread:
+    for threadins in tis_collector.threadinss:
+        if not threadins.is_shared and threadins not in seen_threadinss:
             new_t_set = set()
-            requests = group(thread, new_t_set)
-            len_req = len(requests)
-            if len_req > 1:
-                raise PException("(ParserEngine) detected %d requests in a group" % len_req)
-            elif len_req == 1:
-                threads_by_request[requests.pop()].update(new_t_set)
-            else:
-                unidentified_group.append(new_t_set)
-                cnt_unidentified_threads += len_req
-    print("(ParserEngine) detected %d request groups" % len(threads_by_request))
-    if unidentified_group:
-        print("(ParserEngine) WARN! unidentified groups: %d" % len(unidentified_group))
-        print("(ParserEngine) WARN! total threads: %d" % cnt_unidentified_threads)
-    print("Group requests ok..\n")
+            requests = group(threadins, new_t_set)
+            tis_collector.collect_thread_group(requests, new_t_set)
+
+    print("(ParserEngine) detected %d groups of %d threadinstances" % (
+            len(tis_collector.threadgroup_by_request),
+            sum(len(tgroup) for tgroup in
+                tis_collector.threadgroup_by_request.itervalues())))
+    if tis_collector.threadgroups_with_multiple_requests:
+        print("(ParserEngine) ERROR! %d groups of %d threadinstances have multiple requests" % (
+                len(tis_collector.threadgroups_with_multiple_requests),
+                sum(len(tgroup) for tgroup in
+                    tis_collector.threadgroups_with_multiple_requests.keys())))
+        raise StateError("(ParserEngine) thread group has multiple requests!")
+    if tis_collector.threadgroups_without_request:
+        print("(ParserEngine) WARN! cannot identify request: %d groups of %d threadinstances" % (
+                len(tis_collector.threadgroups_without_request),
+                sum(len(tgroup) for tgroup in
+                    tis_collector.threadgroups_without_request)))
+    print("Group threads ok..\n")
 
     # step 4: build requests
-    errors = defaultdict(list)
-    for request, threads in threads_by_request.iteritems():
-        try:
-            request_obj = RequestInstance(master_graph, request, threads)
-        except PException as e:
-            errors[e.message].append(reqeust_obj)
-        collector.collect_request(request_obj)
+    for request, threads in tis_collector.threadgroup_by_request.iteritems():
+        request_obj = RequestInstance(master_graph, request, threads)
+        rqs_collector.collect_request(request_obj)
 
-    if errors:
-        for err, r_l in errors.iteritems():
-            print("(ParserEngine) WARN! %d errors: %s" % (len(r_l), err))
-    if collector.incompletedrequests:
-        print("(ParserEngine) WARN! incomplete: %s" %
-                collector.incompletedrequests.keys())
-    if collector.cnt_unjoined_by_edgename:
-        # FIXME: show join name instead of edge name
-        for name, cnt in collector.cnt_unjoined_by_edgename.iteritems():
-            print("(ParserEngine) WARN! %d unjoined from edge %s" %
-                    (cnt, name))
-    print("(ParserEngine) built %d correct requests!" %
-            len(collector.requestinstances))
-    print("(ParserEngine) vars summary: %d" % len(collector.c_vars))
-    for k, vs in collector.c_vars.iteritems():
+    if rqs_collector.error_requestinss:
+        print("(ParserEngine) ERROR! %d error request instances" %
+                len(rqs_collector.error_requestinss))
+        for err, requestinss in rqs_collector.requests_by_errortype.iteritems():
+            print("  %s: %d requests" % (err, len(requestinss)))
+
+    if rqs_collector.warn_requestinss:
+        print("(ParserEngine) WARN! %d warn request instances" %
+                len(rqs_collector.warn_requestinss))
+        for warn, requestinss in rqs_collector.requests_by_warntype.iteritems():
+            print("  %s: %d requests" % (warn, len(requestinss)))
+
+    if tis_collector.r_incomplete_threadinss:
+        print("(ParserEngine) WARN! %d incomplete threadinss in requests" %
+                len(tis_collector.r_incomplete_threadinss))
+    if tis_collector.r_extra_start_threadinss:
+        print("(ParserEngine) ERROR! %d extra start threadinss in requests" %
+                len(tis_collector.r_extra_start_threadinss))
+    if tis_collector.r_extra_end_threadinss:
+        print("(ParserEngine) ERROR! %d extra end threadinss in requests" %
+                len(tis_collector.r_extra_end_threadinss))
+    if tis_collector.r_stray_threadinss:
+        print("(ParserEngine) ERROR! %d stray threadinss in requests" %
+                len(tis_collector.r_stray_threadinss))
+
+    if pcs_collector.r_unjoinspaces_by_edge:
+        print("(ParserEngine) WARN! unjoins paces in requests")
+        for edge, paces in pcs_collector.r_unjoinspaces_by_edge.iteritems():
+            print("  %s: %d paces" % (edge.name, len(paces)))
+
+    print("(ParserEngine) vars summary: %d" % len(rqs_collector.requests_vars))
+    for k, vs in rqs_collector.requests_vars.iteritems():
         print("  %s: %d" % (k, len(vs)))
+    print("(ParserEngine) built %d request instances with %d thread instances"
+            % (len(rqs_collector.requestinss),
+               len(tis_collector.r_threadinss)))
     print("Build requests ok..\n")
-
-    return collector
