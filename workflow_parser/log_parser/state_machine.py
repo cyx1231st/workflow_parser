@@ -20,7 +20,6 @@ class StateError(WFException):
     pass
 
 
-# TODO: support rvs
 @total_ordering
 class Pace(object):
     """ Pace is relative to transition. """
@@ -43,8 +42,8 @@ class Pace(object):
         self.joined_relation = None
 
     # total ordering
-    __eq__ = lambda self, other: self.logline.seconds == other.logline.seconds
-    __lt__ = lambda self, other: self.logline.seconds < other.logline.seconds
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
 
     @property
     def request_state(self):
@@ -92,18 +91,22 @@ class Pace(object):
     def is_thread_end(self):
         return self.to_node.is_thread_end
 
-    def __getitem__(self, item):
+    def __getattribute__(self, item):
         assert isinstance(item, str)
 
         if item in rv.ALL_VARS:
             ret = getattr(self.logline, item)
-            if item == rv.REQUEST:
-                if ret is None:
-                    ret = getattr(self.logline, rv.REQUEST)
-                return ret
-            else:
-                assert ret is not None
-                return ret
+            if ret is None and item == rv.REQUEST:
+                ret = getattr(self.threadins, "request")
+            return ret
+        else:
+            return super(Pace, self).__getattribute__(item)
+
+    def __getitem__(self, item):
+        assert isinstance(item, str)
+
+        if item in rv.ALL_VARS:
+            return getattr(self, item)
         elif item in self.logline.get_keys():
             return self.logline[item]
         elif item in self.threadins.thread_vars:
@@ -147,15 +150,15 @@ class Pace(object):
     def __str__(self):
         mark_str = self._mark_str()
         return "<Pace %.3f {%s>%s>%s}, `%s`, %d lvars, %s-%s %s%s>" % (
-                self.logline.seconds,
+                self.seconds,
                 self.from_node.name,
                 self.edge.name,
                 self.to_node.name,
-                self.logline.keyword,
+                self.keyword,
                 len(self.logline.get_keys()),
-                self.logline.target,
-                self.logline.thread,
-                self.logline.request,
+                self.target,
+                self.thread,
+                self.request,
                 mark_str)
 
     def __str__thread__(self):
@@ -163,14 +166,14 @@ class Pace(object):
 
         req_str = ""
         if self.threadins.is_shared:
-            req_str = ", req#%s" % self.logline.request
+            req_str = ", req#%s" % self.request
 
         return "%.3f {%s>%s>%s}, `%s`, %d lvars%s%s" % (
-                self.logline.seconds,
+                self.seconds,
                 self.from_node.name,
                 self.edge.name,
                 self.to_node.name,
-                self.logline.keyword,
+                self.keyword,
                 len(self.logline.get_keys()),
                 req_str,
                 mark_str)
@@ -223,11 +226,11 @@ class JoinRelation(object):
 
     @property
     def from_host(self):
-        return self.from_pace.logline.host
+        return self.from_pace.host
 
     @property
     def to_host(self):
-        return self.to_pace.logline.host
+        return self.to_pace.host
 
 
 """
@@ -819,7 +822,7 @@ class RequestInstance(object):
 
         _process(self.start_threadins)
 
-        self.threadinss.sort(key=lambda ti: ti.start_pace.logline.seconds)
+        self.threadinss.sort(key=lambda ti: ti.start_pace.seconds)
 
         # error: incomplete threads
         if self.e_incomplete_threadinss:

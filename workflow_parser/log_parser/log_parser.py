@@ -140,7 +140,6 @@ class DriverPlugin(object):
         pass
 
 
-# TODO: merge with Pace
 @total_ordering
 class LogLine(object):
     def __init__(self, line, logfile, plugin):
