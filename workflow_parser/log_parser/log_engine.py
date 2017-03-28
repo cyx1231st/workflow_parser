@@ -153,7 +153,7 @@ class TargetsEngine(TargetsCollector):
                 min_ = min(min_, lent)
                 max_ = max(max_, lent)
             sum_t += sum_
-            print("(TargetsEngine) %s has %.3f[%d, %d] threads"
+            print("  %s has %.3f[%d, %d] threads"
                   % (comp, sum_/float(cnt), min_, max_))
         print("(TargetsEngine) detected %d threads" % sum_t)
         print("Build threads ok..\n")

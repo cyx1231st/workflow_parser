@@ -27,6 +27,9 @@ class PacesCollector(object):
         self.unjoinedpaces_by_edge = defaultdict(list)
 
         self.r_unjoinspaces_by_edge = defaultdict(set)
+        self.remote_relations = set()
+        self.remote_l_relations = set()
+        self.local_relations = set()
 
     def collect_join(self, threadins):
         assert isinstance(threadins, ThreadInstance)
@@ -62,6 +65,11 @@ class PacesCollector(object):
         if requestins.e_unjoins_paces_by_edge:
             for edge, paces in requestins.e_unjoins_paces_by_edge.iteritems():
                 self.r_unjoinspaces_by_edge[edge].update(paces)
+
+        if not requestins.errors:
+            self.remote_relations.update(requestins.remote_relations)
+            self.remote_l_relations.update(requestins.remote_l_relations)
+            self.local_relations.update(requestins.local_relations)
 
 
 class ThreadInssCollector(object):
@@ -385,10 +393,17 @@ def parse(tgs_collector, master_graph):
         print("(ParserEngine) ERROR! %d stray threadinss in requests" %
                 len(tis_collector.r_stray_threadinss))
 
+    print("(ParserEngine) relation summary:")
     if pcs_collector.r_unjoinspaces_by_edge:
-        print("(ParserEngine) WARN! unjoins paces in requests")
+        print("  WARN! unjoins paces in requests")
         for edge, paces in pcs_collector.r_unjoinspaces_by_edge.iteritems():
-            print("  %s: %d paces" % (edge.name, len(paces)))
+            print("    %s: %d paces" % (edge.name, len(paces)))
+    print("  %d remote relations" %
+            len(pcs_collector.remote_relations))
+    print("  %d remote(l) relations" %
+            len(pcs_collector.remote_l_relations))
+    print("  %d local relations" %
+            len(pcs_collector.local_relations))
 
     print("(ParserEngine) vars summary: %d" % len(rqs_collector.requests_vars))
     for k, vs in rqs_collector.requests_vars.iteritems():
@@ -397,3 +412,5 @@ def parse(tgs_collector, master_graph):
             % (len(rqs_collector.requestinss),
                len(tis_collector.r_threadinss)))
     print("Build requests ok..\n")
+
+    return pcs_collector, tis_collector, rqs_collector

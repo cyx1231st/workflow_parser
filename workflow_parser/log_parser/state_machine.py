@@ -808,7 +808,7 @@ class RequestInstance(object):
                 else:
                     assert joins_pace.joins_pace.joined_pace is joins_pace
                     if relation.is_remote:
-                        if relation.from_host == relation.to_host:
+                        if relation.from_host != relation.to_host:
                             # remote_relations
                             self.remote_relations.add(relation)
                         else:
