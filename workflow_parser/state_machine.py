@@ -2,15 +2,15 @@ import abc
 from collections import defaultdict
 from functools import total_ordering
 
-from workflow_parser.log_parser import reserved_vars as rv
-from workflow_parser.log_parser.exception import WFException
-from workflow_parser.log_parser.state_graph import ThreadGraph
-from workflow_parser.log_parser.state_graph import MasterGraph
-from workflow_parser.log_parser.state_graph import Node
-from workflow_parser.log_parser.state_graph import Edge
-from workflow_parser.log_parser.log_parser import LogLine
-from workflow_parser.log_parser.state_graph import Join
-from workflow_parser.log_parser.utils import report_loglines
+from workflow_parser import reserved_vars as rv
+from workflow_parser.exception import WFException
+from workflow_parser.state_graph import ThreadGraph
+from workflow_parser.state_graph import MasterGraph
+from workflow_parser.state_graph import Node
+from workflow_parser.state_graph import Edge
+from workflow_parser.log_parser import LogLine
+from workflow_parser.state_graph import Join
+from workflow_parser.utils import report_loglines
 
 
 empty_join = object()
@@ -249,153 +249,6 @@ class JoinRelation(object):
                 self.to_seconds, self.from_host, self.to_host)
 
 
-"""
-class RemotePace(PaceBase):
-    def __init__(self, sub_instance, from_pace=None):
-        super(NestedPace, self).__init__(
-            sub_instance, sub_instance.graph, sub_instance.from_node,
-            sub_instance.to_node, from_pace)
-
-    @property
-    def sub_instance(self):
-        return self.content
-
-    @property
-    def assume_host(self):
-        return self.content.assume_host
-
-    @property
-    def from_seconds(self):
-        return self.sub_instance.from_seconds
-
-    @property
-    def to_seconds(self):
-        return self.sub_instance.to_seconds
-
-    def connect(self, p):
-        super(NestedPace, self).connect(p)
-        self.sub_instance.connect(p.sub_instance)
-
-    def confirm_pace(self, ins):
-        super(NestedPace, self).confirm_pace(ins)
-        host = self.assume_host
-        if host is not None and ins.host != host:
-            return None
-
-        if self.to_node.accept_edge(ins.from_edge):
-            p = NestedPace(ins, self)
-            return p
-        else:
-            return None
-
-    # NestedPace
-    def __repr__(self):
-        ret_str = "<NestPace ins:%r>" % self.sub_instance
-        return ret_str
-
-    def __str__(self):
-        ret_str = "%r:" % self
-        ret_str += "\n%s" % self.sub_instance
-        return ret_str
-"""
-
-
-# class InstanceBase(object):
-#     def __init__(self, graph, ident):
-#         self.graph = graph
-#         self.ident = ident
-
-#         self.from_pace = None
-#         self.to_pace = None
-
-#         self.fail_message = ""
-
-#     @property
-#     def from_node(self):
-#         return self.from_pace.from_node
-
-#     @property
-#     def to_node(self):
-#         if self.to_pace is None:
-#             return None
-#         else:
-#             return self.to_pace.to_node
-
-#     @property
-#     def start_leaf_pace(self):
-#         return None
-
-#     @property
-#     def from_seconds(self):
-#         return self.from_pace.from_seconds
-
-#     @property
-#     def to_seconds(self):
-#         return self.to_pace.to_seconds
-
-#     @property
-#     def is_end(self):
-#         if self.to_pace and self.to_pace.to_node in self.graph.end_nodes:
-#             return True
-#         else:
-#             return False
-
-#     @property
-#     def is_failed(self):
-#         return bool(self.fail_message) or not self.is_end
-
-#     @property
-#     def state(self):
-#         if not self.to_node:
-#             return "UNKNOWN"
-#         else:
-#             state = self.to_node.state
-#             if state is Node.UNKNOWN_STATE:
-#                 return "-"
-#             else:
-#                 return state
-
-#     @property
-#     def assume_host(self):
-#         if not self.is_end or self.to_pace is None:
-#             return None
-#         else:
-#             return self.to_pace.assume_host
-
-#     @property
-#     def name(self):
-#         return self.graph.name
-
-#     def iterall(self):
-#         p = self.start_leaf_pace
-#         while p:
-#             yield p
-#             if p.to_node in self.graph.end_nodes:
-#                 break
-#             p = p.nxt
-
-#     def __iter__(self):
-#         p = self.from_pace
-#         while p:
-#             yield p.content
-#             if p is self.to_pace:
-#                 break
-#             p = p.nxt
-
-#     def __str__(self):
-#         ret_str = "%r:" % self
-
-#         ret_str += "\nPaces:"
-#         p = self.from_pace
-#         while p:
-#             ret_str += "\n    %r" % p
-#             if p is self.to_pace:
-#                 break
-#             p = p.nxt
-#         ret_str += "\n"
-#         return ret_str
-
-
 class ThreadInstance(object):
     def __init__(self, thread, threadgraph, loglines, s_index):
         assert isinstance(thread, str)
@@ -597,56 +450,7 @@ class ThreadInstance(object):
         report_loglines(self.loglines, self.s_index, self.f_index)
         print "-------- end -----------"
 
-    # @property
-    # def from_edge(self):
-    #     return self.from_pace.edge
 
-    # @property
-    # def sort_key(self):
-    #     return self.from_pace.log.seconds
-
-    # @property
-    # def service(self):
-    #     return self.graph.service
-
-    # @property
-    # def start_leaf_pace(self):
-    #     return self.from_pace
-
-    # def connect(self, ins):
-    #     self.to_pace.connect(ins.from_pace)
-
-    # def confirm(self, log):
-    #     assert self.host == log.host
-
-    #     if self.ident != log.ident:
-    #         return False
-
-    #     if not self.is_end:
-    #         p = None
-    #         if self.to_pace is None:
-    #             node, edge = self.graph.decide_node_edge(log)
-    #             if node and edge:
-    #                 p = LeafPace(log, node, edge, None)
-    #                 self.from_pace = p
-    #         else:
-    #             p = self.to_pace.confirm_pace(log)
-
-    #         if p:
-    #             self.to_pace = p
-    #             return True
-
-    #     # extra edges handling
-    #     edge = self.graph.decide_edge_ignored(log)
-    #     if edge is not None:
-    #         if edge not in self.extra_logs:
-    #             assert self.host == log.host
-    #             self.extra_logs[edge] = log
-    #             return True
-    #         else:
-    #             return False
-    #     else:
-    #         return False
 class NestedRequest(object):
     def __init__(self, threadins, requestins):
         assert isinstance(threadins, ThreadInstance)
@@ -868,60 +672,3 @@ class RequestInstance(object):
     @property
     def request_state(self):
         return self.end_threadins.request_state
-    # def confirm(self, ins):
-    #     if self.ident != ins.ident:
-    #         return False
-
-    #     if not self.is_end:
-    #         p = None
-    #         if self.to_pace is None:
-    #             # TODO self.graph.
-    #             for node in self.graph.start_nodes:
-    #                 if node.accept_edge(ins.from_edge):
-    #                     p = NestedPace(ins)
-    #                     self.from_pace = p
-    #                     break
-    #         else:
-    #             p = self.to_pace.confirm_pace(ins)
-
-    #         if p:
-    #             self.to_pace = p
-    #             if not ins.is_end:
-    #                 raise ParseError("Instance %r is not complete!" % ins)
-    #             else:
-    #                 return True
-
-    #     return False
-
-    # def assume_graphs(self):
-    #     """ Acceptable graphs """
-    #     graphs = set()
-    #     if self.is_end:
-    #         return graphs
-
-    #     if self.to_pace is None:
-    #         for node in self.graph.start_nodes:
-    #             for edge in node.edges:
-    #                 graphs.add(edge.graph)
-    #     else:
-    #         node = self.to_pace.to_node
-    #         for edge in node.edges:
-    #             graphs.add(edge.graph)
-    #     return graphs
-
-    # def __repr__(self):
-    #     ret_str = "<NestedIns ident:%s graph:%s end:%s state:%s>" \
-    #               % (self.ident, self.graph.name, self.is_end, self.state)
-    #     return ret_str
-
-    # def __str__(self):
-    #     ret_str = ">>------------\n"
-    #     ret_str += super(NestedInstance, self).__str__()
-
-    #     p = self.from_pace
-    #     while p:
-    #         ret_str += "\n%s" % p.sub_instance
-    #         if p is self.to_pace:
-    #             break
-    #         p = p.nxt
-    #     return ret_str

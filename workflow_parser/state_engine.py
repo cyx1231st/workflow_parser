@@ -2,15 +2,15 @@ from collections import defaultdict
 from collections import deque
 from collections import OrderedDict
 
-from workflow_parser.log_parser.log_engine import TargetsCollector
-from workflow_parser.log_parser.state_graph import MasterGraph
-from workflow_parser.log_parser.state_graph import seen_edges
-from workflow_parser.log_parser.state_machine import empty_join
-from workflow_parser.log_parser.state_machine import JoinRelation
-from workflow_parser.log_parser.state_machine import StateError
-from workflow_parser.log_parser.state_machine import RequestInstance
-from workflow_parser.log_parser.state_machine import ThreadInstance
-from workflow_parser.log_parser.utils import report_loglines
+from workflow_parser.log_engine import TargetsCollector
+from workflow_parser.state_graph import MasterGraph
+from workflow_parser.state_graph import seen_edges
+from workflow_parser.state_machine import empty_join
+from workflow_parser.state_machine import JoinRelation
+from workflow_parser.state_machine import StateError
+from workflow_parser.state_machine import RequestInstance
+from workflow_parser.state_machine import ThreadInstance
+from workflow_parser.utils import report_loglines
 
 
 class PacesCollector(object):

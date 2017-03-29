@@ -4,9 +4,9 @@ from collections import defaultdict
 from functools import total_ordering
 from os import path
 
-from workflow_parser.log_parser.service_registry import ServiceRegistry
-from workflow_parser.log_parser import reserved_vars as rv
-from workflow_parser.log_parser.exception import WFException
+from workflow_parser.service_registry import ServiceRegistry
+from workflow_parser import reserved_vars as rv
+from workflow_parser.exception import WFException
 
 
 class LogError(WFException):

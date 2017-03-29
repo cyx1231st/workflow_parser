@@ -3,10 +3,10 @@ import os
 from os import path
 import sys
 
-from workflow_parser.log_parser.log_parser import DriverPlugin
-from workflow_parser.log_parser.log_parser import LogError
-from workflow_parser.log_parser.log_parser import LogFile
-from workflow_parser.log_parser.service_registry import ServiceRegistry
+from workflow_parser.log_parser import DriverPlugin
+from workflow_parser.log_parser import LogError
+from workflow_parser.log_parser import LogFile
+from workflow_parser.service_registry import ServiceRegistry
 
 
 class TargetsCollector(object):

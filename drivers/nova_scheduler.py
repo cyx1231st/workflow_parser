@@ -12,9 +12,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from workflow_parser.log_parser.driver import DriverBase
-from workflow_parser.log_parser.driver import rv
-from workflow_parser.log_parser.driver import ServiceRegistry
+from workflow_parser.driver import DriverBase
+from workflow_parser.driver import rv
+from workflow_parser.driver import ServiceRegistry
 
 
 sr = ServiceRegistry()

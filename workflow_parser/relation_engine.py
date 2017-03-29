@@ -1,8 +1,8 @@
 from collections import OrderedDict
 
-from workflow_parser.log_parser.log_engine import TargetsCollector
-from workflow_parser.log_parser.state_engine import PacesCollector
-from workflow_parser.log_parser.state_machine import JoinRelation
+from workflow_parser.log_engine import TargetsCollector
+from workflow_parser.state_engine import PacesCollector
+from workflow_parser.state_machine import JoinRelation
 
 
 class HostConstraint(object):

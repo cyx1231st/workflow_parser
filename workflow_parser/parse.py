@@ -16,13 +16,13 @@ from __future__ import print_function
 
 import argparse
 
-from workflow_parser.log_parser.log_engine import TargetsEngine
-from workflow_parser.log_parser.state_engine import state_parse
-from workflow_parser.log_parser.relation_engine import relation_parse
+from workflow_parser.log_engine import TargetsEngine
+from workflow_parser.state_engine import state_parse
+from workflow_parser.relation_engine import relation_parse
 
 
 def main1(driver):
-    from workflow_parser.log_parser.driver import DriverBase
+    from workflow_parser.driver import DriverBase
     assert isinstance(driver, DriverBase)
 
     parser = argparse.ArgumentParser()

@@ -3,8 +3,8 @@ from __future__ import print_function
 from collections import defaultdict
 from orderedset import OrderedSet
 
-from workflow_parser.log_parser.service_registry import Component
-from workflow_parser.log_parser.log_parser import LogLine
+from workflow_parser.service_registry import Component
+from workflow_parser.log_parser import LogLine
 
 # TODO: implement RequestGraph for nested-request support
 

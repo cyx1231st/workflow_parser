@@ -1,11 +1,11 @@
 from abc import ABCMeta
 from abc import abstractmethod
 
-from workflow_parser.log_parser import reserved_vars as rv
-from workflow_parser.log_parser.log_parser import DriverPlugin
-from workflow_parser.log_parser.parse import main1
-from workflow_parser.log_parser.service_registry import ServiceRegistry
-from workflow_parser.log_parser.state_graph import MasterGraph
+from workflow_parser import reserved_vars as rv
+from workflow_parser.log_parser import DriverPlugin
+from workflow_parser.parse import main1
+from workflow_parser.service_registry import ServiceRegistry
+from workflow_parser.state_graph import MasterGraph
 
 
 class DriverBase(DriverPlugin):
