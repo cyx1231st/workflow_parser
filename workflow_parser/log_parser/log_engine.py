@@ -88,6 +88,7 @@ class TargetsEngine(TargetsCollector):
         assert isinstance(log_folder, str)
 
         # current_path = path.dirname(os.path.realpath(__file__))
+        print("Load targets(logfiles)...")
         current_path = os.getcwd()
         log_folder = path.join(current_path, log_folder)
         for f_name in os.listdir(log_folder):
@@ -99,9 +100,10 @@ class TargetsEngine(TargetsCollector):
             self.logfiles.append(logfile)
         self.total_files = len(self.logfiles)
         print("(TargetsEngine) detected %d targets" % self.total_files)
-        print("Load targets(logfiles) ok..\n")
+        print("ok\n")
 
     def readfiles(self):
+        print("Read targets...")
         for logfile in self.logfiles:
             logfile.read()
             # ready line vars: time, seconds, keyword
@@ -132,9 +134,10 @@ class TargetsEngine(TargetsCollector):
                 print("  %s has %d targets, and %d hosts"
                       % (comp, len(targets), len(hosts)))
         print("(TargetsEngine) detected %d hosts" % len(self.targets_by_host))
-        print("Read targets ok..\n")
+        print("ok\n")
 
     def buildthreads(self):
+        print("Build threads...")
         for logfile in self.itervalues():
             requests = logfile.prepare()
             # NOTE: for debug
@@ -156,4 +159,4 @@ class TargetsEngine(TargetsCollector):
             print("  %s has %.3f[%d, %d] threads"
                   % (comp, sum_/float(cnt), min_, max_))
         print("(TargetsEngine) detected %d threads" % sum_t)
-        print("Build threads ok..\n")
+        print("ok\n")

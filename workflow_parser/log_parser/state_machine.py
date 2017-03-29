@@ -232,6 +232,22 @@ class JoinRelation(object):
     def to_host(self):
         return self.to_pace.host
 
+    @property
+    def from_seconds(self):
+        return self.from_pace.seconds
+
+    @property
+    def to_seconds(self):
+        return self.to_pace.seconds
+
+    @property
+    def is_violated(self):
+        return self.from_seconds > self.to_seconds
+
+    def __repr__(self):
+        return "<JoinR %f -> %f, %s -> %s>" % (self.from_seconds,
+                self.to_seconds, self.from_host, self.to_host)
+
 
 """
 class RemotePace(PaceBase):

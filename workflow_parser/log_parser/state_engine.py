@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections import deque
+from collections import OrderedDict
 
 from workflow_parser.log_parser.log_engine import TargetsCollector
 from workflow_parser.log_parser.state_graph import MasterGraph
@@ -17,6 +18,7 @@ class PacesCollector(object):
         self.joins_paces = []
         self.joined_paces = []
         self.joined_paces_by_jo = defaultdict(list)
+        self.joined_paces_by_jo_host = defaultdict(lambda: defaultdict(list))
 
         self.joins_edges = set()
         self.joinspaces_by_edge = defaultdict(list)
@@ -39,6 +41,7 @@ class PacesCollector(object):
         for pace in threadins.joined_paces:
             for joined_obj in pace.joined_objs:
                 self.joined_paces_by_jo[joined_obj].append(pace)
+                self.joined_paces_by_jo_host[joined_obj][pace.host].append(pace)
 
     def collect_unjoin(self):
         for pace in self.joins_paces:
@@ -177,7 +180,7 @@ class RequestsCollector(object):
 
 
 # TODO: add count checks
-def parse(tgs_collector, master_graph):
+def state_parse(tgs_collector, master_graph):
     assert isinstance(master_graph, MasterGraph)
     assert isinstance(tgs_collector, TargetsCollector)
 
@@ -186,6 +189,7 @@ def parse(tgs_collector, master_graph):
     rqs_collector = RequestsCollector(tis_collector, pcs_collector)
 
     # step 1: build thread instances
+    print("Build thread instances...")
     for f_obj in tgs_collector.itervalues():
         for (thread, loglines) in f_obj.loglines_by_thread.iteritems():
             c_index = 0
@@ -224,62 +228,73 @@ def parse(tgs_collector, master_graph):
             len(tis_collector.start_threadinss))
     print("(ParserEngine) joins_paces: %d" % len(pcs_collector.joins_paces))
     print("(ParserEngine) joined_paces: %d" % len(pcs_collector.joined_paces))
-    print("Parse threads ok..\n")
+    print("ok\n")
 
     # step 2: join paces by schema
+    print("Join paces...")
     pcs_collector.joins_paces.sort()
     pcs_collector.joined_paces.sort()
     for jo, p_list in pcs_collector.joined_paces_by_jo.iteritems():
         p_list.sort()
-        pcs_collector.joined_paces_by_jo[jo] = deque(p_list)
+        pcs_collector.joined_paces_by_jo[jo] = OrderedDict.fromkeys(p_list)
+    for jo, paces_by_host in pcs_collector.joined_paces_by_jo_host.iteritems():
+        for host, paces in paces_by_host.iteritems():
+            paces.sort()
+            pcs_collector.joined_paces_by_jo_host[jo][host] = OrderedDict.fromkeys(paces)
 
+    join_attempt_cnt = 0
     for joins_pace in pcs_collector.joins_paces:
         join_objs = joins_pace.edge.joins_objs
         assert len(join_objs) == 1
         join_obj = list(join_objs)[0]
         schemas = join_obj.schemas
-        target_paces = pcs_collector.joined_paces_by_jo[join_obj]
 
         target_pace = None
 
         from_schema = {}
+        care_host = None
         for schema in schemas:
-            from_schema[schema[0]] = joins_pace[schema[0]]
+            from_schema_key = schema[0]
+            to_schema_key = schema[1]
+            if to_schema_key == "host":
+                care_host = joins_pace[from_schema_key]
+            from_schema[from_schema_key] = joins_pace[from_schema_key]
+        if care_host is None:
+            target_paces = pcs_collector.joined_paces_by_jo[join_obj]
+        else:
+            target_paces = pcs_collector.joined_paces_by_jo_host[join_obj][care_host]
+        assert isinstance(target_paces, OrderedDict)
 
         to_schemas = defaultdict(set)
-
-        new_deque = deque()
         for pace in target_paces:
             if pace.joined_relation is not None:
+                target_paces.pop(pace)
                 continue
 
-            if not target_pace:
-                match = True
-                for schema in schemas:
-                    from_schema_key = schema[0]
-                    from_schema_val = from_schema[from_schema_key]
-                    to_schema_key = schema[1]
-                    to_schema_val = pace[to_schema_key]
+            join_attempt_cnt += 1
+            match = True
+            for schema in schemas:
+                from_schema_key = schema[0]
+                from_schema_val = from_schema[from_schema_key]
+                to_schema_key = schema[1]
+                to_schema_val = pace[to_schema_key]
 
-                    to_schemas[to_schema_key].add(to_schema_val)
-                    if from_schema_key == "request":
-                        assert to_schema_key == "request"
-                        if from_schema_val and to_schema_val and from_schema_val != to_schema_val:
-                            match = False
-                            break
-                    elif from_schema[from_schema_key] != to_schema_val:
-                        assert from_schema_val is not None
-                        assert to_schema_val is not None
+                to_schemas[to_schema_key].add(to_schema_val)
+                if from_schema_key == "request":
+                    assert to_schema_key == "request"
+                    if from_schema_val and to_schema_val and from_schema_val != to_schema_val:
                         match = False
                         break
+                elif from_schema[from_schema_key] != to_schema_val:
+                    assert from_schema_val is not None
+                    assert to_schema_val is not None
+                    match = False
+                    break
 
-                if not match:
-                    new_deque.append(pace)
-                else:
-                    target_pace = pace
-            else:
-                new_deque.append(pace)
-        pcs_collector.joined_paces_by_jo[join_obj] = new_deque
+            if match:
+                target_pace = pace
+                target_paces.pop(pace)
+                break
 
         if target_pace:
             joins_pace.join_pace(target_pace, join_obj)
@@ -297,6 +312,7 @@ def parse(tgs_collector, master_graph):
             joined_pace.joined_relation = empty_join
 
     pcs_collector.collect_unjoin()
+    print("(ParserEngine) %d join attempts" % join_attempt_cnt)
     print("(ParserEngine) joins edges summary:")
     for edge in pcs_collector.joins_edges:
         joins_paces = pcs_collector.joinspaces_by_edge[edge]
@@ -314,9 +330,10 @@ def parse(tgs_collector, master_graph):
         if notjoined_paces:
             warn_str += ", WARN! %d unjoined paces" % len(notjoined_paces)
         print("  %s: %d%s" % (edge.name, len(joined_paces), warn_str))
-    print("Join paces ok..\n")
+    print("ok\n")
 
     # step 3: group threads by request
+    print("Group threads...")
     seen_threadinss = set()
     def group(threadins, t_set):
         assert isinstance(threadins, ThreadInstance)
@@ -361,9 +378,10 @@ def parse(tgs_collector, master_graph):
                 len(tis_collector.threadgroups_without_request),
                 sum(len(tgroup) for tgroup in
                     tis_collector.threadgroups_without_request)))
-    print("Group threads ok..\n")
+    print("ok\n")
 
     # step 4: build requests
+    print("Build requests...")
     for request, threads in tis_collector.threadgroup_by_request.iteritems():
         request_obj = RequestInstance(master_graph, request, threads)
         rqs_collector.collect_request(request_obj)
@@ -411,6 +429,6 @@ def parse(tgs_collector, master_graph):
     print("(ParserEngine) built %d request instances with %d thread instances"
             % (len(rqs_collector.requestinss),
                len(tis_collector.r_threadinss)))
-    print("Build requests ok..\n")
+    print("ok\n")
 
     return pcs_collector, tis_collector, rqs_collector
