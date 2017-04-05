@@ -38,8 +38,11 @@ class Pace(object):
         self.prv_pace = None
         self.nxt_pace = None
 
-        self.joins_relation = None
-        self.joined_relation = None
+        self.prv_int = None
+        self.nxt_int = None
+
+        self.joins_int = None
+        self.joined_int = None
 
     # total ordering
     __eq__ = lambda self, other: self.seconds == other.seconds
@@ -55,15 +58,15 @@ class Pace(object):
 
     @property
     def joins_pace(self):
-        if self.joins_relation and self.joins_relation is not empty_join:
-            return self.joins_relation.to_pace
+        if self.joins_int and self.joins_int is not empty_join:
+            return self.joins_int.to_pace
         else:
             return None
 
     @property
     def joined_pace(self):
-        if self.joined_relation and self.joined_relation is not empty_join:
-            return self.joined_relation.from_pace
+        if self.joined_int and self.joined_int is not empty_join:
+            return self.joined_int.from_pace
         else:
             return None
 
@@ -121,20 +124,20 @@ class Pace(object):
         mark_str = ""
         if self.joins_objs:
             mark_str += ", join(%d):" % len(self.joins_objs)
-            if self.joins_relation:
-                if self.joins_relation is empty_join:
+            if self.joins_int:
+                if self.joins_int is empty_join:
                     mark_str += "EMPTY"
                 else:
-                    mark_str += self.joins_relation.name
+                    mark_str += self.joins_int.name
             else:
                 mark_str += "?"
         if self.joined_objs:
             mark_str += ", joined(%d):" % len(self.joined_objs)
-            if self.joined_relation:
-                if self.joined_relation is empty_join:
+            if self.joined_int:
+                if self.joined_int is empty_join:
                     mark_str += "EMPTY"
                 else:
-                    mark_str += self.joined_relation.name
+                    mark_str += self.joined_int.name
             else:
                 mark_str += "?"
         if self.is_thread_start:
@@ -188,49 +191,37 @@ class Pace(object):
         assert isinstance(next_pace, Pace)
         assert isinstance(join_obj, Join)
         assert join_obj in self.edge.joins_objs
-        assert self.joins_relation is None
-        assert next_pace.joined_relation is None
+        assert self.joins_int is None
+        assert next_pace.joined_int is None
 
-        relation = JoinRelation(join_obj, self, next_pace)
-        self.joins_relation = relation
-        next_pace.joined_relation = relation
+        relation = JoinInterval(join_obj, self, next_pace)
+        self.joins_int = relation
+        next_pace.joined_int = relation
+        next_pace.nxt_int.joined_int = relation
         return relation
 
 
-class JoinRelation(object):
-    def __init__(self, join_obj, from_pace, to_pace):
-        assert isinstance(join_obj, Join)
+class IntervalBase(object):
+    def __init__(self, from_pace, to_pace, entity):
         assert isinstance(from_pace, Pace)
         assert isinstance(to_pace, Pace)
 
-        self.name = join_obj.name
-        self.join_obj = join_obj
         self.from_pace = from_pace
         self.to_pace = to_pace
 
-    @property
-    def from_threadins(self):
-        return self.from_pace.threadins
+        self.from_node = from_pace.from_node
+        self.to_node = to_pace.to_node
+        self.entity = entity
 
-    @property
-    def to_threadins(self):
-        return self.to_pace.threadins
+        self.from_edge = from_pace.edge
+        self.to_edge = to_pace.edge
 
-    @property
-    def is_shared(self):
-        return self.join_obj.is_shared
+        self.name = "%s(%s)%s" % (self.from_node.name,
+                                  self.entity.name,
+                                  self.to_node.name)
 
-    @property
-    def is_remote(self):
-        return self.join_obj.is_remote
+        self.is_main = False
 
-    @property
-    def from_host(self):
-        return self.from_pace.host
-
-    @property
-    def to_host(self):
-        return self.to_pace.host
 
     @property
     def from_seconds(self):
@@ -241,12 +232,193 @@ class JoinRelation(object):
         return self.to_pace.seconds
 
     @property
+    def lapse(self):
+        return self.to_seconds - self.from_seconds
+
+    @property
     def is_violated(self):
         return self.from_seconds > self.to_seconds
 
+
+class ThreadInterval(IntervalBase):
+    def __init__(self, from_pace, to_pace, threadins):
+        assert isinstance(threadins, ThreadInstance)
+
+        self.prv_int = None
+        self.nxt_int = None
+        self.joins_int = None
+        self.joined_int = None
+
+        self.target = threadins.target
+        self.component = threadins.component
+        self.host = threadins.host
+        self.threadins = threadins
+
+        super(ThreadInterval, self).__init__(from_pace,
+                                             to_pace,
+                                             from_pace.to_node)
+
+    @property
+    def node(self):
+        return self.entity
+
+    @property
+    def is_lock(self):
+        return self.node.is_lock
+
+    @property
+    def color(self):
+        return self.component.color
+
+    @property
+    def is_request_start(self):
+        return self.from_node.is_request_start
+
+    @property
+    def is_request_end(self):
+        return self.to_node.is_request_end
+
+    @property
+    def is_thread_end(self):
+        return self.to_node.is_thread_end
+
+    @property
+    def prv_main(self):
+        assert self.is_main
+
+        if self.prv_int and not self.prv_int.is_lock:
+            assert not self.joined_int
+            return self.prv_int
+        elif self.prv_int:
+            ret = self.joined_int
+        else:
+            ret = self.joined_int
+        if not ret:
+            assert self.is_request_start
+        return ret
+
+    @property
+    def nxt_main(self):
+        assert self.is_main
+        if self.nxt_int and self.nxt_int.is_main:
+            # self.joins_int cannot be main
+            assert not self.joins_int or not self.joins_int.is_main
+            return self.nxt_int
+        elif self.nxt_int:
+            if self.joins_int and self.joins_int.is_main:
+                return self.joins_int
+            elif self.joins_int:
+                # self.nxt_int nor self.joins_int is main
+                assert False
+            else:
+                assert self.is_request_end
+                return None
+        else:
+            if self.joins_int and self.joins_int.is_main:
+                return self.joins_int
+            elif self.joins_int:
+                assert self.is_request_end
+                return None
+            else:
+                assert self.is_request_end
+                return None
+
+
+class JoinInterval(IntervalBase):
+    def __init__(self, join_obj, from_pace, to_pace):
+        assert isinstance(join_obj, Join)
+        assert isinstance(from_pace, Pace)
+        assert isinstance(to_pace, Pace)
+
+        self.joined_int = from_pace.prv_int
+        self.joins_int = to_pace.nxt_int
+
+        super(JoinInterval, self).__init__(from_pace, to_pace, join_obj)
+
+        if not self.is_remote:
+            assert self.from_target == self.to_target
+            assert self.from_host == self.to_host
+
+    @property
+    def join_obj(self):
+        return self.entity
+
+    @property
+    def color(self):
+        j_type = self.join_type
+        if j_type == "remote":
+            return "#f57405"
+        elif j_type == "local_remote":
+            return "#ccb704"
+        else:
+            return self.from_component.color
+
+    @property
+    def from_threadins(self):
+        return self.from_pace.threadins
+
+    @property
+    def to_threadins(self):
+        return self.to_pace.threadins
+
+    @property
+    def from_host(self):
+        return self.from_pace.host
+
+    @property
+    def to_host(self):
+        return self.to_pace.host
+
+    @property
+    def from_component(self):
+        return self.from_pace.component
+
+    @property
+    def to_component(self):
+        return self.to_pace.component
+
+    @property
+    def from_target(self):
+        return self.from_pace.target
+
+    @property
+    def to_target(self):
+        return self.to_pace.target
+
+    @property
+    def is_shared(self):
+        return self.join_obj.is_shared
+
+    @property
+    def is_remote(self):
+        return self.join_obj.is_remote
+
+    @property
+    def join_type(self):
+        if self.is_remote and self.from_host != self.to_host:
+            return "remote"
+        elif self.is_remote:
+            return "local_remote"
+        else:
+            return "local"
+
+    @property
+    def prv_main(self):
+        assert self.is_main
+        assert self.joined_int
+        return self.joined_int
+
+    @property
+    def nxt_main(self):
+        assert self.is_main
+        assert self.joins_int and self.joins_int.is_main
+        return self.joins_int
+
     def __repr__(self):
-        return "<JoinR %f -> %f, %s -> %s>" % (self.from_seconds,
-                self.to_seconds, self.from_host, self.to_host)
+        return "<JoinR#%s %f -> %f, %s -> %s>" % (
+                self.name,
+                self.from_seconds, self.to_seconds,
+                self.from_host, self.to_host)
 
 
 class ThreadInstance(object):
@@ -264,6 +436,8 @@ class ThreadInstance(object):
         self.paces = []
         self.paces_by_mark = defaultdict(list)
 
+        self.intervals = []
+
         self.s_index = s_index
         self.f_index = None
         self.loglines = loglines
@@ -274,8 +448,8 @@ class ThreadInstance(object):
 
         self.joined_paces = []
         self.joins_paces = []
-        self.joined_relations = set()
-        self.joins_relations = set()
+        self.joined_ints = set()
+        self.joins_ints = set()
 
         self.is_shared = threadgraph.is_shared
         if self.is_shared:
@@ -307,12 +481,6 @@ class ThreadInstance(object):
             index += 1
 
         self.f_index = index
-        prv = None
-        for pace in self.paces:
-            pace.prv_pace = prv
-            if prv:
-                prv.nxt_pace = pace
-            prv = pace
 
         # check
         if not self.paces or not self.is_complete:
@@ -370,6 +538,25 @@ class ThreadInstance(object):
                 self.thread_vars[k] = v.pop()
             else:
                 self.thread_vars_dup[k] = v
+
+        # NOTE: must be the last, intervals and link
+        prv = None
+        prv_int = None
+        for pace in self.paces:
+            pace.prv_pace = prv
+            if prv:
+                prv.nxt_pace = pace
+                interval = ThreadInterval(prv, pace, self)
+                prv.nxt_int = interval
+                pace.prv_int = interval
+                self.intervals.append(interval)
+                interval.prv_int = prv_int
+                if prv_int:
+                    prv_int.nxt_int = interval
+                prv_int = interval
+            prv = pace
+
+
     @property
     def request_state(self):
         return self.end_pace.request_state
@@ -397,6 +584,14 @@ class ThreadInstance(object):
     @property
     def len_paces(self):
         return len(self.paces)
+
+    @property
+    def start_seconds(self):
+        return self.paces[0].seconds
+
+    @property
+    def end_seconds(self):
+        return self.paces[-1].seconds
 
     def __str__(self):
         mark_str = ""
@@ -430,9 +625,9 @@ class ThreadInstance(object):
                 len(self.thread_vars),
                 len(self.thread_vars_dup),
                 len(self.joined_paces),
-                len(self.joined_relations),
+                len(self.joined_ints),
                 len(self.joins_paces),
-                len(self.joins_relations),
+                len(self.joins_ints),
                 mark_str)
 
     def __repr__(self):
@@ -464,8 +659,9 @@ class NestedRequest(object):
 
         self.joined_paces = []
         self.joins_paces = []
-        self.joined_relations = set()
-        self.joins_relations = set()
+
+        self.joined_ints = set()
+        self.joins_ints = set()
 
         self.is_shared = False
         self.request = requestins.request
@@ -478,12 +674,12 @@ class NestedRequest(object):
         for pace in threadins.joined_paces:
             if pace.joined_pace.requestins is requestins:
                 dummy_pace1 = Pace(pace.logline, pace.from_node, pace.edge, self)
-                relation = pace.joined_relation
+                relation = pace.joined_int
                 relation.to_pace = dummy_pace1
-                dummy_pace1.joined_relation = relation
+                dummy_pace1.joined_int = relation
 
                 self.joined_paces.append(dummy_pace1)
-                self.joined_relations.add(dummy_relation)
+                self.joined_ints.add(dummy_relation)
                 self.paces.append(dummy_pace1)
                 break
         if not dummy_pace1:
@@ -493,12 +689,12 @@ class NestedRequest(object):
         for pace in threadins.joins_paces:
             if pace.joins_pace.requestins is requestins:
                 dummy_pace2 = Pace(pace.logline, pace.from_node, pace.edge, self)
-                relation = pace.joins_relation
+                relation = pace.joins_int
                 relation.from_pace = dummy_pace2
-                dummy_pace2.joins_relation = relation
+                dummy_pace2.joins_int = relation
 
                 self.joins_paces.append(dummy_pace2)
-                self.joins_relations.add(dummy_relation)
+                self.joins_ints.add(dummy_relation)
                 self.paces.append(dummy_pace2)
 
                 dummy_pace1.nxt_pace = dummy_pace2
@@ -528,13 +724,13 @@ class RequestInstance(object):
         self.nestedreqs = set()
         self.start_threadins = None
         self.end_threadins = None
+        self.last_threadins = None
 
         self.paces_by_mark = defaultdict(list)
         self.len_paces = 0
 
-        self.remote_relations = set()
-        self.remote_l_relations = set()
-        self.local_relations = set()
+        self.join_ints = set()
+        self.td_ints = set()
 
         # error report
         self.errors = {}
@@ -546,6 +742,9 @@ class RequestInstance(object):
         self.e_extra_e_threadinss = set()
         self.e_stray_threadinss = set()
         self.e_unjoins_paces_by_edge = defaultdict(set)
+
+        # interval
+        self.intervals = set()
 
         # init
         shared_tis = set()
@@ -587,6 +786,7 @@ class RequestInstance(object):
 
             # threadinss
             self.threadinss.append(threadins)
+            self.td_ints.update(threadins.intervals)
 
             # nestedreqs
             if isinstance(threadins, NestedRequest):
@@ -605,6 +805,11 @@ class RequestInstance(object):
                 else:
                     self.end_threadins = threadins
 
+            # last_theadins
+            if self.last_threadins is None \
+                    or self.last_threadins.end_seconds < threadins.end_seconds:
+                self.last_threadins = threadins
+
             # paces_by_mark
             for mark, paces in threadins.paces_by_mark.iteritems():
                 self.paces_by_mark[mark].extend(paces)
@@ -621,28 +826,21 @@ class RequestInstance(object):
             self.len_paces += threadins.len_paces
 
             for joins_pace in threadins.joins_paces:
-                relation = joins_pace.joins_relation
+                relation = joins_pace.joins_int
                 if relation is empty_join:
                     # cnt_unjoined_paces_by_edgename
                     self.e_unjoins_paces_by_edge[joins_pace.edge].add(joins_pace)
                 else:
                     assert joins_pace.joins_pace.joined_pace is joins_pace
-                    if relation.is_remote:
-                        if relation.from_host != relation.to_host:
-                            # remote_relations
-                            self.remote_relations.add(relation)
-                        else:
-                            # remote_l_relations
-                            self.remote_l_relations.add(relation)
-                    else:
-                        assert relation.from_host == relation.to_host
-                        # local_relations
-                        self.local_relations.add(relation)
+                    self.join_ints.add(relation)
                     _process(joins_pace.joins_pace.threadins)
 
         _process(self.start_threadins)
 
         self.threadinss.sort(key=lambda ti: ti.start_pace.seconds)
+
+        def _process_int(from_pace, to_pace):
+            pass
 
         # error: incomplete threads
         if self.e_incomplete_threadinss:
@@ -658,6 +856,15 @@ class RequestInstance(object):
         # error: no end thread
         if not self.end_threadins:
             self.errors["Contains no end thread"] = ""
+        else:
+            int_ = self.end_interval
+            while int_:
+                int_.is_main = True
+                try:
+                    int_ = int_.prv_main
+                except AssertionError:
+                    self.errors["Main route parse error"] = int_
+                    break
 
         # error: stray thread instances
         self.e_stray_threadinss = tis - seen_tis
@@ -670,5 +877,59 @@ class RequestInstance(object):
             self.warns["Has unjoins paces"] = "%d joins edges" % len(self.e_unjoins_paces_by_edge)
 
     @property
+    def start_interval(self):
+        return self.start_threadins.intervals[0]
+
+    @property
+    def end_interval(self):
+        return self.end_threadins.intervals[-1]
+
+    @property
     def request_state(self):
         return self.end_threadins.request_state
+
+    @property
+    def len_threadinss(self):
+        return len(self.threadinss)
+
+    @property
+    def len_hosts(self):
+        return len(self.request_vars["host"])
+
+    @property
+    def start_seconds(self):
+        return self.start_threadins.start_seconds
+
+    @property
+    def end_seconds(self):
+        return self.end_threadins.end_seconds
+
+    @property
+    def last_seconds(self):
+        return self.last_threadins.end_seconds
+
+    @property
+    def lapse(self):
+        return self.end_seconds - self.start_seconds
+
+    def __str__(self):
+        return "Request %s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
+               "%d hosts, %d threads" % (self.request,
+                                          self.lapse,
+                                          self.start_seconds,
+                                          self.end_seconds,
+                                          self.request_state,
+                                          self.len_paces,
+                                          self.len_hosts,
+                                          self.len_threadinss)
+
+    def __repr__(self):
+        return "<Rins#%s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
+               "%d hosts, %d threads>" % (self.request,
+                                          self.lapse,
+                                          self.start_seconds,
+                                          self.end_seconds,
+                                          self.request_state,
+                                          self.len_paces,
+                                          self.len_hosts,
+                                          self.len_threadinss)

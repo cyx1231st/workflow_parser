@@ -66,11 +66,12 @@ class Node(object):
         assert isinstance(master_graph, MasterGraph)
 
         self.id_ = id_
-        self.name = "n-%d" % self.id_
+        self.name = "n%d" % self.id_
         self.component = component
         self.edges = OrderedSet()
 
         self.request_state = None
+        self.is_lock = False
         self.marks = set()
 
         self.thread_graph = None
@@ -139,7 +140,7 @@ class Join(object):
         global join_id
         join_id += 1
 
-        self.name = "j-%d" % join_id
+        self.name = "j%d" % join_id
         self.from_edge = from_edge
         self.to_edge = to_edge
         self.schemas = schemas
@@ -464,7 +465,7 @@ class MasterGraph(object):
 
     def generate_edge_name(self):
         self._edge_index += 1
-        return "e-%d" % self._edge_index
+        return "e%d" % self._edge_index
 
     def add_join_obj(self, join_obj):
         assert isinstance(join_obj, Join)
@@ -519,6 +520,14 @@ class MasterGraph(object):
         else:
             self.marks.add(state_str)
             node.marks.add(state_str)
+
+    # TODO: improve schema join based on lock
+    def set_lock(self, node_id):
+        assert isinstance(node_id, int)
+
+        node = self.nodes_by_id.get(node_id)
+        assert not node.is_lock
+        node.is_lock = True
 
     def check(self):
         for thread_graph in self.thread_graphs:

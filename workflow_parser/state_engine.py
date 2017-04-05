@@ -6,7 +6,7 @@ from workflow_parser.log_engine import TargetsCollector
 from workflow_parser.state_graph import MasterGraph
 from workflow_parser.state_graph import seen_edges
 from workflow_parser.state_machine import empty_join
-from workflow_parser.state_machine import JoinRelation
+from workflow_parser.state_machine import JoinInterval
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInstance
@@ -29,9 +29,8 @@ class PacesCollector(object):
         self.unjoinedpaces_by_edge = defaultdict(list)
 
         self.r_unjoinspaces_by_edge = defaultdict(set)
-        self.remote_relations = set()
-        self.remote_l_relations = set()
-        self.local_relations = set()
+        self.join_intervals_by_type = defaultdict(set)
+        self.join_intervals = set()
 
     def collect_join(self, threadins):
         assert isinstance(threadins, ThreadInstance)
@@ -46,18 +45,18 @@ class PacesCollector(object):
     def collect_unjoin(self):
         for pace in self.joins_paces:
             self.joins_edges.add(pace.edge)
-            if pace.joins_relation is empty_join:
+            if pace.joins_int is empty_join:
                 self.unjoinspaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joins_relation, JoinRelation):
+            elif isinstance(pace.joins_int, JoinInterval):
                 self.joinspaces_by_edge[pace.edge].append(pace)
             else:
                 assert False
 
         for pace in self.joined_paces:
             self.joined_edges.add(pace.edge)
-            if pace.joined_relation is empty_join:
+            if pace.joined_int is empty_join:
                 self.unjoinedpaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joined_relation, JoinRelation):
+            elif isinstance(pace.joined_int, JoinInterval):
                 self.joinedpaces_by_edge[pace.edge].append(pace)
             else:
                 assert False
@@ -70,9 +69,9 @@ class PacesCollector(object):
                 self.r_unjoinspaces_by_edge[edge].update(paces)
 
         if not requestins.errors:
-            self.remote_relations.update(requestins.remote_relations)
-            self.remote_l_relations.update(requestins.remote_l_relations)
-            self.local_relations.update(requestins.local_relations)
+            self.join_intervals.update(requestins.join_ints)
+            for j_ins in requestins.join_ints:
+                self.join_intervals_by_type[j_ins.join_type].add(j_ins)
 
 
 class ThreadInssCollector(object):
@@ -267,7 +266,7 @@ def state_parse(tgs_collector, master_graph):
 
         to_schemas = defaultdict(set)
         for pace in target_paces:
-            if pace.joined_relation is not None:
+            if pace.joined_int is not None:
                 target_paces.pop(pace)
                 continue
 
@@ -305,11 +304,11 @@ def state_parse(tgs_collector, master_graph):
             # for k, v in to_schemas.iteritems():
             #     print("  %s: %s" % (k, v))
             # import pdb; pdb.set_trace()
-            joins_pace.joins_relation = empty_join
+            joins_pace.joins_int = empty_join
 
     for joined_pace in pcs_collector.joined_paces:
-        if joined_pace.joined_relation is None:
-            joined_pace.joined_relation = empty_join
+        if joined_pace.joined_int is None:
+            joined_pace.joined_int = empty_join
 
     pcs_collector.collect_unjoin()
     print("(ParserEngine) %d join attempts" % join_attempt_cnt)
@@ -416,12 +415,8 @@ def state_parse(tgs_collector, master_graph):
         print("  WARN! unjoins paces in requests")
         for edge, paces in pcs_collector.r_unjoinspaces_by_edge.iteritems():
             print("    %s: %d paces" % (edge.name, len(paces)))
-    print("  %d remote relations" %
-            len(pcs_collector.remote_relations))
-    print("  %d remote(l) relations" %
-            len(pcs_collector.remote_l_relations))
-    print("  %d local relations" %
-            len(pcs_collector.local_relations))
+    for j_type, j_inss in pcs_collector.join_intervals_by_type.iteritems():
+        print("  %d %s relations" % (len(j_inss), j_type))
 
     print("(ParserEngine) vars summary: %d" % len(rqs_collector.requests_vars))
     for k, vs in rqs_collector.requests_vars.iteritems():

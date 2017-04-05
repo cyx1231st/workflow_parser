@@ -4,6 +4,7 @@ class Component(object):
 
         self.name = component
         self.service = service
+        self.color = None
 
     def __str__(self):
         return self.name

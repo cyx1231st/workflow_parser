@@ -16,8 +16,10 @@ from __future__ import print_function
 
 import argparse
 
+from workflow_parser.draw_engine import DrawEngine
 from workflow_parser.log_engine import TargetsEngine
 from workflow_parser.state_engine import state_parse
+from workflow_parser.statistics_engine import do_statistics
 from workflow_parser.relation_engine import relation_parse
 
 
@@ -54,11 +56,11 @@ def main1(driver):
     #     print("%s" % log_collector.logfiles_by_component[comp][0])
 
     # build states
-    pcs_collector, tis_collector, rqs_collector = state_parse(tgs_engine, master)
+    pcs, tis, rqs = state_parse(tgs_engine, master)
 
-    relation_parse(pcs_collector, tgs_engine)
+    relation_parse(pcs, tgs_engine)
 
-
+    do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
 
     # instances = engine.parse()
 

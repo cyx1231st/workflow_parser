@@ -25,6 +25,11 @@ cond = sr.nova.conductor
 sche = sr.nova.scheduler
 comp = sr.nova.compute
 
+api.color = "#e86b5b"
+cond.color = "#9c51eb"
+sche.color = "#54c0e8"
+comp.color = "#4fd14d"
+
 # name -> id
 relations = {}
 
@@ -67,6 +72,8 @@ class NovaScheduler(DriverBase):
         e  = build(31, 32, comp, "finished: rescheduled")
         e  = build(15, 23, comp, "fail:")
         e  = build(23, 26, comp, "finished:")
+
+        graph.set_lock(5)
 
         f1.join_edge(j1)
         f6.join_edge(j2)

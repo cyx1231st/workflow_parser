@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 from workflow_parser.log_engine import TargetsCollector
 from workflow_parser.state_engine import PacesCollector
-from workflow_parser.state_machine import JoinRelation
+from workflow_parser.state_machine import JoinInterval
 
 
 class HostConstraint(object):
@@ -256,7 +256,7 @@ class CausalEngine(object):
             return relationcon
 
         for relation in relations:
-            assert isinstance(relation, JoinRelation)
+            assert isinstance(relation, JoinInterval)
             assert relation.is_remote is True
             assert relation.from_host != relation.to_host
 
@@ -323,7 +323,7 @@ def relation_parse(pcs_collector, tgs_collector):
     assert isinstance(tgs_collector, TargetsCollector)
 
     print("Preparing constraints...")
-    relations = pcs_collector.remote_relations
+    relations = pcs_collector.join_intervals_by_type["remote"]
     causal_engine = CausalEngine(relations)
     print("total %d host constraints" % len(causal_engine.hosts))
     print("total %d relation constraints" % len(causal_engine.relationcons))
