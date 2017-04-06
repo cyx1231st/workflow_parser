@@ -239,6 +239,17 @@ class IntervalBase(object):
     def is_violated(self):
         return self.from_seconds > self.to_seconds
 
+    @property
+    def path_type(self):
+        if self.is_main:
+            return "main"
+        else:
+            return "branch"
+
+    @property
+    def int_type(self):
+        return "base"
+
 
 class ThreadInterval(IntervalBase):
     def __init__(self, from_pace, to_pace, threadins):
@@ -265,6 +276,10 @@ class ThreadInterval(IntervalBase):
     @property
     def is_lock(self):
         return self.node.is_lock
+
+    @property
+    def requestins(self):
+        return self.threadins.requestins
 
     @property
     def color(self):
@@ -323,6 +338,18 @@ class ThreadInterval(IntervalBase):
                 assert self.is_request_end
                 return None
 
+    @property
+    def path_type(self):
+        if self.is_lock:
+            assert not self.is_main
+            return "lock"
+        else:
+            return IntervalBase.path_type.fget(self)
+
+    @property
+    def int_type(self):
+        return "thread"
+
 
 class JoinInterval(IntervalBase):
     def __init__(self, join_obj, from_pace, to_pace):
@@ -347,11 +374,18 @@ class JoinInterval(IntervalBase):
     def color(self):
         j_type = self.join_type
         if j_type == "remote":
-            return "#f57405"
+            return "#fa8200"
         elif j_type == "local_remote":
-            return "#ccb704"
+            return "#fab300"
         else:
-            return self.from_component.color
+            return "#fade00"
+
+    @property
+    def requestins(self):
+        from_ = self.from_pace.threadins.requestins
+        to_ = self.to_pace.threadins.requestins
+        assert from_ is to_
+        return from_
 
     @property
     def from_threadins(self):
@@ -401,6 +435,10 @@ class JoinInterval(IntervalBase):
             return "local_remote"
         else:
             return "local"
+
+    @property
+    def int_type(self):
+        return "join"
 
     @property
     def prv_main(self):
@@ -729,6 +767,7 @@ class RequestInstance(object):
         self.paces_by_mark = defaultdict(list)
         self.len_paces = 0
 
+        # interval
         self.join_ints = set()
         self.td_ints = set()
 
@@ -743,9 +782,6 @@ class RequestInstance(object):
         self.e_stray_threadinss = set()
         self.e_unjoins_paces_by_edge = defaultdict(set)
 
-        # interval
-        self.intervals = set()
-
         # init
         shared_tis = set()
         tis = set()
@@ -757,7 +793,7 @@ class RequestInstance(object):
                 threadins.requests.add(request)
             else:
                 tis.add(threadins)
-                threadins.request_obj = self
+                threadins.requestins = self
                 threadins.request = request
                 if threadins.is_request_start:
                     if self.start_threadins is not None:

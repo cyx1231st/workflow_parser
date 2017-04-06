@@ -19,7 +19,8 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     assert isinstance(d_engine, DrawEngine)
 
     print("(Statistics) preparing relations...")
-    ## relations
+
+    ## join intervals
     relations = pcs.join_intervals
     t_dict = {relation.from_target:(str(relation.from_component), relation.from_host)
               for relation in relations}
@@ -28,50 +29,58 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     t_index = [k for k in t_dict.iterkeys()]
     t_values = ((t_dict[k][0], t_dict[k][1]) for k in t_index)
 
-    t_df = pd.DataFrame(t_values,
-                        index=t_index,
-                        columns=["component", "host"])
-    r_df = pd.DataFrame(((relation.from_target,
-                          relation.to_target,
-                          relation.join_type,
-                          relation.to_seconds-relation.from_seconds,
-                          "%s(%s)%s" % (relation.from_node.name,
-                                        relation.join_obj.name,
-                                        relation.to_node.name))
-                         for relation in relations),
-                        columns=["from_target", "to_target",
-                                 "join_type", "lapse",
-                                 "join_nodes"])
-    r1_df = r_df.join(t_df, on="from_target")\
-                .join(t_df, on="to_target", rsuffix="1")
-    # 1
-    h_df = r1_df.groupby(["host", "host1"])\
+    # targets
+    targets_df = pd.DataFrame(t_values,
+                              index=t_index,
+                              columns=["component", "host"])
+
+    # target relations
+    join_intervals_df = pd.DataFrame(((relation.from_target,
+                                       relation.to_target,
+                                       relation.join_type,
+                                       relation.to_seconds-relation.from_seconds,
+                                       relation.entity.name,
+                                       relation.color)
+                                      for relation in relations),
+                                     columns=["from_target", "to_target",
+                                              "join_type", "lapse",
+                                              "entity", "color"])
+
+    # full relations
+    relations_df = join_intervals_df.join(targets_df, on="from_target")\
+            .join(targets_df, on="to_target", rsuffix="1")
+
+    # host relations
+    host_relations_df = relations_df.groupby(["host", "host1"])\
                 .size()\
                 .unstack()\
                 .fillna(0)\
                 .astype("int")
-    h_df.index.name = "from_host"
-    h_df.columns.name = "to_host"
-    # 2
-    c_df = r1_df.groupby(["component", "component1"])\
+    host_relations_df.index.name = "from_host"
+    host_relations_df.columns.name = "to_host"
+
+    # component relations
+    component_relations_df = relations_df.groupby(["component", "component1"])\
                 .size()\
                 .unstack()\
                 .fillna(0)\
                 .astype("int")
-    c_df.index.name = "from_component"
-    c_df.columns.name = "to_component"
-    # 3
-    ca_df = r1_df.groupby(["from_target", "to_target"])\
+    component_relations_df.index.name = "from_component"
+    component_relations_df.columns.name = "to_component"
+
+    # component average relations
+    ca_relations_df = relations_df.groupby(["from_target", "to_target"])\
                  .size()\
                  .reset_index()\
-                 .join(t_df, on="from_target")\
-                 .join(t_df, on="to_target", rsuffix="1")\
+                 .join(targets_df, on="from_target")\
+                 .join(targets_df, on="to_target", rsuffix="1")\
                  .groupby(["component", "component1"])\
                  .mean()\
                  .unstack()
-    ca_df.index.name = "from_component"
-    ca_df.columns = ca_df.columns.droplevel()
-    ca_df.columns.name = "to_component"
+    ca_relations_df.index.name = "from_component"
+    ca_relations_df.columns = ca_relations_df.columns.droplevel()
+    ca_relations_df.columns.name = "to_component"
+
     ## requests
     requestinss = rqs.requestinss
     rqs_index = [ri for ri in requestinss]
@@ -89,40 +98,51 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     print("longest lapse request instance: %s" % longest_lapse_requestins)
     longest_paces_requestins = rqs_df.loc[rqs_df["paces"].idxmax()]["requestins"]
     print("longest paces_request instance: %s" % longest_paces_requestins)
+
+    ## general intervals
+    intervals_df = pd.DataFrame(((int_.requestins.request, int_.lapse,
+                                  int_.from_seconds, int_.to_seconds,
+                                  int_.entity.name,
+                                  int_.from_node.name, int_.to_node.name,
+                                  int_.path_type, int_.int_type,
+                                  int_.color, int_.color)
+                                 for int_ in pcs.intervals),
+                                columns=["request",
+                                         "lapse", "from_sec", "to_sec",
+                                         "entity", "from_node", "to_node",
+                                         "pathtype", "inttype",
+                                         "color", "printcolor"])
+    lock_intervals_df = intervals_df[intervals_df["pathtype"]=="lock"]
+    all_intervals_df = intervals_df[intervals_df["pathtype"]!="lock"]
+    main_intervals_df = intervals_df[intervals_df["pathtype"]=="main"]
     print("ok")
 
-    # d_engine.draw_relation_heatmap(h_df, "host_relations")
-    # d_engine.draw_relation_heatmap(c_df, "component_relations")
-    # d_engine.draw_relation_heatmap(ca_df, "component_mean_relations", "f")
-    # d_engine.draw_boxplot(r_df, "lapse_nodes_jtype",
-    #                       x="join_nodes", y="lapse",
-    #                       hue="join_type")
-    # d_engine.draw_violinplot(r_df, "lapse_nodes_jtype_scaled",
-    #                          x="join_nodes", y="lapse",
-    #                          hue="join_type")
-    # d_engine.draw_distplot(rqs_df["lapse"], "requestlapse")
-    # d_engine.draw_countplot(rqs_df["paces"], "requestpaces")
-    # d_engine.draw_countplot(rqs_df["hosts"], "requesthosts")
-    # d_engine.draw_countplot(rqs_df["threadinss"], "requesttis")
-    d_engine.draw_requestins(longest_lapse_requestins, "longest lapse requestins")
-    d_engine.draw_requestins(longest_paces_requestins, "longest paces requestins")
 
-    # hosts = set()
-    # components = set()
-    # for relation in relations:
-    #     hosts.add(relation.from_host)
-    #     hosts.add(relation.to_host)
-    #     components.add(str(relation.from_component))
-    #     components.add(str(relation.to_component))
-    # hosts = sorted(list(hosts))
-    # components = sorted(list(components))
-    # df = pd.DataFrame(0, index=hosts, columns=hosts)
-    # df_c = pd.DataFrame(0, index=components, columns=components)
-    # for relation in relations:
-    #     df.ix[relation.from_host, relation.to_host] += 1
-    #     df_c.ix[str(relation.from_component),
-    #             str(relation.to_component)] += 1
-    # print("ok")
-    # d_engine.draw_relation_heatmap(df, "host_relations")
-    # d_engine.draw_relation_heatmap(df_c, "component_relations")
+    d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
+    d_engine.draw_relation_heatmap(component_relations_df, "component_relations")
+    d_engine.draw_relation_heatmap(ca_relations_df, "component_mean_relations", "f")
+    d_engine.draw_distplot(rqs_df["lapse"], "requestlapse")
+    d_engine.draw_countplot(rqs_df["paces"], "requestpaces")
+    d_engine.draw_countplot(rqs_df["hosts"], "requesthosts")
+    d_engine.draw_countplot(rqs_df["threadinss"], "requesttis")
+    d_engine.draw_requestins(longest_lapse_requestins, "longest_lapse_requestins")
+    d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
+    d_engine.draw_boxplot(join_intervals_df, "join_intervals",
+                          x="entity", y="lapse",
+                          hue="join_type")
+    d_engine.draw_violinplot(join_intervals_df, "lapse_nodes_jtype_scaled",
+                             x="entity", y="lapse",
+                             hue="join_type")
+    d_engine.draw_boxplot(lock_intervals_df, "lock_intervals",
+                          x="entity", y="lapse")
+    d_engine.draw_violinplot(lock_intervals_df, "lock_intervals",
+                          x="entity", y="lapse")
+    d_engine.draw_boxplot(all_intervals_df, "all_intervals",
+                          x="entity", y="lapse")
+    d_engine.draw_violinplot(all_intervals_df, "all_intervals",
+                             x="entity", y="lapse")
+    d_engine.draw_boxplot(main_intervals_df, "main_intervals",
+                          x="entity", y="lapse")
+    d_engine.draw_violinplot(main_intervals_df, "main_intervals",
+                             x="entity", y="lapse")
 

@@ -10,6 +10,16 @@ import seaborn as sns
 from workflow_parser.state_machine import RequestInstance
 
 
+def patch_violinplot():
+    """Patch seaborn's violinplot in current axis to workaround
+    matplotlib's bug ##5423."""
+    from matplotlib.collections import PolyCollection
+    ax = plt.gca()
+    for art in ax.get_children():
+        if isinstance(art, PolyCollection):
+            art.set_linewidth(0)
+
+
 class DrawEngine(object):
     def __init__(self, out_path):
         assert isinstance(out_path, str)
@@ -77,8 +87,13 @@ class DrawEngine(object):
 
     def draw_violinplot(self, to_draw, name, x=None, y=None, hue=None, scale=True):
         print("(DrawEngine) drawing %s..." % name)
+
+        x_groups = to_draw.groupby(x)[y, "color"]
+        ordered_x = x_groups.median().sort_values(y, ascending=False)
+
         fig = plt.figure()
         fig.clear()
+        fig.suptitle("%s violinplot" % name, fontsize=14)
 
         if scale:
             s = "count"
@@ -87,12 +102,12 @@ class DrawEngine(object):
             s = "width"
             sh = True
 
-        kwargs = {"split":"True",
-                  "inner":"box",
-                  "scale":s,
-                  "scale_hue":sh,
-                  "cut":0,
-                  "bw":.1}
+        kwargs = dict(split="True",
+                      inner="box",
+                      scale=s,
+                      scale_hue=sh,
+                      cut=0,
+                      bw=.1)
 
         if isinstance(to_draw, pd.Series) or isinstance(to_draw, list):
             pass
@@ -101,18 +116,29 @@ class DrawEngine(object):
         else:
             assert False
 
-        sns.violinplot(data=to_draw, **kwargs)
+        if hue is not None:
+            palette = to_draw.groupby(hue)["color"].nth(0)
+        else:
+            palette = x_groups.nth(0)["color"].reindex_axis(ordered_x.index)
+
+        ax = sns.violinplot(data=to_draw, order=ordered_x.index, palette=palette, **kwargs)
+        patch_violinplot()
 
         fig.savefig(self.out_path + name + "_violinplot.png")
         print("ok")
 
-    def draw_boxplot(self, to_draw, name, x, y, hue=None,
-                                   if_swarm=False):
+    def draw_boxplot(self, to_draw, name, x, y, hue=None, if_swarm=False):
         print("(DrawEngine) drawing %s..." % name)
+
+        x_groups = to_draw.groupby(x)[y, "color"]
+        ordered_x = x_groups.median().sort_values(y, ascending=False)
+
         fig = plt.figure()
         fig.clear()
+        fig.suptitle("%s boxplot" % name, fontsize=14)
 
-        kwargs = {}
+        kwargs = dict(data=to_draw,
+                      order=ordered_x.index)
 
         if isinstance(to_draw, pd.Series) or isinstance(to_draw, list):
             pass
@@ -121,29 +147,43 @@ class DrawEngine(object):
         else:
             assert False
 
-        sns.boxplot(data=to_draw, **kwargs)
+        if hue is not None:
+            palette = to_draw.groupby(hue)["color"].nth(0)
+        else:
+            palette = x_groups.nth(0)["color"].reindex_axis(ordered_x.index)
+
+        ax = sns.boxplot(palette=palette, **kwargs)
         if if_swarm:
-            sns.swarmplot(data=to_draw, **kwargs)
+            sns.swarmplot(**kwargs)
+
+        # if hue is None:
+        #     colors = 
+        #     for i, box in enumerate(ax.artists):
+        #         box.set_facecolor(colors[i])
 
         fig.savefig(self.out_path + name + "_boxplot.png")
         print("ok")
 
     def draw_distplot(self, to_draw, name):
         print("(DrawEngine) drawing %s..." % name)
+
         fig = plt.figure()
         fig.clear()
+        fig.suptitle("%s distplot" % name, fontsize=14)
 
-        sns.distplot(to_draw, kde=False)
+        sns.distplot(to_draw, kde=False, color="#86d7f5")
 
         fig.savefig(self.out_path + name + "_distplot.png")
         print("ok")
 
     def draw_countplot(self, to_draw, name):
         print("(DrawEngine) drawing %s..." % name)
+
         fig = plt.figure()
         fig.clear()
+        fig.suptitle("%s countplot" % name, fontsize=14)
 
-        ax = sns.countplot(to_draw)
+        ax = sns.countplot(to_draw, color="#86d7f5")
 
         total = len(to_draw)
         for p in ax.patches:
