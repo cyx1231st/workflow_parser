@@ -62,11 +62,6 @@ def main1(driver):
 
     do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
 
-    # instances = engine.parse()
-
-    # for ins in instances.itervalues():
-    #     print(ins)
-
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)
     # if args.brief:

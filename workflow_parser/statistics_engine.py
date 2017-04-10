@@ -9,6 +9,8 @@ from workflow_parser.log_engine import TargetsCollector
 from workflow_parser.state_engine import PacesCollector
 from workflow_parser.state_engine import ThreadInssCollector
 from workflow_parser.state_engine import RequestsCollector
+from workflow_parser.state_machine import JoinInterval
+from workflow_parser.state_machine import ThreadInterval
 
 
 def do_statistics(tgs, pcs, tis, rqs, d_engine):
@@ -35,16 +37,30 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
                               columns=["component", "host"])
 
     # target relations
-    join_intervals_df = pd.DataFrame(((relation.from_target,
-                                       relation.to_target,
-                                       relation.join_type,
-                                       relation.to_seconds-relation.from_seconds,
+    join_intervals_df = pd.DataFrame(((relation.requestins.request,
+                                       relation.lapse,
+                                       relation.from_seconds,
+                                       relation.to_seconds,
                                        relation.entity.name,
-                                       relation.color)
+                                       relation.from_node.name,
+                                       relation.to_node.name,
+                                       relation.path_type,
+                                       relation.int_type,
+                                       relation.color,
+                                       relation.color_jt,
+                                       relation.from_target,
+                                       relation.to_target,
+                                       relation.join_type)
                                       for relation in relations),
-                                     columns=["from_target", "to_target",
-                                              "join_type", "lapse",
-                                              "entity", "color"])
+                                     columns=["request",
+                                              "lapse", "from_sec", "to_sec",
+                                              "entity", "from_node", "to_node",
+                                              "pathtype", "inttype",
+                                              "color",
+                                              # join specific
+                                              "color_jt",
+                                              "from_target", "to_target",
+                                              "join_type"])
 
     # full relations
     relations_df = join_intervals_df.join(targets_df, on="from_target")\
@@ -99,24 +115,56 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     longest_paces_requestins = rqs_df.loc[rqs_df["paces"].idxmax()]["requestins"]
     print("longest paces_request instance: %s" % longest_paces_requestins)
 
-    ## general intervals
-    intervals_df = pd.DataFrame(((int_.requestins.request, int_.lapse,
-                                  int_.from_seconds, int_.to_seconds,
-                                  int_.entity.name,
-                                  int_.from_node.name, int_.to_node.name,
-                                  int_.path_type, int_.int_type,
-                                  int_.color, int_.color)
-                                 for int_ in pcs.intervals),
+    ## thread intervals
+    threadints_df = pd.DataFrame(((int_.requestins.request,
+                                   int_.lapse,
+                                   int_.from_seconds, int_.to_seconds,
+                                   int_.entity.name,
+                                   int_.from_node.name, int_.to_node.name,
+                                   int_.path_type, int_.int_type,
+                                   int_.color,
+                                   int_.host, str(int_.component), int_.target)
+                                 for int_ in pcs.thread_intervals),
                                 columns=["request",
                                          "lapse", "from_sec", "to_sec",
                                          "entity", "from_node", "to_node",
                                          "pathtype", "inttype",
-                                         "color", "printcolor"])
+                                         "color",
+                                         # threadins specific
+                                         "host", "component", "target"
+                                         ])
+
+    ## general intervals
+    intervals_df = pd.concat((join_intervals_df, threadints_df), join="inner")
     lock_intervals_df = intervals_df[intervals_df["pathtype"]=="lock"]
     all_intervals_df = intervals_df[intervals_df["pathtype"]!="lock"]
     main_intervals_df = intervals_df[intervals_df["pathtype"]=="main"]
-    print("ok")
 
+    def _get_type(int_):
+        if isinstance(int_, ThreadInterval):
+            return str(int_.component)
+        else:
+            assert isinstance(int_, JoinInterval)
+            if int_.is_remote:
+                return "remote_join"
+            else:
+                return "local_join"
+    ## extended intervals
+    extendedints_df = pd.DataFrame(((int_.requestins.request,
+                                     _get_type(int_),
+                                     int_.lapse,
+                                     int_.from_seconds,
+                                     int_.to_seconds,
+                                     int_.from_time,
+                                     int_.to_time,
+                                     int_.color)
+                                    for int_ in pcs.extended_intervals),
+                                   columns=["request", "type",
+                                            "lapse", "from_sec", "to_sec",
+                                            "from_time", "to_time",
+                                            "color"
+                                           ])
+    print("ok")
 
     d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
     d_engine.draw_relation_heatmap(component_relations_df, "component_relations")
@@ -129,10 +177,19 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
     d_engine.draw_boxplot(join_intervals_df, "join_intervals",
                           x="entity", y="lapse",
-                          hue="join_type")
-    d_engine.draw_violinplot(join_intervals_df, "lapse_nodes_jtype_scaled",
+                          hue="join_type", color_column="color_jt")
+    d_engine.draw_violinplot(join_intervals_df, "join_intervals",
                              x="entity", y="lapse",
-                             hue="join_type")
+                             hue="join_type", color_column="color_jt")
+    ordered_x = threadints_df.groupby("entity")["lapse"]\
+                .median()
+    ordered_x.sort(ascending=False)
+    ordered_x = ordered_x.keys()
+    lim = min(len(ordered_x), 5)
+    for i in range(lim):
+        d_engine.draw_boxplot(threadints_df[threadints_df["entity"]==ordered_x[i]],
+                              "intervals_%s_by_host" % ordered_x[i],
+                              x="host", y="lapse")
     d_engine.draw_boxplot(lock_intervals_df, "lock_intervals",
                           x="entity", y="lapse")
     d_engine.draw_violinplot(lock_intervals_df, "lock_intervals",
@@ -145,4 +202,5 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
                           x="entity", y="lapse")
     d_engine.draw_violinplot(main_intervals_df, "main_intervals",
                              x="entity", y="lapse")
+    d_engine.draw_stacked_intervals(extendedints_df, main_intervals_df, "stacked_main_paths")
 

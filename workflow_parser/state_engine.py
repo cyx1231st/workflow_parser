@@ -31,7 +31,8 @@ class PacesCollector(object):
         self.r_unjoinspaces_by_edge = defaultdict(set)
         self.join_intervals_by_type = defaultdict(set)
         self.join_intervals = set()
-        self.intervals = set()
+        self.thread_intervals = set()
+        self.extended_intervals = set()
 
     def collect_join(self, threadins):
         assert isinstance(threadins, ThreadInstance)
@@ -73,8 +74,8 @@ class PacesCollector(object):
             self.join_intervals.update(requestins.join_ints)
             for j_ins in requestins.join_ints:
                 self.join_intervals_by_type[j_ins.join_type].add(j_ins)
-            self.intervals.update(requestins.td_ints)
-            self.intervals.update(requestins.join_ints)
+            self.thread_intervals.update(requestins.td_ints)
+            self.extended_intervals.update(requestins.intervals_extended)
 
 
 class ThreadInssCollector(object):

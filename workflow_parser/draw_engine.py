@@ -2,6 +2,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 from collections import OrderedDict
+from matplotlib import patches as mpatches
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
@@ -85,15 +86,16 @@ class DrawEngine(object):
         fig.savefig(self.out_path + name + "_heatmap.png")
         print("ok")
 
-    def draw_violinplot(self, to_draw, name, x=None, y=None, hue=None, scale=True):
+    def draw_violinplot(self, to_draw, name,
+                        x=None, y=None, hue=None,
+                        nth=None, color_column="color",
+                        scale=True):
         print("(DrawEngine) drawing %s..." % name)
 
-        x_groups = to_draw.groupby(x)[y, "color"]
+        x_groups = to_draw.groupby(x)[y, color_column]
         ordered_x = x_groups.median().sort_values(y, ascending=False)
-
-        fig = plt.figure()
-        fig.clear()
-        fig.suptitle("%s violinplot" % name, fontsize=14)
+        if nth is not None:
+            ordered_x = ordered_x[:nth]
 
         if scale:
             s = "count"
@@ -116,26 +118,35 @@ class DrawEngine(object):
         else:
             assert False
 
+        fig_wid = len(ordered_x)*0.3
         if hue is not None:
-            palette = to_draw.groupby(hue)["color"].nth(0)
+            palette = to_draw.groupby(hue)[color_column].nth(0)
+            fig_wid *= len(palette)
         else:
-            palette = x_groups.nth(0)["color"].reindex_axis(ordered_x.index)
+            palette = x_groups.nth(0)[color_column].reindex_axis(ordered_x.index)
+
+        fig = plt.figure(figsize=(fig_wid+3, 5))
+        fig.clear()
+        fig.suptitle("%s violinplot" % name, fontsize=14)
 
         ax = sns.violinplot(data=to_draw, order=ordered_x.index, palette=palette, **kwargs)
+        ax.set_xticklabels(ordered_x.index,rotation=90)
         patch_violinplot()
 
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_violinplot.png")
         print("ok")
 
-    def draw_boxplot(self, to_draw, name, x, y, hue=None, if_swarm=False):
+    def draw_boxplot(self, to_draw, name,
+                     x, y, hue=None,
+                     nth=None, color_column="color",
+                     if_swarm=False):
         print("(DrawEngine) drawing %s..." % name)
 
-        x_groups = to_draw.groupby(x)[y, "color"]
+        x_groups = to_draw.groupby(x)[y, color_column]
         ordered_x = x_groups.median().sort_values(y, ascending=False)
-
-        fig = plt.figure()
-        fig.clear()
-        fig.suptitle("%s boxplot" % name, fontsize=14)
+        if nth is not None:
+            ordered_x = ordered_x[:nth]
 
         kwargs = dict(data=to_draw,
                       order=ordered_x.index)
@@ -147,20 +158,23 @@ class DrawEngine(object):
         else:
             assert False
 
+        fig_wid = len(ordered_x)*0.15
         if hue is not None:
-            palette = to_draw.groupby(hue)["color"].nth(0)
+            palette = to_draw.groupby(hue)[color_column].nth(0)
+            fig_wid *= len(palette)
         else:
-            palette = x_groups.nth(0)["color"].reindex_axis(ordered_x.index)
+            palette = x_groups.nth(0)[color_column].reindex_axis(ordered_x.index)
+
+        fig = plt.figure(figsize=(fig_wid+3, 5))
+        fig.clear()
+        fig.suptitle("%s boxplot" % name, fontsize=14)
 
         ax = sns.boxplot(palette=palette, **kwargs)
+        ax.set_xticklabels(ordered_x.index,rotation=90)
         if if_swarm:
             sns.swarmplot(**kwargs)
 
-        # if hue is None:
-        #     colors = 
-        #     for i, box in enumerate(ax.artists):
-        #         box.set_facecolor(colors[i])
-
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_boxplot.png")
         print("ok")
 
@@ -398,7 +412,7 @@ class DrawEngine(object):
             from_y = int_.from_threadins.plot_y
             to_x = int_.to_seconds - start
             to_y = int_.to_threadins.plot_y
-            ti_color = int_.color
+            ti_color = int_.color_jt
             if to_y > from_y:
                 connstyle="arc3,rad=-0.05"
             else:
@@ -428,4 +442,156 @@ class DrawEngine(object):
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_requestplot.png")
+        print("ok")
+
+
+    def _convert_intervals_to_stack(self, df):
+        stack = [(round(sec, 6), 1) for sec in df["from_sec"]]
+        stack.extend((round(sec, 6), -1) for sec in df["to_sec"])
+        stack.sort(key=lambda tup: tup[0])
+
+        x_list = []
+        y_list = []
+        x, y = None, 0
+        prv_y = None
+        for data in stack:
+            if x is None:
+                # init
+                x = data[0]
+                prv_y = y
+            elif x != data[0]:
+                # x changes
+                x_list.append(x)
+                y_list.append(prv_y)
+                x_list.append(x+0.00001)
+                y_list.append(y)
+                x = data[0]
+                prv_y = y
+            else:
+                # x not change
+                pass
+            y += data[1]
+        if x is not None:
+            x_list.append(x)
+            y_list.append(prv_y)
+            x_list.append(x+0.00001)
+            y_list.append(y)
+
+        return x_list, y_list
+
+
+    def draw_stacked_intervals(self, thread_ints_df, main_ints_df, name):
+        print("(DrawEngine) drawing %s..." % name)
+
+        start_i = thread_ints_df["from_sec"].argmin()
+        start_s = thread_ints_df.loc[start_i]["from_sec"]
+        start_t = thread_ints_df.loc[start_i]["from_time"]
+        end_i = thread_ints_df["to_sec"].argmax()
+        end_s = thread_ints_df.loc[end_i]["to_sec"]
+        end_t = thread_ints_df.loc[end_i]["to_time"]
+
+
+        ## main_stack
+        # main_x_list
+        # main_ys_list
+        thread_ints_by_type = thread_ints_df.groupby("type")
+        main_stacked_results = []
+        for type_, df in thread_ints_by_type:
+            color = df.iloc[0]["color"]
+            x_list, y_list = self._convert_intervals_to_stack(df)
+            main_stacked_results.append((type_, color, x_list, y_list))
+
+        types = (tup[0] for tup in main_stacked_results)
+        colors = (tup[1] for tup in main_stacked_results)
+
+        main_x_list = set()
+        for tup in main_stacked_results:
+            main_x_list.update(tup[2])
+        main_x_list = list(main_x_list)
+        main_x_list.sort()
+
+        main_ys_list = []
+        for tup in main_stacked_results:
+            stacked_x = tup[2]
+            stacked_y = tup[3]
+            len_stacked = len(stacked_x)
+            assert len_stacked == len(stacked_y)
+            i_stacked = 0
+            y_list = []
+            y = 0
+            for x in main_x_list:
+                if i_stacked < len(stacked_y) and x == stacked_x[i_stacked]:
+                    y = stacked_y[i_stacked]
+                    i_stacked += 1
+                y_list.append(y)
+            assert i_stacked == len(stacked_y)
+            main_ys_list.append(y_list)
+
+        y_max = 0
+        y_stacked = [0] * len(main_x_list)
+        for y_list in main_ys_list:
+            for y_i, val in enumerate(y_list):
+                y_stacked[y_i] += val
+                y_max = max(y_max, y_stacked[y_i])
+
+        main_x_list = [x-start_s for x in main_x_list]
+
+        ## individual stacks
+        ints_by_entity = main_ints_df.groupby("entity")
+        entity_stack_results = []
+        for entity_, df in ints_by_entity:
+            color = df.iloc[0]["color"]
+            x_list, y_list = self._convert_intervals_to_stack(df)
+            entity_stack_results.append((entity_, color, x_list, y_list))
+
+        ## settings ##
+        figsize = (30, 2*(len(entity_stack_results)+1))
+        y_plots = len(entity_stack_results) + 1
+        annot_off_y = 0.18
+        annot_mark_lim = 0.006
+        annot_pres_lim = 0.020
+        markersize = 10
+        node_markersize = 5
+        int_style = "-"
+        int_lock_style = ":"
+        main_linewidth = 2
+        other_linewidth = 1
+        ##############
+
+        #### sns #####
+        sns.set_style("whitegrid")
+        # marker bug
+        sns.set_context(rc={'lines.markeredgewidth': 0.5})
+        ##############
+
+        fig = plt.figure(figsize=figsize)
+        fig.clear()
+        fig.suptitle("%s" % name, fontsize=14)
+
+        a_index = 1
+        for entity, color, x_list, y_list in entity_stack_results:
+            ax = fig.add_subplot(y_plots, 1, a_index)
+            ax.set_xticklabels([])
+            ax.set_ylabel(entity)
+            x_list = [x-start_s for x in x_list]
+            ax.stackplot(x_list, y_list, colors=[color], linewidth=0)
+            ax.set_xlim(0, (end_s-start_s)*1.05)
+            ax.set_ylim(0, y_max)
+            a_index += 1
+
+        ax = fig.add_subplot(y_plots,1,a_index)
+        ax.set_xlabel("lapse (seconds)")
+        ax.set_xlim(0, (end_s-start_s)*1.05)
+        ax.set_ylim(0, y_max)
+        ax.set_ylabel("MAIN")
+
+        ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
+        ax.annotate(end_t, xy=(end_s-start_s, 0), xytext=(end_s-start_s, 0))
+        ax.plot([0, end_s-start_s], [0, 0], 'r*')
+
+        ax.stackplot(main_x_list, *main_ys_list, colors=colors, linewidth=0)
+        ax.legend((mpatches.Patch(color=color) for color in colors), types)
+
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig.savefig(self.out_path + name + "_stackedplot.png")
         print("ok")

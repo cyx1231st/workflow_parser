@@ -232,6 +232,14 @@ class IntervalBase(object):
         return self.to_pace.seconds
 
     @property
+    def from_time(self):
+        return self.from_pace.time
+
+    @property
+    def to_time(self):
+        return self.to_pace.time
+
+    @property
     def lapse(self):
         return self.to_seconds - self.from_seconds
 
@@ -372,6 +380,13 @@ class JoinInterval(IntervalBase):
 
     @property
     def color(self):
+        if self.is_remote:
+            return "#fa8200"
+        else:
+            return "#fade00"
+
+    @property
+    def color_jt(self):
         j_type = self.join_type
         if j_type == "remote":
             return "#fa8200"
@@ -475,6 +490,7 @@ class ThreadInstance(object):
         self.paces_by_mark = defaultdict(list)
 
         self.intervals = []
+        self.intervals_extended = []
 
         self.s_index = s_index
         self.f_index = None
@@ -594,6 +610,20 @@ class ThreadInstance(object):
                 prv_int = interval
             prv = pace
 
+        from_pace = None
+        for interval in self.intervals:
+            if interval.is_lock:
+                if from_pace is not None:
+                    to_pace = interval.from_pace
+                    self.intervals_extended.append(
+                            ThreadInterval(from_pace, to_pace, self))
+                    from_pace = None
+            else:
+                if from_pace is None:
+                    from_pace = interval.from_pace
+        if from_pace is not None:
+            self.intervals_extended.append(
+                    ThreadInterval(from_pace, self.intervals[-1].to_pace, self))
 
     @property
     def request_state(self):
@@ -770,6 +800,7 @@ class RequestInstance(object):
         # interval
         self.join_ints = set()
         self.td_ints = set()
+        self.intervals_extended = set()
 
         # error report
         self.errors = {}
@@ -875,9 +906,6 @@ class RequestInstance(object):
 
         self.threadinss.sort(key=lambda ti: ti.start_pace.seconds)
 
-        def _process_int(from_pace, to_pace):
-            pass
-
         # error: incomplete threads
         if self.e_incomplete_threadinss:
             err_str = "\n".join("%r" % ti for it in self.e_incomplete_threadinss)
@@ -889,6 +917,7 @@ class RequestInstance(object):
             err_str = "\n".join("%r" % ti for ti in self.e_extra_e_threadinss)
             self.errors["Has multiple end threads"] = err_str
 
+        _main_tis = set()
         # error: no end thread
         if not self.end_threadins:
             self.errors["Contains no end thread"] = ""
@@ -896,6 +925,13 @@ class RequestInstance(object):
             int_ = self.end_interval
             while int_:
                 int_.is_main = True
+                if isinstance(int_, ThreadInterval):
+                    ti = int_.threadins
+                    if ti not in _main_tis:
+                        self.intervals_extended.update(ti.intervals_extended)
+                        _main_tis.add(ti)
+                else:
+                    self.intervals_extended.add(int_)
                 try:
                     int_ = int_.prv_main
                 except AssertionError:
