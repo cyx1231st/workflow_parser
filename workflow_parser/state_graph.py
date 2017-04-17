@@ -216,9 +216,9 @@ class Edge(object):
     def __str__(self):
         join_str=""
         if self.joins_objs:
-            join_str += ", %d joins" % len(self.joins_objs)
+            join_str += ", joins(%s)" % ",".join(jo.name for jo in self.joins_objs)
         if self.joined_objs:
-            join_str += ", %d joined" % len(self.joined_objs)
+            join_str += ", joined(%s)" % ",".join(jo.name for jo in self.joined_objs)
         return "<Edge#%s -> Node#%s, `%s`, Component#%s, Thread#%s%s>" \
                % (self.name, self.node.name, self.keyword,
                   self.component, self.thread_graph.name, join_str)
@@ -321,9 +321,9 @@ class ThreadGraph(object):
                 assert edge.component == self.component
                 join_str=""
                 if edge.joins_objs:
-                    join_str += ", %d joins" % len(edge.joins_objs)
+                    join_str += ", joins(%s)" % ",".join(jo.name for jo in edge.joins_objs)
                 if edge.joined_objs:
-                    join_str += ", %d joined" % len(edge.joined_objs)
+                    join_str += ", joined(%s)" % ",".join(jo.name for jo in edge.joined_objs)
                 ret_str[0] += "\n    <Edge#%s -> Node#%s, `%s`%s>" % \
                                 (edge.name, edge.node.name,
                                  edge.keyword, join_str)
@@ -390,6 +390,7 @@ class MasterGraph(object):
 
         self.nodes_by_id = {}
         self.start_nodes = set()
+        self.end_nodes = set()
 
         self.thread_graphs = set()
 
@@ -436,6 +437,9 @@ class MasterGraph(object):
             ret_str += "\n    %s" % th_obj
         ret_str += "\n  Start nodes:"
         for node in self.start_nodes:
+            ret_str += "\n    %s" % node
+        ret_str += "\n  End nodes:"
+        for node in self.end_nodes:
             ret_str += "\n    %s" % node
         ret_str += "\n  Components:    "
         for component in self.components:
@@ -537,6 +541,7 @@ class MasterGraph(object):
             assert node.request_state is None
             self.request_states.add(state_str)
             node.request_state = state_str
+            self.end_nodes.add(node)
         else:
             self.marks.add(state_str)
             node.marks.add(state_str)

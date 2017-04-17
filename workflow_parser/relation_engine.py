@@ -332,6 +332,9 @@ def relation_parse(pcs_collector, tgs_collector):
 
     print("Preparing constraints...")
     causal_engine = CausalEngine(relations)
+    print("------------------------")
+
+    #### summary ####
     print("total %d host constraints" % len(causal_engine.hosts))
     print("total %d relation constraints" % len(causal_engine.relationcons))
     print("distance %f" % causal_engine.distance)
@@ -341,10 +344,14 @@ def relation_parse(pcs_collector, tgs_collector):
             len(causal_engine.violated_relationcons))
     for relationcon in causal_engine.violated_relationcons:
         print("  %s" % relationcon)
-    print("ok\n")
+    print()
+    #################
 
     print("Correcting...")
     if causal_engine.relax():
+        print("-------------")
+
+        #### summary ####
         print("%d relax attempts" % causal_engine.relax_counter)
         hosts = causal_engine.hosts.values()
         hosts.sort(key=lambda hostc: hostc.hostname)
@@ -355,6 +362,7 @@ def relation_parse(pcs_collector, tgs_collector):
                     target.offset = hostc.low
         for relation in relations:
             assert not relation.is_violated
+        #################
     else:
         print("No need to correct clocks")
-    print("ok\n")
+    print()

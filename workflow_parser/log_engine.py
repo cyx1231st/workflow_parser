@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from collections import defaultdict
 import os
 from os import path
@@ -27,6 +29,10 @@ class TargetsCollector(object):
         self.logfiles_by_target = {}
 
         self.logfiles_by_errortype = defaultdict(list)
+        self.logfiles_by_warntype = defaultdict(list)
+
+        # others
+        self.requests = set()
 
     def __len__(self):
         return len(self.logfiles_by_target)
@@ -62,6 +68,11 @@ class TargetsCollector(object):
                 self.logfiles_by_errortype[k].append(logfile)
             return
 
+        if logfile.warns:
+            for k in logfile.warns.keys():
+                self.logfiles_by_warntype[k].append(logfile)
+            return
+
         if logfile.target in self.logfiles_by_target:
             raise LogError("(TargetsCollector) target '%s' collition "
                            "from files: %s, %s" % (
@@ -85,7 +96,6 @@ class TargetsEngine(TargetsCollector):
 
         # other collections
         self.logfiles = []
-        self.requests = set()
 
         super(TargetsEngine, self).__init__()
 
@@ -93,7 +103,7 @@ class TargetsEngine(TargetsCollector):
         assert isinstance(log_folder, str)
 
         # current_path = path.dirname(os.path.realpath(__file__))
-        print("Load targets(logfiles)...")
+        print("Load targets...")
         current_path = os.getcwd()
         log_folder = path.join(current_path, log_folder)
         for f_name in os.listdir(log_folder):
@@ -103,9 +113,13 @@ class TargetsEngine(TargetsCollector):
                 continue
             logfile = LogFile(f_name, f_dir, self.sr, self.plugin, vs)
             self.logfiles.append(logfile)
+        print("---------------")
+
+        #### summary ####
         self.total_files = len(self.logfiles)
-        print("(TargetsEngine) detected %d targets" % self.total_files)
-        print("ok\n")
+        print("%d files" % self.total_files)
+        print()
+        #################
 
     def readfiles(self):
         print("Read targets...")
@@ -114,36 +128,46 @@ class TargetsEngine(TargetsCollector):
             # ready line vars: time, seconds, keyword
             # ready target vars: component, host, target
             self.collect(logfile)
+        print("---------------")
 
-        if self.logfiles_by_errortype:
-            print("(TargetsEngine) error summary:")
-            for e_type, target_list in self.logfiles_by_errortype.iteritems():
-                print("  %s: %d targets" % (e_type, len(target_list)))
+        #### summary ####
         self.total_files_hascontent = len(self)
-        print("(TargetsEngine) %d valid targets, discarded %d targets" %
+        print("%d targets, %d hosts" %
                 (self.total_files_hascontent,
-                 self.total_files - self.total_files_hascontent))
-
+                 len(self.targets_by_host)))
+        for comp in self.sr.sr_components:
+            targets = self.targets_by_component.get(comp, [])
+            if not targets:
+                raise LogError("ERROR! miss component %s" % comp)
+            else:
+                hosts = self.hosts_by_component[comp]
+                print("  %s: %d targets, %d hosts"
+                      % (comp, len(targets), len(hosts)))
 
         self.total_lines = sum(logfile.total_lines for logfile in self.logfiles)
         self.total_loglines = sum(len(logfile) for logfile in self.itervalues())
         self.total_lines_loglines = sum(logfile.total_lines for logfile in self.itervalues())
-        print("(TargetsEngine) built %d loglines from %d lines, total %d lines" %
-                (self.total_loglines,
-                 self.total_lines_loglines,
-                 self.total_lines))
+        print("%d loglines:" % self.total_loglines)
+        print("  %.2f%%: %d lines (valid files)"
+                % (float(self.total_loglines)/self.total_lines_loglines*100,
+                   self.total_lines_loglines))
+        print("  %.2f%%: %d lines (all files)"
+                % (float(self.total_loglines)/self.total_lines*100,
+                   self.total_lines))
+        print()
+        #################
 
-        print("(TargetEngine) components:")
-        for comp in self.sr.sr_components:
-            targets = self.targets_by_component.get(comp, [])
-            if not targets:
-                raise LogError("(TargetsEngine) targets miss component %s" % comp)
-            else:
-                hosts = self.hosts_by_component[comp]
-                print("  %s has %d targets, and %d hosts"
-                      % (comp, len(targets), len(hosts)))
-        print("(TargetsEngine) detected %d hosts" % len(self.targets_by_host))
-        print("ok\n")
+        if self.logfiles_by_warntype:
+            print("! WARN !")
+            for e_type, target_list in self.logfiles_by_warntype.iteritems():
+                print("%d files: %s" % (len(target_list), e_type))
+            print()
+
+        if self.logfiles_by_errortype:
+            print("!! ERROR !!")
+            for e_type, target_list in self.logfiles_by_errortype.iteritems():
+                print("%d files: %s" % (len(target_list), e_type))
+            print()
 
     def buildthreads(self):
         print("Build threads...")
@@ -153,8 +177,9 @@ class TargetsEngine(TargetsCollector):
             # print("%s:  %s" % (logfile.name, logfile.loglines_by_thread.keys()))
             # NOTE: requests collector?
             self.requests.update(requests)
-        self.plugin.do_report()
-        print("(TargetsEngine) detected %d requests" % len(self.requests))
+        print("----------------")
+
+        #### summary ####
         sum_t = 0
         for (comp, targets) in self.targets_by_component.iteritems():
             cnt, sum_, min_, max_ = 0, 0, sys.maxint, 0
@@ -165,7 +190,11 @@ class TargetsEngine(TargetsCollector):
                 min_ = min(min_, lent)
                 max_ = max(max_, lent)
             sum_t += sum_
-            print("  %s has %.3f[%d, %d] threads"
+            print("%s: %.3f[%d, %d] threads"
                   % (comp, sum_/float(cnt), min_, max_))
-        print("(TargetsEngine) detected %d threads" % sum_t)
-        print("ok\n")
+        print("%d threads" % sum_t)
+        print("%d requests" % len(self.requests))
+        print()
+        #################
+
+        self.plugin.do_report()

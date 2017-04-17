@@ -27,9 +27,11 @@ class DriverPlugin(object):
 
     def do_report(self):
         if self._occur:
-            print("(LogDriver) WARN! error types: %d\n  %s" %
+            print("!! WARN !!")
+            print("error types: %d\n  %s" %
                     (len(self._errors), self._errors))
-            print("(LogDriver) WARN! occur: %d" % self._occur)
+            print("occur: %d" % self._occur)
+            print()
         self._errors = set()
         self._occur = 0
 
@@ -315,6 +317,7 @@ class LogFile(object):
         self.total_lines = 0
 
         self.errors = {}
+        self.warns = {}
 
         for k, v in vs.iteritems():
             if k not in rv.FILE_VARS:
@@ -387,7 +390,7 @@ class LogFile(object):
 
         # required after line parsed
         if not self.loglines:
-            self.errors["Empty lines after read file"] = self
+            self.warns["Empty loglines"] = self
             return
         if not self.component:
             self.errors["Require 'component' after read file"] = self

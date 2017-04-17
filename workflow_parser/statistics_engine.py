@@ -6,22 +6,21 @@ import numpy as np
 
 from workflow_parser.draw_engine import DrawEngine
 from workflow_parser.log_engine import TargetsCollector
-from workflow_parser.state_engine import PacesCollector
-from workflow_parser.state_engine import ThreadInssCollector
-from workflow_parser.state_engine import RequestsCollector
+from workflow_parser.state_engine import StateEngine
 from workflow_parser.state_machine import JoinInterval
 from workflow_parser.state_machine import ThreadInterval
 
 
-def do_statistics(tgs, pcs, tis, rqs, d_engine):
+def do_statistics(tgs, s_engine, d_engine):
     assert isinstance(tgs, TargetsCollector)
-    assert isinstance(pcs, PacesCollector)
-    assert isinstance(tis, ThreadInssCollector)
-    assert isinstance(rqs, RequestsCollector)
+    assert isinstance(s_engine, StateEngine)
+    pcs = s_engine.pcs
+    tis = s_engine.tis
+    rqs = s_engine.rqs
     if d_engine:
         assert isinstance(d_engine, DrawEngine)
 
-    print("(Statistics) preparing relations...")
+    print("Preparing relations...")
 
     ## join intervals
     relations = pcs.join_intervals
@@ -114,7 +113,7 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     ## requests
     requestinss = rqs.requestinss
     if not requestinss:
-        print("(Statistics) No requests available, abort!")
+        print("No requests available, abort!")
         return
 
     rqs_index = [ri for ri in requestinss]
@@ -184,7 +183,7 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
                                             "from_time", "to_time",
                                             "color"
                                            ])
-    print("ok")
+    print("----------------------")
 
     if d_engine:
         d_engine.draw_relation_heatmap(host_relations_df, "host_relations")

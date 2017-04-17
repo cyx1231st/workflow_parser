@@ -18,9 +18,10 @@ import argparse
 
 from workflow_parser.draw_engine import DrawEngine
 from workflow_parser.log_engine import TargetsEngine
-from workflow_parser.state_engine import state_parse
+from workflow_parser.state_engine import StateEngine
 from workflow_parser.statistics_engine import do_statistics
 from workflow_parser.relation_engine import relation_parse
+from workflow_parser.statistics import Report
 
 
 def main1(driver):
@@ -59,13 +60,19 @@ def main1(driver):
     #     print("%s" % log_collector.logfiles_by_component[comp][0])
 
     # build states
-    pcs, tis, rqs = state_parse(tgs_engine, master)
+    state_engine = StateEngine(master, tgs_engine)
+    state_engine.build_thread_instances()
+    state_engine.join_paces()
+    state_engine.group_threads()
+    state_engine.build_requests()
 
-    relation_parse(pcs, tgs_engine)
+    relation_parse(state_engine.pcs, tgs_engine)
 
     if args.draw:
         draw_engine = DrawEngine("/home/vagrant/cyxvagrant/tmp/png/")
-        do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
+    else:
+        draw_engine = None
+    do_statistics(tgs_engine, state_engine, draw_engine)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)
