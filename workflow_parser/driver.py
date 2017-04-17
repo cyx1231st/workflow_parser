@@ -38,6 +38,6 @@ class DriverBase(DriverPlugin):
     # def parse_logline(self, line, var_dict):
     # def preprocess_logline(self, logline):
 
-    @abstractmethod
-    def build_statistics(self, s_engine, report):
-        pass
+    # @abstractmethod
+    # def build_statistics(self, s_engine, report):
+    #     pass

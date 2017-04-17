@@ -18,7 +18,8 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
     assert isinstance(pcs, PacesCollector)
     assert isinstance(tis, ThreadInssCollector)
     assert isinstance(rqs, RequestsCollector)
-    assert isinstance(d_engine, DrawEngine)
+    if d_engine:
+        assert isinstance(d_engine, DrawEngine)
 
     print("(Statistics) preparing relations...")
 
@@ -166,41 +167,41 @@ def do_statistics(tgs, pcs, tis, rqs, d_engine):
                                            ])
     print("ok")
 
-    d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
-    d_engine.draw_relation_heatmap(component_relations_df, "component_relations")
-    d_engine.draw_relation_heatmap(ca_relations_df, "component_mean_relations", "f")
-    d_engine.draw_distplot(rqs_df["lapse"], "requestlapse")
-    d_engine.draw_countplot(rqs_df["paces"], "requestpaces")
-    d_engine.draw_countplot(rqs_df["hosts"], "requesthosts")
-    d_engine.draw_countplot(rqs_df["threadinss"], "requesttis")
-    d_engine.draw_requestins(longest_lapse_requestins, "longest_lapse_requestins")
-    d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
-    d_engine.draw_boxplot(join_intervals_df, "join_intervals",
-                          x="entity", y="lapse",
-                          hue="join_type", color_column="color_jt")
-    d_engine.draw_violinplot(join_intervals_df, "join_intervals",
-                             x="entity", y="lapse",
-                             hue="join_type", color_column="color_jt")
-    ordered_x = threadints_df.groupby("entity")["lapse"]\
-                .median()
-    ordered_x.sort(ascending=False)
-    ordered_x = ordered_x.keys()
-    lim = min(len(ordered_x), 5)
-    for i in range(lim):
-        d_engine.draw_boxplot(threadints_df[threadints_df["entity"]==ordered_x[i]],
-                              "intervals_%s_by_host" % ordered_x[i],
-                              x="host", y="lapse")
-    d_engine.draw_boxplot(lock_intervals_df, "lock_intervals",
-                          x="entity", y="lapse")
-    d_engine.draw_violinplot(lock_intervals_df, "lock_intervals",
-                          x="entity", y="lapse")
-    d_engine.draw_boxplot(all_intervals_df, "all_intervals",
-                          x="entity", y="lapse")
-    d_engine.draw_violinplot(all_intervals_df, "all_intervals",
-                             x="entity", y="lapse")
-    d_engine.draw_boxplot(main_intervals_df, "main_intervals",
-                          x="entity", y="lapse")
-    d_engine.draw_violinplot(main_intervals_df, "main_intervals",
-                             x="entity", y="lapse")
-    d_engine.draw_stacked_intervals(extendedints_df, main_intervals_df, "stacked_main_paths")
-
+    if d_engine:
+        d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
+        d_engine.draw_relation_heatmap(component_relations_df, "component_relations")
+        d_engine.draw_relation_heatmap(ca_relations_df, "component_mean_relations", "f")
+        d_engine.draw_distplot(rqs_df["lapse"], "requestlapse")
+        d_engine.draw_countplot(rqs_df["paces"], "requestpaces")
+        d_engine.draw_countplot(rqs_df["hosts"], "requesthosts")
+        d_engine.draw_countplot(rqs_df["threadinss"], "requesttis")
+        d_engine.draw_requestins(longest_lapse_requestins, "longest_lapse_requestins")
+        d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
+        d_engine.draw_boxplot(join_intervals_df, "join_intervals",
+                              x="entity", y="lapse",
+                              hue="join_type", color_column="color_jt")
+        d_engine.draw_violinplot(join_intervals_df, "join_intervals",
+                                 x="entity", y="lapse",
+                                 hue="join_type", color_column="color_jt")
+        ordered_x = threadints_df.groupby("entity")["lapse"]\
+                    .median()
+        ordered_x.sort(ascending=False)
+        ordered_x = ordered_x.keys()
+        lim = min(len(ordered_x), 5)
+        for i in range(lim):
+            d_engine.draw_boxplot(threadints_df[threadints_df["entity"]==ordered_x[i]],
+                                  "intervals_%s_by_host" % ordered_x[i],
+                                  x="host", y="lapse")
+        d_engine.draw_boxplot(lock_intervals_df, "lock_intervals",
+                              x="entity", y="lapse")
+        d_engine.draw_violinplot(lock_intervals_df, "lock_intervals",
+                              x="entity", y="lapse")
+        d_engine.draw_boxplot(all_intervals_df, "all_intervals",
+                              x="entity", y="lapse")
+        d_engine.draw_violinplot(all_intervals_df, "all_intervals",
+                                 x="entity", y="lapse")
+        d_engine.draw_boxplot(main_intervals_df, "main_intervals",
+                              x="entity", y="lapse")
+        d_engine.draw_violinplot(main_intervals_df, "main_intervals",
+                                 x="entity", y="lapse")
+        d_engine.draw_stacked_intervals(extendedints_df, main_intervals_df, "stacked_main_paths")

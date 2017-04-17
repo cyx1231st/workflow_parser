@@ -31,13 +31,16 @@ def main1(driver):
     parser.add_argument('folder',
                         default=".",
                         help="The logs are in that folder.")
-    parser.add_argument('--brief',
+    parser.add_argument('--draw',
                         action="store_true",
-                        help="Supress verbose error report.")
+                        help="Draw figures.")
+    parser.add_argument('--drawfolder',
+                        help="Folder to put figures.")
     parser.add_argument('--csv-print-header', action="store_true",
                         help="Write a row into the CSV file for the headers.")
     parser.add_argument('--outfile',
-                        help="The output file of report.")
+                        help="The output file of report, "
+                        "valid only when --draw is set.")
     args = parser.parse_args()
 
     # build graph
@@ -60,7 +63,8 @@ def main1(driver):
 
     relation_parse(pcs, tgs_engine)
 
-    do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
+    if args.draw:
+        do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)

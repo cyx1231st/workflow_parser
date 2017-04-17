@@ -44,6 +44,9 @@ class Pace(object):
         self.joins_int = None
         self.joined_int = None
 
+        if logline.pace is None:
+            logline.pace = self
+
     # total ordering
     __eq__ = lambda self, other: self.seconds == other.seconds
     __lt__ = lambda self, other: self.seconds < other.seconds
@@ -198,6 +201,8 @@ class Pace(object):
         self.joins_int = relation
         next_pace.joined_int = relation
         next_pace.nxt_int.joined_int = relation
+        self.threadins.joins_ints.add(relation)
+        next_pace.threadins.joined_ints.add(relation)
         return relation
 
 
@@ -507,6 +512,7 @@ class ThreadInstance(object):
 
         self.is_shared = threadgraph.is_shared
         if self.is_shared:
+            self.request = None
             self.requests = set()
             self.requestinss = set()
         else:
@@ -522,6 +528,8 @@ class ThreadInstance(object):
             edge = node.decide_edge(log)
             if not edge:
                 break
+            if log.pace is not None:
+                assert False
             pace = Pace(log, node, edge, self)
             marks = edge.marks
             for mark in marks:
@@ -680,7 +688,7 @@ class ThreadInstance(object):
             req_str = self.request
 
         return "<ThIns#%s-%s: log#%d[%d, %d) comp#%s, host#%s, graph#%s, "\
-               "req#%s, %d-%d vars, %d(%d) joined_p, %d(%d) joins_p%s>" % (
+               "req#%s, %d(dup%d) vars, %d(act%d) joined_p, %d(act%d) joins_p%s>" % (
                 self.target,
                 self.thread,
                 self.len_paces,
@@ -714,68 +722,124 @@ class ThreadInstance(object):
         print "-------- end -----------"
 
 
-class NestedRequest(object):
-    def __init__(self, threadins, requestins):
+class NestedRequest(ThreadInstance):
+    @classmethod
+    def generate(cls, threadins):
         assert isinstance(threadins, ThreadInstance)
+        assert threadins.is_shared
+
+        ret_list = []
+
+        joined_ints = threadins.joined_ints.copy()
+        joins_ints = threadins.joins_ints.copy()
+
+        for joined_int in joined_ints:
+            schemas = joined_int.join_obj.schemas
+            from_pace = joined_int.to_pace
+            joins = None
+            match = {}
+            for schema in schemas:
+                k = schema[0]
+                if k == "request":
+                    continue
+                else:
+                    match[k] = from_pace[k]
+            for joins_int in joins_ints:
+                to_pace = joins_int.from_pace
+                for k, v in match.iteritems():
+                    if to_pace[k] == v:
+                        joins = joins_int
+                    else:
+                        joins = None
+                        break
+                if joins:
+                    break
+            if joins is not None:
+                joins_ints.discard(joins)
+                ret_list.append(cls(joined_int, joins_int, threadins))
+            else:
+                import pdb; pdb.set_trace()
+                joined_int.from_threadins.joins_ints.discard(joined_int)
+
+        if joins_ints:
+            import pdb; pdb.set_trace()
+        assert not joins_ints
+
+        return ret_list
+
+    def __init__(self, joined_int, joins_int, threadins):
         assert threadins.is_shared == True
-        assert isinstance(requestins, RequestInstance)
+        assert isinstance(joined_int, JoinInterval)
+        assert isinstance(joins_int, JoinInterval)
 
         self.threadins = threadins
+
+        #### copy ####
+        self.thread = threadins.thread
+        self.threadgraph = threadins.threadgraph
+        self.thread_vars = threadins.thread_vars
+        self.thread_vars_dup = threadins.thread_vars_dup
+
+        self.s_index = threadins.s_index
+        self.f_index = threadins.f_index
+        self.loglines = threadins.loglines
+
+        self.component = threadins.component
+        self.host = threadins.host
+        self.target = threadins.target
+        ##############
 
         self.paces = []
         self.paces_by_mark = {}
 
+        self.intervals = []
+        self.intervals_extended = []
+
         self.joined_paces = []
         self.joins_paces = []
-
         self.joined_ints = set()
         self.joins_ints = set()
 
         self.is_shared = False
-        self.request = requestins.request
-        self.requestins = requestins
+        self.request = None
+        self.requestins = None
 
-        self.request_obj = request_obj
-        self.request = request_obj.request
+        # very ugly!!
+        from_node = self.threadgraph.master_graph.nodes_by_id[90]
+        edge = self.threadgraph.master_graph.edges_by_from_to[(90, 91)]
+        mid_node = self.threadgraph.master_graph.nodes_by_id[91]
+        mid_node1 = self.threadgraph.master_graph.nodes_by_id[92]
+        edge1 = self.threadgraph.master_graph.edges_by_from_to[(92, 93)]
+        to_node = self.threadgraph.master_graph.nodes_by_id[93]
 
-        dummy_pace1 = None
-        for pace in threadins.joined_paces:
-            if pace.joined_pace.requestins is requestins:
-                dummy_pace1 = Pace(pace.logline, pace.from_node, pace.edge, self)
-                relation = pace.joined_int
-                relation.to_pace = dummy_pace1
-                dummy_pace1.joined_int = relation
+        from_pace = joined_int.to_pace
+        dummy_pace1 = Pace(from_pace.logline, from_node, edge, self)
+        joined_int.to_pace = dummy_pace1
+        dummy_pace1.joined_int = joined_int
+        self.joined_paces.append(dummy_pace1)
+        self.joined_ints.add(joined_int)
+        self.paces.append(dummy_pace1)
 
-                self.joined_paces.append(dummy_pace1)
-                self.joined_ints.add(dummy_relation)
-                self.paces.append(dummy_pace1)
-                break
-        if not dummy_pace1:
-            raise StateError("(NestedRequest) dummy_pace1 failed")
+        to_pace = joins_int.from_pace
+        dummy_pace2 = Pace(to_pace.logline, mid_node1, edge1, self)
+        joins_int.from_pace = dummy_pace2
+        dummy_pace2.joins_int = joins_int
+        self.joins_paces.append(dummy_pace2)
+        self.joins_ints.add(joins_int)
+        self.paces.append(dummy_pace2)
 
-        dummy_pace2 = None
-        for pace in threadins.joins_paces:
-            if pace.joins_pace.requestins is requestins:
-                dummy_pace2 = Pace(pace.logline, pace.from_node, pace.edge, self)
-                relation = pace.joins_int
-                relation.from_pace = dummy_pace2
-                dummy_pace2.joins_int = relation
+        dummy_pace1.nxt_pace = dummy_pace2
+        dummy_pace2.prv_pace = dummy_pace1
 
-                self.joins_paces.append(dummy_pace2)
-                self.joins_ints.add(dummy_relation)
-                self.paces.append(dummy_pace2)
-
-                dummy_pace1.nxt_pace = dummy_pace2
-                dummy_pace2.prv_pace = dummy_pace1
-                break
-        if not dummy_pace2:
-            raise StateError("(NestedRequest) dummy_pace2 failed")
-
-    def __getattribute__(self, item):
-        if item in self.__dict__:
-            return self.__dict__[item]
-        else:
-            return getattr(self.threadins, name)
+        dummy_interval = ThreadInterval(dummy_pace1, dummy_pace2, self)
+        dummy_pace1.nxt_int = dummy_interval
+        dummy_pace2.prv_int = dummy_interval
+        self.intervals.append(dummy_interval)
+        self.intervals_extended.append(dummy_interval)
+        dummy_interval.joined_int = joined_int
+        joined_int.joins_int = dummy_interval
+        dummy_interval.joins_int = joins_int
+        joins_int.joined_int = dummy_interval
 
 
 class RequestInstance(object):
@@ -819,6 +883,8 @@ class RequestInstance(object):
         for threadins in threadinss:
             assert isinstance(threadins, ThreadInstance)
             if threadins.is_shared:
+                # TODO remove shared processing in request instance
+                assert False
                 shared_tis.add(threadins)
                 threadins.requestinss.add(self)
                 threadins.requests.add(request)
@@ -841,12 +907,16 @@ class RequestInstance(object):
         # error: no start thread
         if self.start_threadins is None:
             self.errors["Contains no start thread"] = ""
+            return
 
         for shared_ti in shared_tis:
+            # TODO remove shared processing in request instance
+            assert False
             tis.add(NestedRequest(shared_ti, self))
 
         seen_tis = set()
         def _process(threadins):
+            assert isinstance(threadins, ThreadInstance)
             if threadins in seen_tis:
                 return
             seen_tis.add(threadins)
@@ -1005,3 +1075,11 @@ class RequestInstance(object):
                                           self.len_paces,
                                           self.len_hosts,
                                           self.len_threadinss)
+
+    def trace(self):
+        print("%r" % self)
+        int_ = self.end_interval
+        print("  %s" % int_.to_pace)
+        while(int_):
+            print("  %s" % int_.from_pace)
+            int_ = int_.prv_main

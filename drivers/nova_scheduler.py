@@ -89,14 +89,11 @@ class NovaScheduler(DriverBase):
         graph.set_state(25, "SUCCESS")
         graph.set_state(26, "COMPUTE FAIL")
 
-    def filter_logfile(self, f_dir, f_name):
+    def filter_logfile(self, f_dir, f_name, var_dict):
         if f_name.startswith("out"):
             return False
         if not f_name.startswith("BENCH-"):
             return False
-        return True
-
-    def parse_logfilename(self, f_name, var_dict):
         pieces = f_name.split("-")
         component = pieces[1]
         host = "-".join(pieces[2:])
@@ -104,16 +101,14 @@ class NovaScheduler(DriverBase):
         var_dict[rv.COMPONENT] = component
         var_dict[rv.HOST] = host
         var_dict[rv.TARGET] = component+"@"+host
+        return True
 
-    def filter_logline(self, line):
+    def filter_logline(self, line, var_dict):
         if "BENCH-" not in line:
             return False
         if "Bench initiated!" in line:
             return False
-        else:
-            return True
 
-    def parse_logline(self, line, var_dict):
         pieces = line.split()
 
         # seconds
@@ -172,6 +167,7 @@ class NovaScheduler(DriverBase):
             var_dict["t_host"] = " ".join(keyword.split(" ")[1:])
         if "decided" in keyword:
             var_dict["t_host"] = " ".join(keyword.split(" ")[1:])
+        return True
 
     def preprocess_logline(self, logline):
         if "start_db" in logline.keyword:

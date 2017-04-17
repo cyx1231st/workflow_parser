@@ -283,6 +283,8 @@ class CausalEngine(object):
             self.distance = 0.0
 
     def relax(self):
+        if not self.unknown_hostcs:
+            return False
         while True:
             next_hostc = None
             # ready hostc first
@@ -316,14 +318,19 @@ class CausalEngine(object):
                         next_changed_hostcs.update(hostcs)
                         self.relax_counter += 1
                 changed_hostcs = next_changed_hostcs
+        return True
 
 
 def relation_parse(pcs_collector, tgs_collector):
     assert isinstance(pcs_collector, PacesCollector)
     assert isinstance(tgs_collector, TargetsCollector)
 
-    print("Preparing constraints...")
     relations = pcs_collector.join_intervals_by_type["remote"]
+    if not relations:
+        print("No relations detected, skip relation engine.\n")
+        return
+
+    print("Preparing constraints...")
     causal_engine = CausalEngine(relations)
     print("total %d host constraints" % len(causal_engine.hosts))
     print("total %d relation constraints" % len(causal_engine.relationcons))
@@ -337,15 +344,17 @@ def relation_parse(pcs_collector, tgs_collector):
     print("ok\n")
 
     print("Correcting...")
-    causal_engine.relax()
-    print("%d relax attempts" % causal_engine.relax_counter)
-    hosts = causal_engine.hosts.values()
-    hosts.sort(key=lambda hostc: hostc.hostname)
-    for hostc in hosts:
-        if hostc.low != 0:
-            print "adjust %r" % hostc
-            for target in tgs_collector.itervalues(tgs_collector.targets_by_host[hostc.hostname]):
-                target.offset = hostc.low
-    for relation in relations:
-        assert not relation.is_violated
+    if causal_engine.relax():
+        print("%d relax attempts" % causal_engine.relax_counter)
+        hosts = causal_engine.hosts.values()
+        hosts.sort(key=lambda hostc: hostc.hostname)
+        for hostc in hosts:
+            if hostc.low != 0:
+                print "adjust %r" % hostc
+                for target in tgs_collector.itervalues(tgs_collector.targets_by_host[hostc.hostname]):
+                    target.offset = hostc.low
+        for relation in relations:
+            assert not relation.is_violated
+    else:
+        print("No need to correct clocks")
     print("ok\n")

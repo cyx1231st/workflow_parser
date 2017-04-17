@@ -33,6 +33,11 @@ class DriverPlugin(object):
         self._errors = set()
         self._occur = 0
 
+    def _purge_dict(self, var_dict):
+        for k in var_dict.keys():
+            if not var_dict[k]:
+                var_dict.pop(k)
+
     def do_filter_logfile(self, f_dir, f_name):
         assert isinstance(f_dir, str)
         assert isinstance(f_name, str)
@@ -48,59 +53,39 @@ class DriverPlugin(object):
         if not ext_match:
             return None
 
-        f_name = f_name.split(".")[0]
+        f_name = f_name.rsplit(".", 1)[0]
         assert f_name
 
         try:
-            ret = self.filter_logfile(f_dir, f_name)
+            var_dict = {}
+            ret = self.filter_logfile(f_dir, f_name, var_dict)
             assert isinstance(ret, bool)
             if ret:
                 # NOTE
                 # print("(LogDriver) loaded: %s" % f_dir)
-                return f_name
+                assert all(isinstance(k, str) for k in var_dict.keys())
+                self._purge_dict(var_dict)
+                return f_name, var_dict
             else:
-                return None
+                return None, None
         except Exception as e:
             raise LogError(
                 "(LogDriver) `filter_logfile` error when f_name=%s"
-                % f_name, e)
-
-    def do_parse_logfilename(self, f_name):
-        assert isinstance(f_name, str)
-
-        try:
-            var_dict = {}
-            ret =  self.parse_logfilename(f_name, var_dict)
-            assert all(isinstance(k, str) for k in var_dict.keys())
-            return var_dict
-        except Exception as e:
-            raise LogError(
-                "(LogDriver) `parse_logfilename` error when f_name=%s"
                 % f_name, e)
 
     def do_filter_logline(self, line):
         assert isinstance(line, str)
 
         try:
-            ret = self.filter_logline(line)
+            var_dict = {}
+            ret = self.filter_logline(line, var_dict)
+            assert all(isinstance(k, str) for k in var_dict.keys())
+            self._purge_dict(var_dict)
             assert isinstance(ret, bool)
-            return ret
+            return ret, var_dict
         except Exception as e:
             raise LogError(
                 "(LogDriver) `filter_logline` error when line=%s"
-                % line, e)
-
-    def do_parse_logline(self, line):
-        assert isinstance(line, str)
-
-        try:
-            var_dict = {}
-            ret = self.parse_logline(line, var_dict)
-            assert all(isinstance(k, str) for k in var_dict.keys())
-            return var_dict
-        except Exception as e:
-            raise LogError(
-                "(LogDriver) `parse_logline` error when line=%r"
                 % line, e)
 
     def do_preprocess_logline(self, logline):
@@ -120,19 +105,11 @@ class DriverPlugin(object):
                 % logline, e)
 
     @abstractmethod
-    def filter_logfile(self, f_dir, f_name):
-        pass
-
-    @abstractmethod
-    def parse_logfilename(self, f_name, var_dict):
+    def filter_logfile(self, f_dir, f_name, var_dict):
         pass
 
     @abstractmethod
     def filter_logline(self, line):
-        pass
-
-    @abstractmethod
-    def parse_logline(self, line, var_dict):
         pass
 
     @abstractmethod
@@ -142,7 +119,7 @@ class DriverPlugin(object):
 
 @total_ordering
 class LogLine(object):
-    def __init__(self, line, logfile, plugin):
+    def __init__(self, line, logfile, plugin, vs):
         assert isinstance(line, str)
         assert isinstance(logfile, LogFile)
         assert isinstance(plugin, DriverPlugin)
@@ -163,9 +140,14 @@ class LogLine(object):
         self.prv_logline = None
         self.nxt_logline = None
 
-        self.correct = True
+        self.prv_thread_logline = None
+        self.nxt_thread_logline = None
 
-        vs = plugin.do_parse_logline(line)
+        self.correct = True
+        self.ignored = False
+
+        self.pace = None
+
         for k, v in vs.iteritems():
             self[k] = v
 
@@ -268,8 +250,16 @@ class LogLine(object):
                 raise LogError("(LogLine) require 'thread' when parse line: %r" %
                         self)
 
+    def _str_marks(self):
+        mark_str = ""
+        if not self.correct:
+            mark_str += ", ERROR"
+        if self.ignored:
+            mark_str += ", IGNORED"
+        return mark_str
+
     def __str__(self):
-        ret = "<LL>%.3f %s [%s %s %s] %s %s: <%s>" % (
+        ret = "<LL>%.3f %s [%s %s %s] %s %s: <%s>%s" % (
               self.seconds,
               self.time,
               self.component,
@@ -277,16 +267,18 @@ class LogLine(object):
               self.target,
               self.request,
               self.thread,
-              self.keyword)
+              self.keyword,
+              self._str_marks())
         return ret
 
     def __str1__(self):
-        ret = "<LL>%.3f %s | %s %s: <%s>" % (
+        ret = "<LL>%.3f %s | %s %s: <%s>%s" % (
               self.seconds,
               self.time,
               self.request,
               self.thread,
-              self.keyword)
+              self.keyword,
+              self._str_marks())
         return ret
 
     def __repr__(self):
@@ -300,7 +292,7 @@ class LogLine(object):
 
 # TODO: Rename to Target
 class LogFile(object):
-    def __init__(self, f_name, f_dir, sr, plugin):
+    def __init__(self, f_name, f_dir, sr, plugin, vs):
         assert isinstance(f_name, str)
         assert isinstance(f_dir, str)
         assert isinstance(sr, ServiceRegistry)
@@ -322,14 +314,12 @@ class LogFile(object):
         self.offset = 0
         self.total_lines = 0
 
-        vs = plugin.do_parse_logfilename(f_name)
+        self.errors = {}
+
         for k, v in vs.iteritems():
             if k not in rv.FILE_VARS:
                 raise LogError("(LogFile) key is not reserved: %r" % k)
             setattr(self, k, v)
-        # self.logs_by_ins = collections.defaultdict(list)
-        # self.lo = None
-        # self.hi = None
 
     def __len__(self):
         return len(self.loglines)
@@ -385,18 +375,29 @@ class LogFile(object):
         with open(self.dir_, 'r') as reader:
             for line in reader:
                 self.total_lines += 1
-                if not self.plugin.do_filter_logline(line):
+                ret, vs = self.plugin.do_filter_logline(line)
+                if not ret:
                     continue
-                lg = LogLine(line, self, self.plugin)
+                try:
+                    lg = LogLine(line, self, self.plugin, vs)
+                except LogError as e:
+                    raise LogError("(LogFile) error when parse line '%s'"
+                            % line.strip(), e)
                 self.loglines.append(lg)
 
         # required after line parsed
+        if not self.loglines:
+            self.errors["Empty lines after read file"] = self
+            return
         if not self.component:
-            raise LogError("(LogFile) require 'component' after parse file: %s" % line)
+            self.errors["Require 'component' after read file"] = self
+            return
         if not self.host:
-            raise LogError("(LogFile) require 'host' after parse file: %s" % line)
+            self.errors["Require 'host' after read file"] = self
+            return
         if not self.target:
-            raise LogError("(LogFile) require 'target' after parse file: %s" % self.name)
+            self.errors["Require 'target' after read file"] = self
+            return
 
         self.loglines.sort(key=lambda item: item.seconds)
 
@@ -417,6 +418,13 @@ class LogFile(object):
             self.loglines_by_thread[line.thread].append(line)
             if line.request:
                 requests.add(line.request)
+        for lines in self.loglines_by_thread.itervalues():
+            prv = None
+            for line in lines:
+                line.prv_thread_logline = prv
+                if prv:
+                    prv.nxt_thread_logline = line
+                prv = line
         return requests
 
     # def set_offset(self, lo, hi):

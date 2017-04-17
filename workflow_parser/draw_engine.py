@@ -446,8 +446,8 @@ class DrawEngine(object):
 
 
     def _convert_intervals_to_stack(self, df):
-        stack = [(round(sec, 6), 1) for sec in df["from_sec"]]
-        stack.extend((round(sec, 6), -1) for sec in df["to_sec"])
+        stack = [(round(sec, 7), 1) for sec in df["from_sec"]]
+        stack.extend((round(sec, 7), -1) for sec in df["to_sec"])
         stack.sort(key=lambda tup: tup[0])
 
         x_list = []
@@ -463,7 +463,7 @@ class DrawEngine(object):
                 # x changes
                 x_list.append(x)
                 y_list.append(prv_y)
-                x_list.append(x+0.00001)
+                x_list.append(x+0.00000001)
                 y_list.append(y)
                 x = data[0]
                 prv_y = y
@@ -474,7 +474,7 @@ class DrawEngine(object):
         if x is not None:
             x_list.append(x)
             y_list.append(prv_y)
-            x_list.append(x+0.00001)
+            x_list.append(x+0.00000001)
             y_list.append(y)
 
         return x_list, y_list
@@ -594,4 +594,207 @@ class DrawEngine(object):
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_stackedplot.png")
+        print("ok")
+
+
+    def draw_debug_groups(self, requests, threadgroup):
+        print("(DrawEngine) drawing %s..." % requests)
+
+        ## settings ##
+        figsize = (200, 30)
+        annot_off_y = 0.18
+        annot_mark_lim = 0.006
+        annot_pres_lim = 0.020
+        markersize = 10
+        node_markersize = 5
+        int_style = "-"
+        int_lock_style = ":"
+        main_linewidth = 2
+        other_linewidth = 1
+        ##############
+
+        #### sns #####
+        sns.set_style("whitegrid")
+        # marker bug
+        sns.set_context(rc={'lines.markeredgewidth': 0.5})
+        ##############
+
+        #### args ####
+        annot_kw = dict(color="k",
+                        horizontalalignment="center",
+                        verticalalignment="center",
+                        size=8)
+        ##############
+
+        # figure and axes
+        fig = plt.figure(figsize=figsize)
+        fig.clear()
+        fig.suptitle("Debug: %s" % requests, fontsize=14)
+        ax = fig.add_subplot(1,1,1)
+
+        # prepare requests
+        import sys
+        start = sys.maxint
+        last = 0
+        for ti in threadgroup:
+            start = min(start, ti.start_seconds)
+            last = max(last, ti.end_seconds)
+        start = 0
+        all_lapse = last - start
+        plot_main = False
+
+        threadinss = threadgroup
+        y_indexes_l, y_indexes_r = self._prepare_thread_indexes(threadinss,
+                                                                plot_main)
+
+        # xy axis labels
+        ax.set_xlabel("lapse (seconds)")
+        ax.set_ylabel("thread by targets")
+        ax.set_yticks(range(len(y_indexes_l)))
+        ax.set_ylim(.5, len(y_indexes_l)-0.5)
+        ax.set_yticklabels(y_indexes_l)
+        # ax2 = ax.twinx()
+        # ax2.set_ylabel("component by hosts")
+        # ax2.set_ylim(0.5, len(y_indexes_r)-0.5)
+        # ax2.set_yticks(range(len(y_indexes_r)))
+        # ax2.set_yticklabels(y_indexes_r)
+
+        # ratios for markers
+        mark_lim = all_lapse * annot_mark_lim
+        pres_lim = all_lapse * annot_pres_lim
+
+        for ti in threadinss:
+            ti_color = ti.component.color
+            # draw start point
+            if ti.is_request_start:
+                t_marker=node_markersize
+                color = "k"
+            else:
+                t_marker = "."
+                color = "k"
+            ax.plot(ti.start_seconds-start, ti.plot_y,
+                     marker=t_marker,
+                     color=color,
+                     markersize=markersize)
+
+            # annotate start edge
+            ax.annotate("%s" % ti.intervals[0].from_edge.name,
+                         (ti.start_seconds-start, ti.plot_y),
+                         (ti.start_seconds-start, ti.plot_y+annot_off_y),
+                         **annot_kw)
+
+            marker=7
+            for int_ in ti.intervals:
+                from_x = int_.from_seconds - start
+                from_y = int_.threadins.plot_y
+                to_x = int_.to_seconds - start
+                to_y = from_y
+
+                # draw interval
+                if int_.is_lock:
+                    linestyle = int_lock_style
+                else:
+                    linestyle = int_style
+                if int_.is_main:
+                    linewidth = main_linewidth
+                    assert plot_main
+                    ax.plot([from_x, to_x],
+                            [1, 1],
+                            linestyle=linestyle,
+                            color=ti_color,
+                            linewidth=linewidth)
+                else:
+                    linewidth = other_linewidth
+                ax.plot([from_x, to_x],
+                         [from_y, to_y],
+                         linestyle=linestyle,
+                         color=ti_color,
+                         label=int_.node.name,
+                         linewidth=linewidth)
+
+                # mark interval
+                if marker == 6:
+                    annot_off = annot_off_y
+                else:
+                    annot_off = -annot_off_y
+
+                if int_.lapse >= pres_lim:
+                    ax.annotate("%s=%.2f" % (int_.node.id_, int_.lapse),
+                                 ((from_x + to_x)/2, to_y),
+                                 ((from_x + to_x)/2, to_y+annot_off),
+                                 **annot_kw)
+                elif int_.lapse >= mark_lim:
+                    ax.annotate("%s" % int_.node.id_,
+                                 ((from_x + to_x)/2, to_y),
+                                 ((from_x + to_x)/2, to_y+annot_off),
+                                 **annot_kw)
+
+                # draw end point
+                if int_.is_request_end:
+                    t_marker = 4
+                    color = "k"
+                    t_markersize=markersize
+                elif int_.is_thread_end:
+                    t_marker = "3"
+                    color="k"
+                    t_markersize=markersize
+                else:
+                    t_marker = marker
+                    color=ti_color
+                    t_markersize=node_markersize
+                ax.plot(int_.to_seconds-start, ti.plot_y,
+                         marker=t_marker,
+                         color=color,
+                         markersize=t_markersize)
+
+                # draw thread end
+                if int_.is_thread_end:
+                    ax.annotate("%s" % int_.to_edge.name,
+                                 (to_x, to_y),
+                                 (to_x, to_y+annot_off_y),
+                                 **annot_kw)
+
+                marker = 6 if marker==7 else 7
+
+        join_ints = set()
+        for ti in threadinss:
+            join_ints.update(ti.joined_ints)
+            join_ints.update(ti.joins_ints)
+
+        ax = fig.axes[0]
+        for int_ in join_ints:
+            from_x = int_.from_seconds - start
+            from_y = int_.from_threadins.plot_y
+            to_x = int_.to_seconds - start
+            to_y = int_.to_threadins.plot_y
+            ti_color = int_.color_jt
+            if to_y > from_y:
+                connstyle="arc3,rad=-0.05"
+            else:
+                connstyle="arc3,rad=0.05"
+            if int_.is_main:
+                width = main_linewidth
+                assert plot_main
+                ax.plot([from_x, to_x],
+                        [1, 1],
+                        linestyle=int_style,
+                        color=ti_color,
+                        linewidth=linewidth)
+            else:
+                width = other_linewidth
+            ax.annotate("",
+                        (to_x, to_y),
+                        (from_x, from_y),
+                        arrowprops=dict(arrowstyle="->",
+                                        shrinkA=0.5,
+                                        shrinkB=0.5,
+                                        color=ti_color,
+                                        connectionstyle=connstyle,
+                                        lw=width))
+            ax.annotate("%s=%.2f" % (int_.join_obj.name, int_.lapse),
+                        ((from_x+to_x)/2, (from_y+to_y)/2+.5),
+                        **annot_kw)
+
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig.savefig(self.out_path + "debuggroupplot.png")
         print("ok")

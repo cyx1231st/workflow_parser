@@ -19,12 +19,14 @@ class TargetsCollector(object):
         self.total_lines = 0
 
         # indexes
-        self.targets_by_component = defaultdict(lambda: set())
-        self.targets_by_host = defaultdict(lambda: set())
-        self.hosts_by_component = defaultdict(lambda: set())
+        self.targets_by_component = defaultdict(set)
+        self.targets_by_host = defaultdict(set)
+        self.hosts_by_component = defaultdict(set)
 
         # entities
         self.logfiles_by_target = {}
+
+        self.logfiles_by_errortype = defaultdict(list)
 
     def __len__(self):
         return len(self.logfiles_by_target)
@@ -55,8 +57,11 @@ class TargetsCollector(object):
     def collect(self, logfile):
         assert isinstance(logfile, LogFile)
 
-        if len(logfile) == 0:
+        if logfile.errors:
+            for k in logfile.errors.keys():
+                self.logfiles_by_errortype[k].append(logfile)
             return
+
         if logfile.target in self.logfiles_by_target:
             raise LogError("(TargetsCollector) target '%s' collition "
                            "from files: %s, %s" % (
@@ -93,10 +98,10 @@ class TargetsEngine(TargetsCollector):
         log_folder = path.join(current_path, log_folder)
         for f_name in os.listdir(log_folder):
             f_dir = path.join(log_folder, f_name)
-            f_name = self.plugin.do_filter_logfile(f_dir, f_name)
-            if not f_name:
+            f_name, vs = self.plugin.do_filter_logfile(f_dir, f_name)
+            if f_name is None:
                 continue
-            logfile = LogFile(f_name, f_dir, self.sr, self.plugin)
+            logfile = LogFile(f_name, f_dir, self.sr, self.plugin, vs)
             self.logfiles.append(logfile)
         self.total_files = len(self.logfiles)
         print("(TargetsEngine) detected %d targets" % self.total_files)
@@ -110,8 +115,12 @@ class TargetsEngine(TargetsCollector):
             # ready target vars: component, host, target
             self.collect(logfile)
 
+        if self.logfiles_by_errortype:
+            print("(TargetsEngine) error summary:")
+            for e_type, target_list in self.logfiles_by_errortype.iteritems():
+                print("  %s: %d targets" % (e_type, len(target_list)))
         self.total_files_hascontent = len(self)
-        print("(TargetsEngine) %d targets has loglines, discarded %d targets" %
+        print("(TargetsEngine) %d valid targets, discarded %d targets" %
                 (self.total_files_hascontent,
                  self.total_files - self.total_files_hascontent))
 
