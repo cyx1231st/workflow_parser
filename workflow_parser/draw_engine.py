@@ -255,8 +255,18 @@ class DrawEngine(object):
         assert isinstance(requestins, RequestInstance)
         print("(DrawEngine) drawing %s..." % name)
 
+        # prepare requests
+        start = requestins.start_seconds
+        last = requestins.last_seconds
+        all_lapse = last - start
+        plot_main = requestins.start_interval.is_main
+
+        threadinss = requestins.threadinss
+        y_indexes_l, y_indexes_r = self._prepare_thread_indexes(threadinss,
+                                                                plot_main)
+
         ## settings ##
-        figsize = (30, 5)
+        figsize = (30, .5*len(y_indexes_l))
         annot_off_y = 0.18
         annot_mark_lim = 0.006
         annot_pres_lim = 0.020
@@ -286,16 +296,6 @@ class DrawEngine(object):
         fig.clear()
         fig.suptitle("%s: %s" % (name, requestins), fontsize=14)
         ax = fig.add_subplot(1,1,1)
-
-        # prepare requests
-        start = requestins.start_seconds
-        last = requestins.last_seconds
-        all_lapse = last - start
-        plot_main = requestins.start_interval.is_main
-
-        threadinss = requestins.threadinss
-        y_indexes_l, y_indexes_r = self._prepare_thread_indexes(threadinss,
-                                                                plot_main)
 
         # xy axis labels
         ax.set_xlabel("lapse (seconds)")
@@ -369,12 +369,12 @@ class DrawEngine(object):
                     annot_off = -annot_off_y
 
                 if int_.lapse >= pres_lim:
-                    ax.annotate("%s=%.2f" % (int_.node.id_, int_.lapse),
+                    ax.annotate("%s=%.2f" % (int_.path_name, int_.lapse),
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
-                    ax.annotate("%s" % int_.node.id_,
+                    ax.annotate("%s" % int_.path_name,
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
@@ -436,7 +436,7 @@ class DrawEngine(object):
                                         color=ti_color,
                                         connectionstyle=connstyle,
                                         lw=width))
-            ax.annotate("%s=%.2f" % (int_.join_obj.name, int_.lapse),
+            ax.annotate("%s=%.2f" % (int_.path_name, int_.lapse),
                         ((from_x+to_x)/2, (from_y+to_y)/2+.5),
                         **annot_kw)
 
@@ -537,7 +537,7 @@ class DrawEngine(object):
         main_x_list = [x-start_s for x in main_x_list]
 
         ## individual stacks
-        ints_by_entity = main_ints_df.groupby("entity")
+        ints_by_entity = main_ints_df.groupby("path")
         entity_stack_results = []
         for entity_, df in ints_by_entity:
             color = df.iloc[0]["color"]

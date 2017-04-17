@@ -189,7 +189,21 @@ class CephWritefull(DriverBase):
         graph.build_by_edge(121, e19)
         graph.build_by_edge(118, e14)
 
-        graph.set_lock(8)
+
+        graph.set_lock(  3)
+        graph.set_lock(  5)
+        graph.set_lock(  8)
+        graph.set_lock( 28)
+        graph.set_lock( 44)
+        graph.set_lock( 47)
+        graph.set_lock( 56)
+        graph.set_lock( 72)
+        graph.set_lock( 92)
+        graph.set_lock( 97)
+        graph.set_lock( 99)
+        graph.set_lock(111)
+        graph.set_lock(117)
+
 
         # client send osd
         e3.join_edge(e4, {("tid", "tid"),

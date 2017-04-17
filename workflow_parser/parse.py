@@ -64,6 +64,7 @@ def main1(driver):
     relation_parse(pcs, tgs_engine)
 
     if args.draw:
+        draw_engine = DrawEngine("/home/vagrant/cyxvagrant/tmp/png/")
         do_statistics(tgs_engine, pcs, tis, rqs, draw_engine)
 
     # build statistics

@@ -253,6 +253,12 @@ class IntervalBase(object):
         return self.from_seconds > self.to_seconds
 
     @property
+    def path_name(self):
+        return "%s(%s)%s" % (self.from_node.name,
+                             self.entity.name,
+                             self.to_node.name)
+
+    @property
     def path_type(self):
         if self.is_main:
             return "main"
@@ -315,14 +321,25 @@ class ThreadInterval(IntervalBase):
         assert self.is_main
 
         if self.prv_int and not self.prv_int.is_lock:
-            assert not self.joined_int
+            if self.joined_int:
+                e = StateError("Both prv_int and joined_int are accetable")
+                e.where = self.node.name
+                raise e
             return self.prv_int
         elif self.prv_int:
-            ret = self.joined_int
+            if self.joined_int:
+                ret = self.joined_int
+            else:
+                ret = self.prv_int
         else:
             ret = self.joined_int
-        if not ret:
-            assert self.is_request_start
+        if not ret or ret is empty_join:
+            if self.is_request_start:
+                return None
+            else:
+                e = StateError("The thread path backward is empty")
+                e.where = self.node.name
+                raise e
         return ret
 
     @property
@@ -354,7 +371,6 @@ class ThreadInterval(IntervalBase):
     @property
     def path_type(self):
         if self.is_lock:
-            assert not self.is_main
             return "lock"
         else:
             return IntervalBase.path_type.fget(self)
@@ -463,7 +479,10 @@ class JoinInterval(IntervalBase):
     @property
     def prv_main(self):
         assert self.is_main
-        assert self.joined_int
+
+        if not self.joined_int:
+            e = StateError("ERROR joined_int is empty")
+            e.where = self.join_obj.name
         return self.joined_int
 
     @property
@@ -1004,8 +1023,8 @@ class RequestInstance(object):
                     self.intervals_extended.add(int_)
                 try:
                     int_ = int_.prv_main
-                except AssertionError:
-                    self.errors["Main route parse error"] = int_
+                except StateError as e:
+                    self.errors["Main route parse error"] = (int_, e)
                     break
 
         # error: stray thread instances

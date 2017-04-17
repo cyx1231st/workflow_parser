@@ -168,6 +168,7 @@ class RequestsCollector(object):
         # error report
         self.error_requestinss = []
         self.requests_by_errortype = defaultdict(list)
+        self.main_route_error = defaultdict(lambda: defaultdict(lambda: 0))
 
         # warn report
         self.warn_requestinss = []
@@ -184,6 +185,9 @@ class RequestsCollector(object):
             self.error_requestinss.append(requestins)
             for error in requestins.errors.keys():
                 self.requests_by_errortype[error].append(requestins)
+                if error == "Main route parse error":
+                    e = requestins.errors[error][1]
+                    self.main_route_error[e.message][e.where] += 1
         else:
             assert requestins.request not in self.requestinss
             self.requestinss[requestins.request] = requestins
@@ -457,6 +461,12 @@ def state_parse(tgs_collector, master_graph):
                 len(rqs_collector.error_requestinss))
         for err, requestinss in rqs_collector.requests_by_errortype.iteritems():
             print("  %s: %d requests" % (err, len(requestinss)))
+    if rqs_collector.main_route_error:
+        print("(ParseEngine) ERROR when parse main:")
+        for e_msg, where_count in rqs_collector.main_route_error.iteritems():
+            print("  %s:" % e_msg)
+            for where, cnt in where_count.iteritems():
+                print("    %s: %d" % (where, cnt))
 
     if rqs_collector.warn_requestinss:
         print("(ParserEngine) WARN! %d warn request instances" %
