@@ -189,10 +189,11 @@ def do_statistics(tgs, s_engine, d_engine):
         d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
         d_engine.draw_relation_heatmap(ca_local_relations_df, "component_local_relations", "f")
         d_engine.draw_relation_heatmap(ca_relations_df, "component_remote_relations", "f")
-        d_engine.draw_distplot(rqs_df["lapse"], "request_with_lapse")
-        d_engine.draw_countplot(rqs_df["paces"], "request_with_paces")
-        d_engine.draw_countplot(rqs_df["hosts"], "request_with_hosts")
-        d_engine.draw_countplot(rqs_df["threadinss"], "request_with_threads")
+        if len(requestinss) > 1:
+            d_engine.draw_distplot(rqs_df["lapse"], "request_with_lapse")
+            d_engine.draw_countplot(rqs_df["paces"], "request_with_paces")
+            d_engine.draw_countplot(rqs_df["hosts"], "request_with_hosts")
+            d_engine.draw_countplot(rqs_df["threadinss"], "request_with_threads")
         d_engine.draw_requestins(longest_lapse_requestins, "longest_lapse_requestins")
         d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
         d_engine.draw_boxplot(join_intervals_df, "join_intervals",
