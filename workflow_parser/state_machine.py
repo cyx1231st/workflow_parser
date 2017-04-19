@@ -824,12 +824,12 @@ class NestedRequest(ThreadInstance):
         self.requestins = None
 
         # very ugly!!
-        from_node = self.threadgraph.master_graph.nodes_by_id[90]
-        edge = self.threadgraph.master_graph.edges_by_from_to[(90, 91)]
-        mid_node = self.threadgraph.master_graph.nodes_by_id[91]
-        mid_node1 = self.threadgraph.master_graph.nodes_by_id[92]
-        edge1 = self.threadgraph.master_graph.edges_by_from_to[(92, 93)]
-        to_node = self.threadgraph.master_graph.nodes_by_id[93]
+        from_node = self.threadgraph.master_graph.nodes_by_id[59]
+        edge = self.threadgraph.master_graph.edges_by_from_to[(59, 60)]
+        mid_node = self.threadgraph.master_graph.nodes_by_id[60]
+        mid_node1 = self.threadgraph.master_graph.nodes_by_id[61]
+        edge1 = self.threadgraph.master_graph.edges_by_from_to[(61, 62)]
+        to_node = self.threadgraph.master_graph.nodes_by_id[62]
 
         from_pace = joined_int.to_pace
         dummy_pace1 = Pace(from_pace.logline, from_node, edge, self)

@@ -7,7 +7,6 @@ from collections import OrderedDict
 from workflow_parser.log_engine import TargetsCollector
 from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import MasterGraph
-from workflow_parser.state_graph import seen_edges
 from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import JoinInterval
 from workflow_parser.state_machine import NestedRequest
@@ -283,7 +282,7 @@ class StateEngine(object):
                     _report_ignored(ltup[0][0])
             print()
 
-        edges = self.mastergraph.edges - seen_edges
+        edges = self.mastergraph.edges - self.mastergraph.seen_edges
         if edges:
             print("! WARN !")
             print("Unseen graph edges: %s" %

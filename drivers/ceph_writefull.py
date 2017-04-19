@@ -29,257 +29,226 @@ client.color = "#54c0e8"
 
 class CephWritefull(DriverBase):
     def build_graph(self, graph):
-        build = graph.build_edge
-
-        #
         # client issue writefull
-        e  = build(  0,  1, client, "IoCtx writefull start", True)
-        e  = build(  1,  2, client, "objecter _op_submit start")
-        e  = build(  2,  3, client, "objecter calculate start")
-        e  = build(  3,  4, client, "objecter calculate finish")
-        e3 = build(  4,  5, client, "objecter send_op start")
-        e  = build(  5,  6, client, "objecter send_op finish")
-        e  = build(  6,  7, client, "objecter _op_submit finish")
-        e  = build(  7,  8, client, "IoCtx lock start")
-        e1 = build(  8,  9, client, "IoCtx lock finish")
-        e  = build(  9, 10, client, "IoCtx writefull finish")
+        e1,   n1 = graph.build_thread(client,
+                               1, "IoCtx writefull start", True)
+        e2,   n2 =  n1.build(  2, "objecter _op_submit start")
+        e3,   n3 =  n2.build(  3, "objecter calculate start")
+        e4,   n4 =  n3.build(  4, "objecter calculate finish")
+        e5,   n5 =  n4.build(  5, "objecter send_op start")
+        e6,   n6 =  n5.build(  6, "objecter send_op finish")
+        e7,   n7 =  n6.build(  7, "objecter _op_submit finish")
+        e8,   n8 =  n7.build(  8, "IoCtx lock start")
+        e9,   n9 =  n8.build(  9, "IoCtx lock finish")
+        e10, n10 =  n9.build( 10, "IoCtx writefull finish")
 
-        #
         # client receive message
-        e35= build( 20, 21, client, "messenger fast_dispatch start")
-        e  = build( 21, 22, client, "objecter ms_dispatch")
-        e2 = build( 22, 23, client, "messenger fast_dispatch finish")
+        e11, n11 = graph.build_thread(client,
+                              11, "messenger fast_dispatch start")
+        e12, n12 = n11.build( 12, "objecter ms_dispatch")
+        e13, n13 = n12.build( 13, "messenger fast_dispatch finish")
 
-        #
         # osd recieive message
-        e4 = build( 25, 26,    osd, "messenger fast_dispatch start")
-        e  = build( 26, 27,    osd, "osd dispatch_op_fast start")
-        e22= build( 27, 28,    osd, "osd enqueue_op start")
-        e  = build( 28, 29,    osd, "osd enqueue_op finish")
-        e  = build( 29, 30,    osd, "osd dispatch_op_fast finish")
-        e  = build( 30, 31,    osd, "messenger fast_dispatch finish")
+        e14, n14 = graph.build_thread(osd,
+                              14, "messenger fast_dispatch start")
+        e15, n15 = n14.build( 15, "osd dispatch_op_fast start")
+        e16, n16 = n15.build( 16, "osd enqueue_op start")
+        e17, n17 = n16.build( 17, "osd enqueue_op finish")
+        e18, n18 = n17.build( 18, "osd dispatch_op_fast finish")
+        e19, n19 = n18.build( 19, "messenger fast_dispatch finish")
 
-        #
         # osd dequeue op
-        e23= build( 35, 36,    osd, "osd dequeue_op start")
-        e8 = build( 52, 53,    osd, "osd dequeue_op finish")
+        e20, n20 = graph.build_thread(osd,
+                              20, "osd dequeue_op start")
 
         # main osd receive OSD_OP
-        e  = build( 36, 37,    osd, "primarylogpg do_request start")
-        e  = build( 37, 38,    osd, "primarylogpg execute_ctx start")
-        e  = build( 38, 39,    osd, "primarylogpg prepare_transaction start")
-        e  = build( 39, 40,    osd, "primarylogpg do_osd_ops start")
-        e  = build( 40, 41,    osd, "primarylogpg do_osd_ops finish")
-        e  = build( 41, 42,    osd, "primarylogpg prepare_transaction finish")
-        e  = build( 42, 43,    osd, "primarylogpg submit_transaction start")
-        e5 = build( 43, 44,    osd, "replicatedbackend send_message_osd_cluster start")
-        e  = build( 44, 43,    osd, "replicatedbackend send_message_osd_cluster finish")
-        e9 = build( 43, 45,    osd, "replicatedbackend queue_transactions start")
-        e  = build( 45, 46,    osd, "filestore queue_transactions")
-        e24= build( 46, 47,    osd, "filejournal queue_writeq start")
-        e  = build( 47, 48,    osd, "filejournal queue_writeq finish")
-        e  = build( 48, 49,    osd, "replicatedbackend queue_transactions finish")
-        e  = build( 49, 50,    osd, "primarylogpg submit_transaction finish")
-        e  = build( 50, 51,    osd, "primarylogpg execute_ctx finish")
-        e  = build( 51, 52,    osd, "primarylogpg do_request finish")
+        e21, n21 = n20.build( 21, "primarylogpg do_request start")
+        e22, n22 = n21.build( 22, "primarylogpg execute_ctx start")
+        e23, n23 = n22.build( 23, "primarylogpg prepare_transaction start")
+        e24, n24 = n23.build( 24, "primarylogpg do_osd_ops start")
+        e25, n25 = n24.build( 25, "primarylogpg do_osd_ops finish")
+        e26, n26 = n25.build( 26, "primarylogpg prepare_transaction finish")
+        e27, n27 = n26.build( 27, "primarylogpg submit_transaction start")
+        e28, n28 = n27.build( 28, "replicatedbackend send_message_osd_cluster start")
+        e29, _   = n28.build(n27, "replicatedbackend send_message_osd_cluster finish")
+        e30, n29 = n27.build( 29, "replicatedbackend queue_transactions start")
+        e31, n30 = n29.build( 30, "filestore queue_transactions")
+        e32, n31 = n30.build( 31, "filejournal queue_writeq start")
+        e33, n32 = n31.build( 32, "filejournal queue_writeq finish")
+        e34, n33 = n32.build( 33, "replicatedbackend queue_transactions finish")
+        e35, n34 = n33.build( 34, "primarylogpg submit_transaction finish")
+        e36, n35 = n34.build( 35, "primarylogpg execute_ctx finish")
+        e37, n36 = n35.build( 36, "primarylogpg do_request finish")
+
+        e38, n37 = n36.build( 37, "osd dequeue_op finish")
 
         # main osd receive sub_op_reply
-        e  = build( 36, 55,    osd, "replicatedbackend handle_message")
-        e  = build( 55, 56,    osd, "replicatedbackend sub_op_modify_reply start")
-        e13= build( 56, 52,    osd, "replicatedbackend sub_op_modify_reply finish")
+        e39, n38 = n20.build( 38, "replicatedbackend handle_message")
+        e40, n39 = n38.build( 39, "replicatedbackend sub_op_modify_reply start")
+        e41, _   = n39.build(n36, "replicatedbackend sub_op_modify_reply finish")
 
         # main osd applied 3 osds
-        e  = build( 56, 65,    osd, "replicatedbackend execute_on_applied start")
-        e17= build( 65, 66,    osd, "primarylogpg repop_all_applied start")
-        e16= build( 66, 67,    osd, "primarylogpg repop_all_applied finish")
-        e  = build( 67, 68,    osd, "replicatedbackend execute_on_applied finish")
+        e42, n40 = n39.build( 40, "replicatedbackend execute_on_applied start")
+        e43, n41 = n40.build( 41, "primarylogpg repop_all_applied start")
+        e44, n42 = n41.build( 42, "primarylogpg repop_all_applied finish")
+        e45, n43 = n42.build( 43, "replicatedbackend execute_on_applied finish")
 
-        e11= build( 68, 69,    osd, "replicatedbackend execute_on_commit start")
-        e20= build( 69, 70,    osd, "primarylogpg repop_all_committed start")
-        e  = build( 70, 71,    osd, "primarylogpg register_on_commit start")
-        e34= build( 71, 72,    osd, "primarylogpg send_message_osd_cluster start")
-        e  = build( 72, 73,    osd, "primarylogpg send_message_osd_cluster finish")
-        e  = build( 73, 74,    osd, "primarylogpg register_on_commit finish")
-        e15= build( 74, 75,    osd, "primarylogpg register_on_success start")
-        e  = build( 75, 76,    osd, "primarylogpg register_on_success finish")
-        e  = build( 76, 77,    osd, "primarylogpg register_on_finish start")
-        e  = build( 77, 78,    osd, "primarylogpg register_on_finish finish")
-        e12= build( 78, 79,    osd, "primarylogpg repop_all_committed finish")
-        e  = build( 79, 56,    osd, "replicatedbackend execute_on_commit finish")
+        e46, n44 = n43.build( 44, "replicatedbackend execute_on_commit start")
+        e47, n45 = n44.build( 45, "primarylogpg repop_all_committed start")
+        e48, n46 = n45.build( 46, "primarylogpg register_on_commit start")
+        e49, n47 = n46.build( 47, "primarylogpg send_message_osd_cluster start")
+        e50, n48 = n47.build( 48, "primarylogpg send_message_osd_cluster finish")
+        e51, n49 = n48.build( 49, "primarylogpg register_on_commit finish")
+        e52, n50 = n49.build( 50, "primarylogpg register_on_success start")
+        e53, n51 = n50.build( 51, "primarylogpg register_on_success finish")
+        e54, n52 = n51.build( 52, "primarylogpg register_on_finish start")
+        e55, n53 = n52.build( 53, "primarylogpg register_on_finish finish")
+        e56, n54 = n53.build( 54, "primarylogpg repop_all_committed finish")
+        e57, _   = n54.build(n39, "replicatedbackend execute_on_commit finish")
 
         # case on commit first
-        graph.build_by_edge( 56, e11)
-        graph.build_by_edge( 74, e12)
+        _  , _   = n39.build(n44, e46)
+        _  , _   = n49.build(n54, e56)
 
         # case all applied separatly
-        graph.build_by_edge( 68, e13)
+        _  , _   = n43.build(n36, e41)
 
         # case applied - success - finish
-        graph.build_by_edge( 66, e15)
-        graph.build_by_edge( 78, e16)
+        _  , _   = n41.build(n50, e52)
+        _  , _   = n53.build(n42, e44)
 
         # TODO: model call operations
         # replica osd 
-        graph.build_by_edge( 55, e9)
-        graph.build_by_edge( 49, e8)
+        _  , _   = n38.build(n29, e30)
+        _  , _   = n33.build(n37, e38)
 
-        #
         # main osd on applied
-        e32= build( 80, 81,    osd, "replicatedbackend op_applied start")
-        e18= build( 81, 82,    osd, "replicatedbackend op_applied finish")
+        e58, n55 = graph.build_thread(osd,
+                              55, "replicatedbackend op_applied start")
+        e59, n56 = n55.build( 56, "replicatedbackend op_applied finish")
 
         # case call all applied
-        graph.build_by_edge( 81, e17)
-        graph.build_by_edge( 67, e18)
+        _  , _   = n55.build(n41, e43)
+        _  , _   = n42.build(n56, e59)
 
-        #
         # main osd on commit
-        e30= build( 85, 86,    osd, "replicatedbackend op_commit start")
-        e21= build( 86, 87,    osd, "replicatedbackend op_commit finish")
+        e60, n57 = graph.build_thread(osd,
+                              57, "replicatedbackend op_commit start")
+        e61, n58 = n57.build( 58, "replicatedbackend op_commit finish")
 
         # case call all commit
-        graph.build_by_edge( 86, e20)
-        graph.build_by_edge( 79, e21)
+        _  , _   = n57.build(n45, e47)
+        _  , _   = n54.build(n58, e61)
 
-        #
         # journal write
-        # TODO: actually, 90->91 cannot create new thread instance
-        e25= build( 90, 90,    osd, "filejournal singlewrite")
-        e6 = build( 90, 91,    osd, "filejournal queue_completions_thru")
-        e7 = build( 91, 92,    osd, "filejournal queue_finisher start")
-        e  = build( 92, 93,    osd, "filejournal queue_finisher finish")
-        graph.build_by_edge( 93, e6)
+        e62, n59 = graph.build_thread(osd,
+                              59, "filejournal singlewrite")
+        _  , _   = n59.build(n59, e62)
+        e63, n60 = n59.build( 60, "filejournal queue_completions_thru")
+        e64, n61 = n60.build( 61, "filejournal queue_finisher start")
+        e65, n62 = n61.build( 62, "filejournal queue_finisher finish")
+        _  , _   = n62.build(n60, e63)
 
-        #
         # journaled ahead
-        e26= build( 95, 96,    osd, "filestore _journaled_ahead start")
-        e27= build( 96, 97,    osd, "filestore queue_op start")
-        e  = build( 97, 98,    osd, "filestore queue_op finish")
-        e29= build( 98, 99,    osd, "filestore queue_ondisk_finishers start")
-        e  = build( 99,100,    osd, "filestore queue_ondisk_finishers finish")
-        e  = build(100,101,    osd, "filestore _journaled_ahead finish")
+        e66, n63 = graph.build_thread(osd,
+                              63, "filestore _journaled_ahead start")
+        e67, n64 = n63.build( 64, "filestore queue_op start")
+        e68, n65 = n64.build( 65, "filestore queue_op finish")
+        e69, n66 = n65.build( 66, "filestore queue_ondisk_finishers start")
+        e70, n67 = n66.build( 67, "filestore queue_ondisk_finishers finish")
+        e71, n68 = n67.build( 68, "filestore _journaled_ahead finish")
 
-        #
         # disk write
-        e28= build(105,106,    osd, "filestore _do_op start")
-        e  = build(106,107,    osd, "filestore _do_op finish")
-        e  = build(107,108,    osd, "filestore _finish_op start")
-        e  = build(108,109,    osd, "filestore execute_onreadable_sync start")
-        e  = build(109,110,    osd, "filestore execute_onreadable_sync finish")
-        e10= build(110,111,    osd, "filestore queue_onreadable start")
-        e  = build(111,112,    osd, "filestore queue_onreadable finish")
-        e  = build(112,113,    osd, "filestore _finish_op finish")
+        e72, n69 = graph.build_thread(osd,
+                              69, "filestore _do_op start")
+        e73, n70 = n69.build( 70, "filestore _do_op finish")
+        e74, n71 = n70.build( 71, "filestore _finish_op start")
+        e75, n72 = n71.build( 72, "filestore execute_onreadable_sync start")
+        e76, n73 = n72.build( 73, "filestore execute_onreadable_sync finish")
+        e77, n74 = n73.build( 74, "filestore queue_onreadable start")
+        e78, n75 = n74.build( 75, "filestore queue_onreadable finish")
+        e79, n76 = n75.build( 76, "filestore _finish_op finish")
 
         # replica osd disk write
-        graph.build_by_edge(108, e10)
+        _  , _   = n71.build(n74, e77)
 
-        #
         ## replica osd on commit
-        e31= build(115,116,    osd, "eplicatedbackend sub_op_modify_commit start")
-        e19= build(116,117,    osd, "replicatedbackend send_message_osd_cluster start")
-        e  = build(117,118,    osd, "replicatedbackend send_message_osd_cluster finish")
-        e  = build(118,119,    osd, "eplicatedbackend sub_op_modify_commit finish")
+        e80, n77 = graph.build_thread(osd,
+                              77, "replicatedbackend sub_op_modify_commit start")
+        e81, n78 = n77.build( 78, "replicatedbackend send_message_osd_cluster start")
+        e82, n79 = n78.build( 79, "replicatedbackend send_message_osd_cluster finish")
+        e83, n80 = n79.build( 80, "replicatedbackend sub_op_modify_commit finish")
 
-        #
         ## replica osd on applied
-        e33= build(120,121,    osd, "replicatedbackend sub_op_modify_applied start")
-        e14= build(121,122,    osd, "replicatedbackend sub_op_modify_applied finish")
+        e84, n81 = graph.build_thread(osd,
+                              81, "replicatedbackend sub_op_modify_applied start")
+        e85, n82 = n81.build( 82, "replicatedbackend sub_op_modify_applied finish")
 
-        #? case  on applied sendmsg
-        graph.build_by_edge(121, e19)
-        graph.build_by_edge(118, e14)
+        #! case  on applied sendmsg
+        _  , _   = n81.build(n78, e81)
+        _  , _   = n79.build(n82, e85)
 
-
-        graph.set_lock(  3)
-        graph.set_lock(  5)
-        graph.set_lock(  8)
-        graph.set_lock( 28)
-        graph.set_lock( 44)
-        graph.set_lock( 47)
-        graph.set_lock( 56)
-        graph.set_lock( 72)
-        graph.set_lock( 92)
-        graph.set_lock( 97)
-        graph.set_lock( 99)
-        graph.set_lock(111)
-        graph.set_lock(117)
-
+        n3.set_lock()
+        n5.set_lock()
+        n8.set_lock()
+        n16.set_lock()
+        n28.set_lock()
+        n31.set_lock()
+        n39.set_lock()
+        n47.set_lock()
+        n61.set_lock()
+        n64.set_lock()
+        n66.set_lock()
+        n74.set_lock()
+        n78.set_lock()
 
         # client send osd
-        e3.join_edge(e4, {("tid", "tid"),
-                          ("target_t", "target"),
-                          ("target", "target_s"),
-                          ("msg_op", "msg_op")})
+        j1 = e5.join_remote(e14, ["tid",
+                                  "msg_op",
+                                  ("target_t", "target"),
+                                  ("target", "target_s")])
         # osd enqueue op
-        e22.join_edge(e23, {("tracked_op_seq", "tracked_op_seq"),
-                            ("pgid", "pgid")}, is_remote=False)
+        j2 = e16.join_local(e20, ["tracked_op_seq",
+                                  "pgid"])
         # main osd send sub_op to replica osd
-        e5.join_edge(e4, {("tid", "tid"),
-                          ("target_t", "target"),
-                          ("target", "target_s"),
-                          ("msg_op", "msg_op")})
+        j3 = e28.join_remote(e14, ["tid",
+                                   "msg_op",
+                                   ("target_t", "target"),
+                                   ("target", "target_s")])
         # filejournal queue writeq
-        e24.join_edge(e25,
-                      {("tracked_op_seq", "tracked_op_seq"),
-                       ("seq", "seq")},
-                      is_remote=False,
-                      is_shared=True)
+        #TODO: nested request
+        j4 = e32.join_local(e62, ["tracked_op_seq",
+                                  "seq"],
+                            is_shared=True)
         # filejournal journaled ahead
-        e7.join_edge(e26,
-                     {("tracked_op_seq", "tracked_op_seq"),
-                      ("seq", "seq")},
-                     is_remote=False)
+        j5 = e64.join_local(e66, ["tracked_op_seq",
+                                  "seq"])
         # filejournal write disk
-        e27.join_edge(e28,
-                      {("tracked_op_seq", "tracked_op_seq"),
-                       ("seq", "seq")},
-                      is_remote=False)
+        j6 = e67.join_local(e72, ["tracked_op_seq",
+                                  "seq"])
         # main osd on commit
-        e29.join_edge(e30,
-                      {("tracked_op_seq", "tracked_op_seq")},
-                      is_remote=False)
+        j7 = e69.join_local(e60, ["tracked_op_seq"])
         # replica osd on commit
-        e29.join_edge(e31,
-                      {("tracked_op_seq", "tracked_op_seq")},
-                      is_remote=False)
+        j9 = e69.join_local(e80, ["tracked_op_seq"])
         # replica osd reply main osd
-        e19.join_edge(e4,
-                      {("tid", "tid"),
-                       ("target_t", "target"),
-                       ("target", "target_s"),
-                       ("msg_op", "msg_op")})
+        j10 = e81.join_remote(e14, ["tid",
+                                    "msg_op",
+                                    ("target_t", "target"),
+                                    ("target", "target_s")])
         # main osd on apply
-        e10.join_edge(e32,
-                      {("tracked_op_seq", "tracked_op_seq")},
-                      is_remote=False)
+        j11 = e77.join_local(e58, ["tracked_op_seq"])
         # replica osd on apply
-        e10.join_edge(e33,
-                      {("tracked_op_seq", "tracked_op_seq")},
-                      is_remote=False)
+        j12 = e77.join_local(e84, ["tracked_op_seq"])
         # main osd send reply
         # NOTE: msg_op not match
-        e34.join_edge(e35,
-                      {("tid", "tid"),
-                       ("target_t", "target"),
-                       ("target", "target_s")})
+        j13 = e49.join_remote(e11, ["tid",
+                                    ("target_t", "target"),
+                                    ("target", "target_s")])
         # main osd unlock ioctx
-        e2.join_edge(e1, {("tid", "tid"), ("target_s", "target_t")}, is_remote=False)
+        j14 = e13.join_local(e9, ["tid",
+                                  ("target_s", "target_t")])
 
-        graph.set_state(10, "SUCCESS")
-
-        # f1.join_edge(j1)
-        # f6.join_edge(j2)
-        # f2.join_edge(j2)
-        # f3.join_edge(j3)
-        # f4.join_edge(j4, {("t_host", "t_host")})
-        # f5.join_edge(j5, {("t_host", "host")})
-        # f7.join_edge(j1)
-
-        # graph.set_state(20, "API FAIL")
-        # graph.set_state(21, "RETRY FAIL")
-        # graph.set_state(22, "NO VALID HOST")
-        # graph.set_state(25, "SUCCESS")
-        # graph.set_state(26, "COMPUTE FAIL")
+        n10.set_state("SUCCESS")
 
     def filter_logfile(self, f_dir, f_name, var_dict):
         if f_name.startswith("out"):
