@@ -36,58 +36,61 @@ relations = {}
 
 class NovaScheduler(DriverBase):
     def build_graph(self, graph):
-        build = graph.build_edge
 
-        e  = build( 0,  1, api,  "received", True)
-        e  = build( 1, 20, api,  "failed:")
-        f1 = build( 1,  2, api,  "sent/retried", )
-        e  = build( 2, 27, api,  "api returned")
+        e1,  n1  = graph.build_thread(api,
+                               1, "received", True)
+        e2,  n20 =  n1.build( 20, "failed:")
+        e3,  n2  =  n1.build(  2, "sent/retried")
+        e4,  n27 =  n2.build( 27, "api returned")
 
-        j1 = build(28,  3, cond, "received")
-        e  = build( 3, 21, cond, "failed: attempt")
-        e  = build( 3,  4, cond, "attempts")
-        f2 = build( 4,  5, cond, "sent scheduler")
+        e5,  n3  = graph.build_thread(cond,
+                               3, "received")
+        e6,  n21 =  n3.build( 21, "failed: attempt")
+        e7,  n4  =  n3.build(  4, "attempts")
+        e8,  n5  =  n4.build(  5, "sent scheduler")
 
         # case 3000
-        e  = build( 5, 40, cond, "failed: Timed out")
-        f6 = build( 40, 5, cond, "sent scheduler")
+        e9,  n40 =  n5.build( 40, "failed: Timed out")
+        e10, _   = n40.build( n5, "sent scheduler")
 
-        j3 = build( 5, 22, cond, "failed: NoValidHost")
-        j4 = build( 5, 13, cond, "decided")
-        f5 = build(13, 14, cond, "sent")
+        e11, n22 =  n5.build( 22, "failed: NoValidHost")
+        e12, n13 =  n5.build( 13, "decided")
+        e13, n14 = n13.build( 14, "sent")
 
-        j2 = build(29,  6, sche, "received")
-        e  = build( 6,  7, sche, "start scheduling")
-        e  = build( 7,  8, sche, "start_db")
-        e  = build( 8,  9, sche, "finish_db")
-        e  = build( 9, 10, sche, "finish scheduling")
-        f4 = build(10, 11, sche, "selected")
-        f3 = build(10, 12, sche, "failed:")
+        e14, n6  = graph.build_thread(sche,
+                               6, "received")
+        e15, n7  =  n6.build(  7, "start scheduling")
+        e16, n8  =  n7.build(  8, "start_db")
+        e17, n9  =  n8.build(  9, "finish_db")
+        e18, n10 =  n9.build( 10, "finish scheduling")
+        e19, n11 = n10.build( 11, "selected")
+        e20, n12 = n10.build( 12, "failed:")
 
-        j5 = build(30, 15, comp, "received")
-        e  = build(15, 24, comp, "success")
-        e  = build(24, 25, comp, "finished: active")
-        e  = build(15, 16, comp, "fail: retry")
-        f7 = build(16, 31, comp, "sent/retried")
-        e  = build(31, 32, comp, "finished: rescheduled")
-        e  = build(15, 23, comp, "fail:")
-        e  = build(23, 26, comp, "finished:")
+        e21, n15 = graph.build_thread(comp,
+                              15, "received")
+        e22, n24 = n15.build( 24, "success")
+        e23, n25 = n24.build( 25, "finished: active")
+        e24, n16 = n15.build( 16, "fail: retry")
+        e25, n31 = n16.build( 31, "sent/retried")
+        e26, n32 = n31.build( 32, "finished: rescheduled")
+        e27, n23 = n15.build( 23, "fail:")
+        e28, n26 = n23.build( 26, "finished:")
 
-        graph.set_lock(5)
+        n5.set_lock()
 
-        f1.join_edge(j1)
-        f6.join_edge(j2)
-        f2.join_edge(j2)
-        f3.join_edge(j3)
-        f4.join_edge(j4, {("t_host", "t_host")})
-        f5.join_edge(j5, {("t_host", "host")})
-        f7.join_edge(j1)
+        e3.join_remote(e5)
+        e10.join_remote(e14)
+        e8.join_remote(e14)
+        e20.join_remote(e11)
+        e19.join_remote(e12, ["t_host"])
+        e13.join_remote(e21, [("t_host", "host")])
+        e25.join_remote(e5)
 
-        graph.set_state(20, "API FAIL")
-        graph.set_state(21, "RETRY FAIL")
-        graph.set_state(22, "NO VALID HOST")
-        graph.set_state(25, "SUCCESS")
-        graph.set_state(26, "COMPUTE FAIL")
+        n20.set_state("API FAIL")
+        n21.set_state("RETRY FAIL")
+        n22.set_state("NO VALID HOST")
+        n25.set_state("SUCCESS")
+        n26.set_state("COMPUTE FAIL")
 
     def filter_logfile(self, f_dir, f_name, var_dict):
         if f_name.startswith("out"):

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from collections import OrderedDict
 
 from workflow_parser.log_engine import TargetsCollector

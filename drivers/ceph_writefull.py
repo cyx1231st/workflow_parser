@@ -30,16 +30,16 @@ client.color = "#54c0e8"
 class CephWritefull(DriverBase):
     def build_graph(self, graph):
         # client issue writefull
-        e1,   n1 = graph.build_thread(client,
+        e1,  n1  = graph.build_thread(client,
                                1, "IoCtx writefull start", True)
-        e2,   n2 =  n1.build(  2, "objecter _op_submit start")
-        e3,   n3 =  n2.build(  3, "objecter calculate start")
-        e4,   n4 =  n3.build(  4, "objecter calculate finish")
-        e5,   n5 =  n4.build(  5, "objecter send_op start")
-        e6,   n6 =  n5.build(  6, "objecter send_op finish")
-        e7,   n7 =  n6.build(  7, "objecter _op_submit finish")
-        e8,   n8 =  n7.build(  8, "IoCtx lock start")
-        e9,   n9 =  n8.build(  9, "IoCtx lock finish")
+        e2,  n2  =  n1.build(  2, "objecter _op_submit start")
+        e3,  n3  =  n2.build(  3, "objecter calculate start")
+        e4,  n4  =  n3.build(  4, "objecter calculate finish")
+        e5,  n5  =  n4.build(  5, "objecter send_op start")
+        e6,  n6  =  n5.build(  6, "objecter send_op finish")
+        e7,  n7  =  n6.build(  7, "objecter _op_submit finish")
+        e8,  n8  =  n7.build(  8, "IoCtx lock start")
+        e9,  n9  =  n8.build(  9, "IoCtx lock finish")
         e10, n10 =  n9.build( 10, "IoCtx writefull finish")
 
         # client receive message
