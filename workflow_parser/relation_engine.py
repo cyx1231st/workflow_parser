@@ -359,7 +359,7 @@ def relation_parse(pcs_collector, tgs_collector):
         hosts.sort(key=lambda hostc: hostc.hostname)
         for hostc in hosts:
             if hostc.low != 0:
-                print "adjust %r" % hostc
+                print("adjust %r" % hostc)
                 for target in tgs_collector.itervalues(tgs_collector.targets_by_host[hostc.hostname]):
                     target.offset = hostc.low
         for relation in relations:
