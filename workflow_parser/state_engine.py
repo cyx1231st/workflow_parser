@@ -7,6 +7,7 @@ from collections import OrderedDict
 from workflow_parser.log_engine import TargetsCollector
 from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import MasterGraph
+from workflow_parser.state_graph import Token
 from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import JoinInterval
 from workflow_parser.state_machine import NestedRequest
@@ -217,26 +218,32 @@ class StateEngine(object):
                 len_index = len(loglines)
                 assert len_index > 0
                 self.pcs.ignored_loglines_total_by_component[f_obj.component][1] += len_index
+                threadins = None
                 while c_index != len_index:
                     logline = loglines[c_index]
-                    graph = self.mastergraph.decide_threadgraph(logline)
-
-                    if not graph:
-                        # error
-                        # print("(ParserEngine) parse error: cannot decide graph")
-                        # report_loglines(loglines, c_index)
-                        # print "-------- end -----------"
-                        # raise StateError("(ParserEngine) parse error: cannot decide graph")
-                        self.pcs.collect_ignored(logline, loglines, c_index,
-                                thread, f_obj.component, f_obj.target)
-                        logline.ignored = True
-                        c_index += 1
-                        continue
-
-                    threadins = ThreadInstance(thread, graph, loglines, c_index)
+                    if not threadins:
+                        token = Token.new(self.mastergraph, logline)
+                        if not token:
+                            # error
+                            # print("(ParserEngine) parse error: cannot decide graph")
+                            # report_loglines(loglines, c_index)
+                            # print "-------- end -----------"
+                            # raise StateError("(ParserEngine) parse error: cannot decide graph")
+                            import pdb; pdb.set_trace()
+                            self.pcs.collect_ignored(logline, loglines, c_index,
+                                    thread, f_obj.component, f_obj.target)
+                            logline.ignored = True
+                        else:
+                            threadins = ThreadInstance(thread, token, loglines, c_index)
+                    else:
+                        is_success = threadins.step(c_index)
+                        if not is_success:
+                            self.tis.collect_thread(threadins)
+                            threadins = None
+                            continue
+                    c_index += 1
+                if threadins:
                     self.tis.collect_thread(threadins)
-                    assert c_index < threadins.f_index
-                    c_index = threadins.f_index
         print("-------------------------")
 
         #### summary ####
@@ -334,7 +341,8 @@ class StateEngine(object):
                     target_paces = self.pcs.joined_paces_by_jo[join_obj]
                 else:
                     target_paces = self.pcs.joined_paces_by_jo_host[join_obj][care_host]
-                assert isinstance(target_paces, OrderedDict)
+                if target_paces:
+                    assert isinstance(target_paces, OrderedDict)
 
                 to_schemas = defaultdict(set)
                 for pace in target_paces:
@@ -412,6 +420,7 @@ class StateEngine(object):
                 print("%s: %d unjoins paces"
                         % (edge.name,
                            len(notjoins_paces)))
+            print("--------")
             for edge, notjoined_paces in self.pcs.unjoinedpaces_by_edge.iteritems():
                 print("%s: %d unjoined paces"
                         % (edge.name,

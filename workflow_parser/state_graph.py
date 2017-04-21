@@ -426,15 +426,6 @@ class ThreadGraph(object):
             self.end_nodes.add(node)
         self.master_graph._remove_thread(thread_graph)
 
-########
-    def decide_node(self, logline):
-        assert isinstance(logline, LogLine)
-        for node in self.start_nodes:
-            edge = node.decide_edge(logline)
-            if edge is not None:
-                return node
-        return None
-
 
 class MasterGraph(object):
     def __init__(self, name):
@@ -594,12 +585,45 @@ class MasterGraph(object):
             print("%r\n" % th_g)
         print("--------------<<\n")
 
-    def decide_threadgraph(self, logline):
-        assert len(self.threadgraphs_by_component) > 0
+
+class Token(object):
+    def __init__(self, start_node, edge, logline):
+        assert isinstance(start_node, StartNode)
+        assert isinstance(edge, Edge)
         assert isinstance(logline, LogLine)
-        threadgraphs = self.threadgraphs_by_component.get(logline.component, OrderedSet())
-        for thread_graph in threadgraphs:
-            node = thread_graph.decide_node(logline)
-            if node:
-                return thread_graph
+        assert edge in start_node.edges
+
+        self.history = [(start_node, edge, logline)]
+        self.from_node = start_node
+        self.edge = edge
+        self.logline = logline
+        self.thread_graph = start_node.thread_graph
+
+    @property
+    def node(self):
+        return self.edge.node
+
+    @classmethod
+    def new(cls, master_graph, logline):
+        assert isinstance(logline, LogLine)
+        assert isinstance(master_graph, MasterGraph)
+
+        threadgraphs = master_graph.threadgraphs_by_component.get(logline.component, OrderedSet())
+        for t_g in threadgraphs:
+            for s_node in t_g.start_nodes:
+                edge = s_node.decide_edge(logline)
+                if edge:
+                    return cls(s_node, edge, logline)
         return None
+
+    def step(self, logline):
+        assert isinstance(logline, LogLine)
+        edge = self.node.decide_edge(logline)
+        if edge:
+            self.from_node = self.node
+            self.edge = edge
+            self.logline = logline
+            self.history.append((self.from_node, edge, logline))
+            return True
+        else:
+            return False

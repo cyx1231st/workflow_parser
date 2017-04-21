@@ -8,6 +8,7 @@ from workflow_parser.state_graph import ThreadGraph
 from workflow_parser.state_graph import MasterGraph
 from workflow_parser.state_graph import Node
 from workflow_parser.state_graph import Edge
+from workflow_parser.state_graph import Token
 from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import Join
 from workflow_parser.utils import report_loglines
@@ -44,6 +45,7 @@ class Pace(object):
         self.joins_int = None
         self.joined_int = None
 
+        # assert logline.pace is None
         if logline.pace is None:
             logline.pace = self
 
@@ -499,25 +501,25 @@ class JoinInterval(IntervalBase):
 
 
 class ThreadInstance(object):
-    def __init__(self, thread, threadgraph, loglines, s_index):
+    def __init__(self, thread, token, loglines, s_index):
         assert isinstance(thread, str)
-        assert isinstance(threadgraph, ThreadGraph)
+        assert isinstance(token, Token)
         assert isinstance(loglines, list)
         assert isinstance(s_index, int)
 
         self.thread = thread
-        self.threadgraph = threadgraph
+        self.token = token
+        self.threadgraph = self.token.thread_graph
         self.thread_vars = {}
-        self.thread_vars_dup = {}
+        self.thread_vars_dup = defaultdict(set)
 
         self.paces = []
         self.paces_by_mark = defaultdict(list)
 
         self.intervals = []
-        self.intervals_extended = []
 
         self.s_index = s_index
-        self.f_index = None
+        self.f_index = s_index + 1
         self.loglines = loglines
 
         self.component = None
@@ -529,7 +531,7 @@ class ThreadInstance(object):
         self.joined_ints = set()
         self.joins_ints = set()
 
-        self.is_shared = threadgraph.is_shared
+        self.is_shared = self.threadgraph.is_shared
         if self.is_shared:
             self.request = None
             self.requests = set()
@@ -539,118 +541,8 @@ class ThreadInstance(object):
             self.requestins = None
 
         # init
-        s_log = loglines[s_index]
-        node = threadgraph.decide_node(s_log)
-        index = s_index
-        while index != len(loglines):
-            log = loglines[index]
-            edge = node.decide_edge(log)
-            if not edge:
-                break
-            if log.pace is not None:
-                assert False
-            pace = Pace(log, node, edge, self)
-            marks = edge.marks
-            for mark in marks:
-                self.paces_by_mark[mark].append(pace)
-            if edge.joins_objs:
-                self.joins_paces.append(pace)
-            if edge.joined_objs:
-                self.joined_paces.append(pace)
-            self.paces.append(pace)
-            node = edge.node
-            index += 1
-
-        self.f_index = index
-
-        # check
-        if not self.paces or not self.is_complete:
-            self.report("Thread is not complete")
-            raise StateError("(ThreadInstance) parse error")
-
-        # check and set thread vars
-        v_dict = defaultdict(set)
-        for pace in self.paces:
-            logline = pace.logline
-            keys = logline.get_keys(True)
-            for key in keys:
-                v_dict[key].add(logline[key])
-
-        for name in ("keyword", "time", "seconds"):
-            v_dict.pop(name)
-
-        for name in ("component", "target", "host"):
-            values = v_dict.pop(name)
-            if len(values) == 1:
-                setattr(self, name, values.pop())
-            else:
-                self.report("Thread key %s contains: %s" % (name, values))
-                raise StateError("(ThreadInstance) parse error: variable mismatch")
-
-        threads = v_dict.pop("thread")
-        if len(threads) == 1:
-            thread = threads.pop()
-            if thread != self.thread:
-                self.report("Thread %s collides: %s" % (self.thread, thread))
-                raise StateError("(ThreadInstance) thread mismatch")
-        else:
-            self.report("Thread %s collides: %s" % (self.thread, threads))
-            raise StateError("(ThreadInstance) thread mismatch")
-
-        requests = v_dict.pop("request")
-        if None in requests:
-            requests.discard(None)
-        if self.is_shared:
-            self.requests.update(requests)
-        else:
-            if len(requests) == 0:
-                pass
-            elif len(requests) == 1:
-                self.request = requests.pop()
-            else:
-                self.report("Thread has multiple requests %s" % requests)
-                raise StateError("(ThreadInstance) thread is not shared!")
-
-        # generate vars
-        for k, v in v_dict.iteritems():
-            if len(v) == 0:
-                pass
-            elif len(v) == 1:
-                self.thread_vars[k] = v.pop()
-            else:
-                self.thread_vars_dup[k] = v
-
-        # NOTE: must be the last, intervals and link
-        prv = None
-        prv_int = None
-        for pace in self.paces:
-            pace.prv_pace = prv
-            if prv:
-                prv.nxt_pace = pace
-                interval = ThreadInterval(prv, pace, self)
-                prv.nxt_int = interval
-                pace.prv_int = interval
-                self.intervals.append(interval)
-                interval.prv_int = prv_int
-                if prv_int:
-                    prv_int.nxt_int = interval
-                prv_int = interval
-            prv = pace
-
-        from_pace = None
-        for interval in self.intervals:
-            if interval.is_lock:
-                if from_pace is not None:
-                    to_pace = interval.from_pace
-                    self.intervals_extended.append(
-                            ThreadInterval(from_pace, to_pace, self))
-                    from_pace = None
-            else:
-                if from_pace is None:
-                    from_pace = interval.from_pace
-        if from_pace is not None:
-            self.intervals_extended.append(
-                    ThreadInterval(from_pace, self.intervals[-1].to_pace, self))
+        self._apply_token()
+        assert self.paces
 
     @property
     def request_state(self):
@@ -740,6 +632,88 @@ class ThreadInstance(object):
         report_loglines(self.loglines, self.s_index, self.f_index)
         print "-------- end -----------"
 
+    def _apply_token(self):
+        from_node = self.token.from_node
+        edge = self.token.edge
+        logline = self.token.logline
+        pace = Pace(logline, from_node, edge, self)
+        for mark in edge.marks:
+            self.paces_by_mark[mark].append(pace)
+        if edge.joins_objs:
+            self.joins_paces.append(pace)
+        if edge.joined_objs:
+            self.joined_paces.append(pace)
+        for key in logline.get_keys(True):
+            if key in ("keyword", "time", "seconds"):
+                continue
+
+            new_val = logline[key]
+            if key in ("component", "target", "host", "thread"):
+                val = getattr(self, key)
+                if val is None:
+                    setattr(self, key, new_val)
+                elif val != logline[key]:
+                    self.report("Thread var %s=%s, conflicts %s"
+                            % (key, val, new_val))
+                    raise StateError("(ThreadInstance) parse error: variable mismatch")
+                else:
+                    pass
+            elif key == "request":
+                if new_val is None:
+                    pass
+                elif self.is_shared:
+                    self.requests.add(new_val)
+                elif self.request is None:
+                    self.request = new_val
+                elif self.request != new_val:
+                    self.report("Thread request=%s, conflicts %s"
+                            % (self.request, new_val))
+                    raise StateError("(ThreadInstance) thread is not shared!")
+                else:
+                    pass
+            else:
+                if key in self.thread_vars_dup:
+                    self.thread_vars_dup[key].add(new_val)
+                else:
+                    val = self.thread_vars.get(key)
+                    if val is None:
+                        self.thread_vars[key] = new_val
+                    elif val != new_val:
+                        self.thread_vars_dup[key].add(val)
+                        self.thread_vars_dup[key].add(new_val)
+                        self.thread_vars.pop(key)
+                    else:
+                        pass
+
+        if self.paces:
+            prv_pace = self.paces[-1]
+            pace.prv_pace = prv_pace
+            prv_pace.nxt_pace = pace
+
+            interval = ThreadInterval(prv_pace, pace, self)
+            prv_pace.nxt_int = interval
+            pace.prv_int = interval
+
+            if self.intervals:
+                prv_interval = self.intervals[-1]
+                prv_interval.nxt_int = interval
+                interval.prv_int = prv_interval
+            self.intervals.append(interval)
+
+        self.paces.append(pace)
+
+    def step(self, log_index):
+        assert isinstance(log_index, int)
+        assert log_index == self.f_index
+
+        logline = self.loglines[log_index]
+        if self.token.step(logline):
+            self._apply_token()
+            self.f_index = log_index + 1
+            return True
+        else:
+            return False
+
 
 class NestedRequest(ThreadInstance):
     @classmethod
@@ -812,7 +786,6 @@ class NestedRequest(ThreadInstance):
         self.paces_by_mark = {}
 
         self.intervals = []
-        self.intervals_extended = []
 
         self.joined_paces = []
         self.joins_paces = []
@@ -854,7 +827,6 @@ class NestedRequest(ThreadInstance):
         dummy_pace1.nxt_int = dummy_interval
         dummy_pace2.prv_int = dummy_interval
         self.intervals.append(dummy_interval)
-        self.intervals_extended.append(dummy_interval)
         dummy_interval.joined_int = joined_int
         joined_int.joins_int = dummy_interval
         dummy_interval.joins_int = joins_int
@@ -883,7 +855,7 @@ class RequestInstance(object):
         # interval
         self.join_ints = set()
         self.td_ints = set()
-        self.intervals_extended = set()
+        self.intervals_extended = []
 
         # error report
         self.errors = {}
@@ -1012,20 +984,35 @@ class RequestInstance(object):
             self.errors["Contains no end thread"] = ""
         else:
             int_ = self.end_interval
+            to_pace = None
             while int_:
                 int_.is_main = True
                 if isinstance(int_, ThreadInterval):
                     ti = int_.threadins
                     if ti not in _main_tis:
-                        self.intervals_extended.update(ti.intervals_extended)
                         _main_tis.add(ti)
+                    if to_pace is None:
+                        to_pace = int_.to_pace
                 else:
-                    self.intervals_extended.add(int_)
+                    if to_pace is not None:
+                        self.intervals_extended.append(
+                                ThreadInterval(int_.to_pace,
+                                               to_pace,
+                                               int_.to_threadins))
+                        to_pace = int_.from_pace
+                    else:
+                        assert False
+                    self.intervals_extended.append(int_)
                 try:
                     int_ = int_.prv_main
                 except StateError as e:
                     self.errors["Main route parse error"] = (int_, e)
                     break
+            if to_pace is not None:
+                self.intervals_extended.append(
+                        ThreadInterval(self.start_interval.from_pace,
+                                       to_pace,
+                                       self.start_interval.threadins))
 
         # error: stray thread instances
         self.e_stray_threadinss = tis - seen_tis
