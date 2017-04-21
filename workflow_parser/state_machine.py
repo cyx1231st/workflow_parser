@@ -32,7 +32,6 @@ class Pace(object):
 
         self.logline = logline
         self.from_node = from_node
-        self.to_node = edge.node
         self.edge = edge
         self.threadins = threadins
 
@@ -49,9 +48,9 @@ class Pace(object):
         if logline.pace is None:
             logline.pace = self
 
-    # total ordering
-    __eq__ = lambda self, other: self.seconds == other.seconds
-    __lt__ = lambda self, other: self.seconds < other.seconds
+    @property
+    def to_node(self):
+        return self.edge.node
 
     @property
     def request_state(self):
@@ -98,6 +97,10 @@ class Pace(object):
     @property
     def is_thread_end(self):
         return self.to_node.is_thread_end
+
+    # total ordering
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
 
     def __getattribute__(self, item):
         assert isinstance(item, str)

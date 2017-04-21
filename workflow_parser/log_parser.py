@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from abc import ABCMeta
 from abc import abstractmethod
 from collections import defaultdict
@@ -21,7 +23,6 @@ class DriverPlugin(object):
             self._extensions = ["log"]
         else:
             self._extensions = extensions
-
         self._errors = set()
         self._occur = 0
 
@@ -35,9 +36,9 @@ class DriverPlugin(object):
         self._errors = set()
         self._occur = 0
 
-    def _purge_dict(self, var_dict):
+    def _purge_dict_empty_values(self, var_dict):
         for k in var_dict.keys():
-            if not var_dict[k]:
+            if var_dict[k] in {None, ""}:
                 var_dict.pop(k)
 
     def do_filter_logfile(self, f_dir, f_name):
@@ -66,7 +67,7 @@ class DriverPlugin(object):
                 # NOTE
                 # print("(LogDriver) loaded: %s" % f_dir)
                 assert all(isinstance(k, str) for k in var_dict.keys())
-                self._purge_dict(var_dict)
+                self._purge_dict_empty_values(var_dict)
                 return f_name, var_dict
             else:
                 return None, None
@@ -82,7 +83,7 @@ class DriverPlugin(object):
             var_dict = {}
             ret = self.filter_logline(line, var_dict)
             assert all(isinstance(k, str) for k in var_dict.keys())
-            self._purge_dict(var_dict)
+            self._purge_dict_empty_values(var_dict)
             assert isinstance(ret, bool)
             return ret, var_dict
         except Exception as e:
@@ -121,10 +122,11 @@ class DriverPlugin(object):
 
 @total_ordering
 class LogLine(object):
-    def __init__(self, line, logfile, plugin, vs):
+    def __init__(self, line, target_obj, plugin, vs):
         assert isinstance(line, str)
-        assert isinstance(logfile, LogFile)
+        assert isinstance(target_obj, Target)
         assert isinstance(plugin, DriverPlugin)
+        assert isinstance(vs, dict)
 
         # required immediately:
         self.time = None
@@ -135,9 +137,12 @@ class LogLine(object):
         # required after 2nd pass:
         self.request = None
 
-        self.logfile = logfile
+        self.target_obj = target_obj
         self.line = line.strip()
         self._vars = {}
+
+        self.correct = True
+        self.ignored = False
 
         self.prv_logline = None
         self.nxt_logline = None
@@ -145,11 +150,9 @@ class LogLine(object):
         self.prv_thread_logline = None
         self.nxt_thread_logline = None
 
-        self.correct = True
-        self.ignored = False
-
         self.pace = None
 
+        # init
         for k, v in vs.iteritems():
             self[k] = v
 
@@ -160,6 +163,18 @@ class LogLine(object):
             raise LogError("(LogLine) require 'seconds' when parse line: %s" % line)
         if self.keyword is None:
             raise LogError("(LogLine) require 'keyword' when parse line: %s" % line)
+
+    @property
+    def seconds(self):
+        seconds = self.__dict__.get(rv.SECONDS)
+        if seconds is None:
+            return None
+        else:
+            return seconds + self.target_obj.offset
+
+    # total ordering
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
 
     def __getitem__(self, key):
         assert isinstance(key, str)
@@ -180,8 +195,8 @@ class LogLine(object):
     def __getattribute__(self, item):
         assert isinstance(item, str)
 
-        if item in rv.FILE_VARS:
-            return getattr(self.logfile, item)
+        if item in rv.TARGET_VARS:
+            return getattr(self.target_obj, item)
         else:
             return super(LogLine, self).__getattribute__(item)
 
@@ -190,8 +205,8 @@ class LogLine(object):
 
         if name in rv.ALL_VARS:
             # redirect access to self.ll_file
-            if name in rv.FILE_VARS:
-                setattr(self.logfile, name, value)
+            if name in rv.TARGET_VARS:
+                setattr(self.target_obj, name, value)
                 return
 
             # check types
@@ -213,20 +228,7 @@ class LogLine(object):
 
     def __contains__(self, item):
         assert isinstance(item, str)
-
         return item in self.get_keys(True)
-
-    # total ordering
-    __eq__ = lambda self, other: self.seconds == other.seconds
-    __lt__ = lambda self, other: self.seconds < other.seconds
-
-    @property
-    def seconds(self):
-        seconds = self.__dict__.get(rv.SECONDS)
-        if seconds is None:
-            return None
-        else:
-            return seconds + self.logfile.offset
 
     def get_keys(self, res=False):
         assert isinstance(res, bool)
@@ -288,12 +290,12 @@ class LogLine(object):
         ret += "\n  V:"
         for k, v in self._vars.iteritems():
             ret += "%s=%s," % (k, v)
-        ret += "\n  L[%s]: %s" % (self.logfile.filename, self.line)
+        ret += "\n  L[%s]: %s" % (self.target_obj.filename, self.line)
         return ret
 
 
 # TODO: Rename to Target
-class LogFile(object):
+class Target(object):
     def __init__(self, f_name, f_dir, sr, plugin, vs):
         assert isinstance(f_name, str)
         assert isinstance(f_dir, str)
@@ -320,8 +322,8 @@ class LogFile(object):
         self.warns = {}
 
         for k, v in vs.iteritems():
-            if k not in rv.FILE_VARS:
-                raise LogError("(LogFile) key is not reserved: %r" % k)
+            if k not in rv.TARGET_VARS:
+                raise LogError("(Target) key is not reserved: %r" % k)
             setattr(self, k, v)
 
     def __len__(self):
@@ -354,23 +356,23 @@ class LogFile(object):
         if name in rv.ALL_VARS:
             # check leagal
             if name in rv.LINE_VARS:
-                raise LogError("(LogFile) cannot set line var %s!" % name)
+                raise LogError("(Target) cannot set line var %s!" % name)
 
             # check types
             if value is not None:
                 if name == rv.COMPONENT:
                     value = self.sr.f_to_component(value)
                     if not value:
-                        raise LogError("(LogFile) unrecognized component: %r" %
+                        raise LogError("(Target) unrecognized component: %r" %
                                 value)
                 elif not isinstance(value, str):
-                    raise LogError("(LogFile) the log key '%s' is "
+                    raise LogError("(Target) the log key '%s' is "
                                    "not str: %r" % (name, value))
 
             # cannot overwrite
             old_v = self.__dict__.get(name)
             if old_v is not None and old_v != value:
-                raise LogError("(LogFile) cannot overwrite attribute %s: "
+                raise LogError("(Target) cannot overwrite attribute %s: "
                                "old_v=%s, new_v=%s" % (name, old_v, value))
         self.__dict__[name] = value
 
@@ -384,7 +386,7 @@ class LogFile(object):
                 try:
                     lg = LogLine(line, self, self.plugin, vs)
                 except LogError as e:
-                    raise LogError("(LogFile) error when parse line '%s'"
+                    raise LogError("(Target) error when parse line '%s'"
                             % line.strip(), e)
                 self.loglines.append(lg)
 
@@ -429,46 +431,3 @@ class LogFile(object):
                     prv.nxt_thread_logline = line
                 prv = line
         return requests
-
-    # def set_offset(self, lo, hi):
-    #     # deprecated
-    #     if lo is not None:
-    #         if self.lo is None:
-    #             self.lo = lo
-    #         else:
-    #             self.lo = max(self.lo, lo)
-    #     if hi is not None:
-    #         if self.hi is None:
-    #             self.hi = hi
-    #         else:
-    #             self.hi = min(self.hi, hi)
-    #     if self.lo is not None and self.hi is not None \
-    #             and self.lo >= self.hi:
-    #         return False
-    #     else:
-    #         return True
-
-    # def correct(self, offset):
-    #     for log in self.loglines:
-    #         log.seconds -= offset
-
-    # def correct_seconds(self):
-    #     # deprecated
-    #     if self.lo is None:
-    #         return
-
-    #     if self.hi is None:
-    #         self.hi = self.lo + 0.02
-
-    #     offset = (self.lo + self.hi) / 2
-    #     for log in self.loglines:
-    #         log.seconds += offset
-
-    # def catg_logs(self, name_errors, mismatch_errors):
-    #     for log in self.loglines:
-    #         if log.correct and log.instance_name not in name_errors \
-    #                 and log.instance_id not in mismatch_errors:
-    #                 # and log.instance_name not in mismatch_errors \
-    #             self.logs_by_ins[log.instance_name].append(log)
-    #         else:
-    #             self.errors.append(log)

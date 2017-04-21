@@ -57,7 +57,7 @@ def main1(driver):
 
     # debug
     # for comp in driver.services.sr_components:
-    #     print("%s" % log_collector.logfiles_by_component[comp][0])
+    #     print("%s" % log_collector.targetobjs_by_component[comp][0])
 
     # build states
     state_engine = StateEngine(master, tgs_engine)
