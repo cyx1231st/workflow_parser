@@ -3,12 +3,15 @@ from __future__ import print_function
 from abc import ABCMeta
 from abc import abstractmethod
 from collections import defaultdict
+from collections import deque
+import heapq
 from functools import total_ordering
 from os import path
 
 from workflow_parser.service_registry import ServiceRegistry
 from workflow_parser import reserved_vars as rv
 from workflow_parser.exception import WFException
+from workflow_parser.utils import Heap
 
 
 class LogError(WFException):
@@ -122,10 +125,9 @@ class DriverPlugin(object):
 
 @total_ordering
 class LogLine(object):
-    def __init__(self, line, target_obj, plugin, vs):
+    def __init__(self, line, target_obj, vs):
         assert isinstance(line, str)
         assert isinstance(target_obj, Target)
-        assert isinstance(plugin, DriverPlugin)
         assert isinstance(vs, dict)
 
         # required immediately:
@@ -238,23 +240,7 @@ class LogLine(object):
             ret.update(rv.ALL_VARS)
         return ret
 
-    def prepare(self, plugin):
-        assert isinstance(plugin, DriverPlugin)
-
-        ret = plugin.do_preprocess_logline(self)
-        if not ret:
-            self.correct = False
-            if self.prv_logline:
-                self.prv_logline.nxt_logline = self.nxt_logline
-            if self.nxt_logline:
-                self.nxt_logline.prv_logline = self.prv_logline
-        else:
-            # required after 1st pass
-            if self.thread is None:
-                raise LogError("(LogLine) require 'thread' when parse line: %r" %
-                        self)
-
-    def _str_marks(self):
+    def __str_marks__(self):
         mark_str = ""
         if not self.correct:
             mark_str += ", ERROR"
@@ -272,17 +258,17 @@ class LogLine(object):
               self.request,
               self.thread,
               self.keyword,
-              self._str_marks())
+              self.__str_marks__())
         return ret
 
-    def __str1__(self):
+    def __str_target__(self):
         ret = "<LL>%.3f %s | %s %s: <%s>%s" % (
               self.seconds,
               self.time,
               self.request,
               self.thread,
               self.keyword,
-              self._str_marks())
+              self.__str_marks__())
         return ret
 
     def __repr__(self):
@@ -294,8 +280,9 @@ class LogLine(object):
         return ret
 
 
-# TODO: Rename to Target
 class Target(object):
+    _repr_lines_lim = 10
+
     def __init__(self, f_name, f_dir, sr, plugin, vs):
         assert isinstance(f_name, str)
         assert isinstance(f_dir, str)
@@ -334,7 +321,7 @@ class Target(object):
         if self.target:
             target_str += "#%s" % self.target
 
-        return "<File%s: fname=%s, comp=%s, host=%s, off=%d, %d from %d lines, %d threads>" % (
+        return "<Target%s: fname=%s, comp=%s, host=%s, off=%d, %d from %d lines, %d threads>" % (
                target_str,
                self.filename,
                self.component,
@@ -347,7 +334,7 @@ class Target(object):
     def __repr__(self):
         ret = str(self)
         for line in self.loglines:
-            ret += "\n| %s" % line.__str1__()
+            ret += "\n| %s" % line.__str_target__()
         return ret
 
     def __setattr__(self, name, value):
@@ -376,23 +363,60 @@ class Target(object):
                                "old_v=%s, new_v=%s" % (name, old_v, value))
         self.__dict__[name] = value
 
-    def read(self):
+    def _yield_lines(self):
         with open(self.dir_, 'r') as reader:
             for line in reader:
+                assert isinstance(line, str)
                 self.total_lines += 1
-                ret, vs = self.plugin.do_filter_logline(line)
-                if not ret:
-                    continue
-                try:
-                    lg = LogLine(line, self, self.plugin, vs)
-                except LogError as e:
-                    raise LogError("(Target) error when parse line '%s'"
-                            % line.strip(), e)
-                self.loglines.append(lg)
+                yield line
+
+    def _build_loglines(self, lines):
+        for line in lines:
+            assert isinstance(line, str)
+            ret, vs = self.plugin.do_filter_logline(line)
+            if not ret:
+                continue
+            try:
+                lg = LogLine(line, self, vs)
+            except LogError as e:
+                raise LogError("(Target) error when parse line '%s'"
+                        % line.strip(), e)
+            yield lg
+
+
+    def _buffer_lines(self, lines):
+        buffer_lines = Heap(key=lambda a: a.seconds)
+
+        prv_line = [None]
+        def _flush_line(flush=None):
+            while buffer_lines:
+                if flush and buffer_lines.distance < flush:
+                    break
+                line = buffer_lines.pop()
+                if prv_line[0] is not None:
+                    prv_line[0].nxt_logline = line
+                    line.prv_logline = prv_line[0]
+                    assert prv_line[0].seconds <= line.seconds
+                yield line
+                prv_line[0] = line
+
+        for line in lines:
+            assert isinstance(line, LogLine)
+            buffer_lines.push(line)
+            for line in _flush_line(1):
+                yield line
+        for line in _flush_line():
+            yield line
+
+    def read(self):
+        lines = self._yield_lines()
+        lines = self._build_loglines(lines)
+        lines = self._buffer_lines(lines)
+        self.loglines = list(lines)
 
         # required after line parsed
         if not self.loglines:
-            self.warns["Empty loglines"] = self
+            self.errors["Empty loglines"] = self
             return
         if not self.component:
             self.errors["Require 'component' after read file"] = self
@@ -404,30 +428,36 @@ class Target(object):
             self.errors["Require 'target' after read file"] = self
             return
 
-        self.loglines.sort(key=lambda item: item.seconds)
-
-        prv = None
-        for f_obj in self.loglines:
-            f_obj.prv_logline = prv
-            if prv is not None:
-                prv.nxt_logline = f_obj
-            prv = f_obj
+    def _prepare_lines(self, lines):
+        prv_line = None
+        prv_line_by_thread = {}
+        for line in lines:
+            assert isinstance(line, LogLine)
+            ret = self.plugin.do_preprocess_logline(line)
+            if not ret:
+                line.correct = False
+                continue
+            thread = line.thread
+            if thread is None:
+                raise LogError("(LogLine) require 'thread' when parse line: %r" % self)
+            if prv_line is not None:
+                prv_line.nxt_logline = line
+                line.prv_logline = prv_line
+            t_prv_line = prv_line_by_thread.get(thread)
+            if t_prv_line is not None:
+                t_prv_line.nxt_thread_logline = line
+                line.prv_thread_logline = t_prv_line
+            yield (line.thread, line)
+            prv_line = line
+            prv_line_by_thread[thread] = line
 
     def prepare(self):
-        for line in self.loglines:
-            line.prepare(self.plugin)
-        self.loglines = [line for line in self.loglines if line.correct]
-
+        lines = self.loglines
         requests = set()
-        for line in self.loglines:
-            self.loglines_by_thread[line.thread].append(line)
-            if line.request:
-                requests.add(line.request)
-        for lines in self.loglines_by_thread.itervalues():
-            prv = None
-            for line in lines:
-                line.prv_thread_logline = prv
-                if prv:
-                    prv.nxt_thread_logline = line
-                prv = line
+        self.loglines = []
+        for thread, logline in self._prepare_lines(lines):
+            self.loglines.append(logline)
+            if logline.request is not None:
+                requests.add(logline.request)
+            self.loglines_by_thread[thread].append(logline)
         return requests

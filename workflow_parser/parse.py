@@ -22,6 +22,7 @@ from workflow_parser.state_engine import StateEngine
 from workflow_parser.statistics_engine import do_statistics
 from workflow_parser.relation_engine import relation_parse
 from workflow_parser.statistics import Report
+from workflow_parser.utils import Report as ReportInternal
 
 
 def main1(driver):
@@ -48,19 +49,22 @@ def main1(driver):
     master = driver.graph
     master.check()
 
+    report_i = ReportInternal()
+
     # build targets
-    tgs_engine = TargetsEngine(driver.services, driver)
+    tgs_engine = TargetsEngine(driver.services, driver, report_i)
     tgs_engine.loadfiles(args.folder)
     tgs_engine.readfiles()
-    tgs_engine.buildthreads()
+    tgs_engine.preparethreads()
 
+    print("%r" % report_i)
 
     # debug
     # for comp in driver.services.sr_components:
     #     print("%s" % log_collector.targetobjs_by_component[comp][0])
 
     # build states
-    state_engine = StateEngine(master, tgs_engine)
+    state_engine = StateEngine(master, tgs_engine, report_i)
     state_engine.build_thread_instances()
     state_engine.join_paces()
     state_engine.group_threads()

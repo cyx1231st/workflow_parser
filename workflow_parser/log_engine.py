@@ -9,6 +9,7 @@ from workflow_parser.log_parser import DriverPlugin
 from workflow_parser.log_parser import LogError
 from workflow_parser.log_parser import Target
 from workflow_parser.service_registry import ServiceRegistry
+from workflow_parser.utils import Report
 
 
 class TargetsCollector(object):
@@ -87,12 +88,14 @@ class TargetsCollector(object):
 
 
 class TargetsEngine(TargetsCollector):
-    def __init__(self, sr, plugin):
+    def __init__(self, sr, plugin, report):
         assert isinstance(sr, ServiceRegistry)
         assert isinstance(plugin, DriverPlugin)
+        assert isinstance(report, Report)
 
         self.sr = sr
         self.plugin = plugin
+        self.report = report
 
         # other collections
         self.targetobjs = []
@@ -118,6 +121,7 @@ class TargetsEngine(TargetsCollector):
         #### summary ####
         self.total_files = len(self.targetobjs)
         print("%d files" % self.total_files)
+        self.report.step("load_t", target=self.total_files)
         print()
         #################
 
@@ -154,6 +158,11 @@ class TargetsEngine(TargetsCollector):
         print("  %.2f%%: %d lines (all files)"
                 % (float(self.total_loglines)/self.total_lines*100,
                    self.total_lines))
+        self.report.lines[0] = self.total_lines
+        self.report.step("read_t", target=self.total_files_hascontent,
+                                   component=len(self.targets_by_component),
+                                   host=len(self.targets_by_host),
+                                   line=self.total_loglines)
         print()
         #################
 
@@ -169,8 +178,8 @@ class TargetsEngine(TargetsCollector):
                 print("%d files: %s" % (len(targetobjs), e_type))
             print()
 
-    def buildthreads(self):
-        print("Build threads...")
+    def preparethreads(self):
+        print("Prepare threads...")
         for target_obj in self.itervalues():
             requests = target_obj.prepare()
             # NOTE: for debug
@@ -194,6 +203,11 @@ class TargetsEngine(TargetsCollector):
                   % (comp, sum_/float(cnt), min_, max_))
         print("%d threads" % sum_t)
         print("%d requests" % len(self.requests))
+
+        total_loglines = sum(len(to) for to in self.itervalues())
+        self.report.step("prepare", line=total_loglines,
+                                    thread=sum_t,
+                                    request=len(self.requests))
         print()
         #################
 

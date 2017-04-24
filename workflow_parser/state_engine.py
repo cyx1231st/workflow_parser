@@ -14,7 +14,9 @@ from workflow_parser.state_machine import NestedRequest
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInstance
+from workflow_parser.state_machine import BlankInterval
 from workflow_parser.utils import report_loglines
+from workflow_parser.utils import Report
 
 
 class PacesCollector(object):
@@ -200,15 +202,17 @@ class RequestsCollector(object):
 
 # TODO: add count checks
 class StateEngine(object):
-    def __init__(self, mastergraph, tgs):
+    def __init__(self, mastergraph, tgs, report):
         assert isinstance(mastergraph, MasterGraph)
         assert isinstance(tgs, TargetsCollector)
+        assert isinstance(report, Report)
 
         self.mastergraph = mastergraph
         self.tgs = tgs
         self.pcs = PacesCollector()
         self.tis = ThreadInssCollector(self.pcs)
         self.rqs = RequestsCollector(self.tis, self.pcs)
+        self.report = report
 
     def build_thread_instances(self):
         print("Build thread instances...")
@@ -219,6 +223,7 @@ class StateEngine(object):
                 assert len_index > 0
                 self.pcs.ignored_loglines_total_by_component[f_obj.component][1] += len_index
                 threadins = None
+                prv_blank_pace = None
                 while c_index != len_index:
                     logline = loglines[c_index]
                     if not threadins:
@@ -235,10 +240,13 @@ class StateEngine(object):
                             logline.ignored = True
                         else:
                             threadins = ThreadInstance(thread, token, loglines, c_index)
+                            if prv_blank_pace:
+                                BlankInterval(prv_blank_pace, threadins.paces[0])
                     else:
                         is_success = threadins.step(c_index)
                         if not is_success:
                             self.tis.collect_thread(threadins)
+                            prv_blank_pace = threadins.paces[-1]
                             threadins = None
                             continue
                     c_index += 1
