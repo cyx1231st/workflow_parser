@@ -1,17 +1,23 @@
+from __future__ import print_function
+
 import abc
 from collections import defaultdict
+from orderedset import OrderedSet
 from functools import total_ordering
 
 from workflow_parser import reserved_vars as rv
 from workflow_parser.exception import WFException
-from workflow_parser.state_graph import ThreadGraph
+from workflow_parser.service_registry import ServiceRegistry
+from workflow_parser.state_graph import Edge
+from workflow_parser.state_graph import Join
 from workflow_parser.state_graph import MasterGraph
 from workflow_parser.state_graph import Node
-from workflow_parser.state_graph import Edge
-from workflow_parser.state_graph import Token
-from workflow_parser.log_parser import LogLine
-from workflow_parser.state_graph import Join
+from workflow_parser.state_graph import StartNode
+from workflow_parser.state_graph import ThreadGraph
+from workflow_parser.log_parser import LogError
+from workflow_parser.log_parser import DriverPlugin
 from workflow_parser.utils import report_loglines
+from workflow_parser.utils import Heap
 
 
 empty_join = object()
@@ -19,6 +25,490 @@ empty_join = object()
 
 class StateError(WFException):
     pass
+
+
+@total_ordering
+class LogLine(object):
+    def __init__(self, line, target_obj, vs):
+        assert isinstance(line, str)
+        assert isinstance(target_obj, Target)
+        assert isinstance(vs, dict)
+
+        # required immediately:
+        self.time = None
+        self.seconds = None
+        self.keyword = None
+        # required after 1st pass:
+        self.thread = None
+        # required after 2nd pass:
+        self.request = None
+
+        self.target_obj = target_obj
+        self.thread_obj = None
+        self.line = line.strip()
+        self._vars = {}
+
+        self.correct = True
+        self.ignored = False
+
+        self.prv_logline = None
+        self.nxt_logline = None
+
+        self.prv_thread_logline = None
+        self.nxt_thread_logline = None
+
+        self.pace = None
+
+        # init
+        for k, v in vs.iteritems():
+            self[k] = v
+
+        # required immediately
+        if self.time is None:
+            raise LogError("(LogLine) require 'time' when parse line: %s" % line)
+        if self.seconds is None:
+            raise LogError("(LogLine) require 'seconds' when parse line: %s" % line)
+        if self.keyword is None:
+            raise LogError("(LogLine) require 'keyword' when parse line: %s" % line)
+
+    @property
+    def seconds(self):
+        seconds = self.__dict__.get(rv.SECONDS)
+        if seconds is None:
+            return None
+        else:
+            return seconds + self.target_obj.offset
+
+    # total ordering
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
+
+    def __getitem__(self, key):
+        assert isinstance(key, str)
+
+        if key in rv.ALL_VARS:
+            return getattr(self, key)
+        else:
+            return self._vars[key]
+
+    def __setitem__(self, key, value):
+        assert isinstance(key, str)
+
+        if key in rv.ALL_VARS:
+            setattr(self, key, value)
+        else:
+            self._vars[key] = value
+
+    def __getattribute__(self, item):
+        assert isinstance(item, str)
+
+        if item in rv.TARGET_VARS:
+            return getattr(self.target_obj, item)
+        else:
+            return super(LogLine, self).__getattribute__(item)
+
+    def __setattr__(self, name, value):
+        assert isinstance(name, str)
+
+        if name in rv.ALL_VARS:
+            # redirect access to self.ll_file
+            if name in rv.TARGET_VARS:
+                setattr(self.target_obj, name, value)
+                return
+
+            # check types
+            if value is not None:
+                if name == rv.SECONDS:
+                    if not isinstance(value, float):
+                        raise LogError("(LogLine) the value of key '%s' is "
+                                       "not float: %r" % (name, value))
+                elif not isinstance(value, str):
+                    raise LogError("(LogLine) the value key '%s' is "
+                                   "not string: %r" % (name, value))
+
+            # cannot overwrite
+            old_v = self.__dict__.get(name)
+            if old_v is not None and old_v != value:
+                raise LogError("(LogLine) cannot overwrite attribute %s: "
+                               "old_v=%s, new_v=%s" % (name, old_v, value))
+        self.__dict__[name] = value
+
+    def __contains__(self, item):
+        assert isinstance(item, str)
+        return item in self.get_keys(True)
+
+    def get_keys(self, res=False):
+        assert isinstance(res, bool)
+
+        ret = set(self._vars.keys())
+        if res:
+            ret.update(rv.ALL_VARS)
+        return ret
+
+    def __str_marks__(self):
+        mark_str = ""
+        if not self.correct:
+            mark_str += ", ERROR"
+        if self.ignored:
+            mark_str += ", IGNORED"
+        return mark_str
+
+    def __str__(self):
+        ret = "<LL>%.3f %s [%s %s %s] %s %s: <%s>%s" % (
+              self.seconds,
+              self.time,
+              self.component,
+              self.host,
+              self.target,
+              self.request,
+              self.thread,
+              self.keyword,
+              self.__str_marks__())
+        return ret
+
+    def __str_target__(self):
+        ret = "<LL>%.3f %s | %s %s: <%s>%s" % (
+              self.seconds,
+              self.time,
+              self.request,
+              self.thread,
+              self.keyword,
+              self.__str_marks__())
+        return ret
+
+    def __repr__(self):
+        ret = str(self)
+        ret += "\n  V:"
+        for k, v in self._vars.iteritems():
+            ret += "%s=%s," % (k, v)
+        ret += "\n  L[%s]: %s" % (self.target_obj.filename, self.line)
+        return ret
+
+
+class Token(object):
+    def __init__(self, start_node, edge, logline):
+        assert isinstance(start_node, StartNode)
+        assert isinstance(edge, Edge)
+        assert isinstance(logline, LogLine)
+        assert edge in start_node.edges
+
+        self.history = [(start_node, edge, logline)]
+        self.from_node = start_node
+        self.edge = edge
+        self.logline = logline
+        self.thread_graph = start_node.thread_graph
+
+    @property
+    def node(self):
+        return self.edge.node
+
+    @classmethod
+    def new(cls, master_graph, logline):
+        assert isinstance(logline, LogLine)
+        assert isinstance(master_graph, MasterGraph)
+
+        threadgraphs = master_graph.threadgraphs_by_component.get(logline.component, OrderedSet())
+        for t_g in threadgraphs:
+            for s_node in t_g.start_nodes:
+                edge = s_node.decide_edge(logline.keyword)
+                if edge:
+                    return cls(s_node, edge, logline)
+        return None
+
+    def step(self, logline):
+        assert isinstance(logline, LogLine)
+        edge = self.node.decide_edge(logline.keyword)
+        if edge:
+            self.from_node = self.node
+            self.edge = edge
+            self.logline = logline
+            self.history.append((self.from_node, edge, logline))
+            return True
+        else:
+            return False
+
+
+class Thread(object):
+    def __init__(self, id_, target_obj, thread):
+        assert isinstance(target_obj, Target)
+        assert isinstance(thread, str)
+        assert isinstance(id_, int)
+
+        self.id_ = id_
+        self.thread = thread
+        self.target_obj = target_obj
+        self.loglines = []
+
+        self.cnt_valid_loglines = 0
+        self.ignored_loglines = []
+        self.threadinss = []
+
+    @property
+    def name(self):
+        return "%s|td%d" % (self.target, self.id_)
+
+    @property
+    def target(self):
+        return self.target_obj.target
+
+    @property
+    def component(self):
+        return self.target_obj.component
+
+    @property
+    def host(self):
+        return self.target_obj.host
+
+    def __str__(self):
+        return "<Thread#%s: %s, %d loglines, %d ignored, %d threadinss>" %\
+                (self.name,
+                 self.thread,
+                 len(self.loglines),
+                 len(self.ignored_loglines),
+                 len(self.threadinss))
+
+    def append_logline(self, logline):
+        assert isinstance(logline, LogLine)
+        assert logline.thread_obj is None
+        assert logline.thread == self.thread
+        assert logline.target == self.target
+
+        if self.loglines:
+            assert self.loglines[-1] <= logline
+        logline.thread_obj = self
+        self.loglines.append(logline)
+
+    def build_threadinss(self, master_graph):
+        threadins = None
+        prv_blank_pace = None
+        for logline in self.loglines:
+            if threadins is not None:
+                if threadins.step(logline):
+                    # success!
+                    pass
+                else:
+                    self.threadinss.append(threadins)
+                    prv_blank_pace = threadins.paces[-1]
+                    threadins = None
+            if threadins is None:
+                token = Token.new(master_graph, logline)
+                if token:
+                    threadins = ThreadInstance(self, token)
+                    if prv_blank_pace:
+                        BlankInterval(prv_blank_pace, threadins.paces[0])
+                else:
+                    # error
+                    # print("(ParserEngine) parse error: cannot decide graph")
+                    # report_loglines(loglines, c_index)
+                    # print "-------- end -----------"
+                    # raise StateError("(ParserEngine) parse error: cannot decide graph")
+                    import pdb; pdb.set_trace()
+            if threadins is not None:
+                self.cnt_valid_loglines += 1
+            else:
+                self.ignored_loglines.append(logline)
+                logline.ignored = True
+        if threadins:
+            self.threadinss.append(threadins)
+
+        assert len(self.ignored_loglines) + self.cnt_valid_loglines\
+                == len(self.loglines)
+
+
+class Target(object):
+    _repr_lines_lim = 10
+
+    def __init__(self, f_name, f_dir, sr, plugin, vs):
+        assert isinstance(f_name, str)
+        assert isinstance(f_dir, str)
+        assert isinstance(sr, ServiceRegistry)
+        assert isinstance(plugin, DriverPlugin)
+
+        self.filename = f_name
+        self.dir_ = f_dir
+        self.sr = sr
+        self.plugin = plugin
+
+        # required after line parsed
+        self.component = None
+        self.host = None
+        self.target = None
+
+        self.loglines = []
+        self.thread_objs = {}
+        self.loglines_by_thread = defaultdict(list)
+
+        self.offset = 0
+        self.total_lines = 0
+
+        self.errors = {}
+        self.warns = {}
+
+        self._index_thread = 0
+
+        for k, v in vs.iteritems():
+            if k not in rv.TARGET_VARS:
+                raise LogError("(Target) key is not reserved: %r" % k)
+            setattr(self, k, v)
+
+    def __len__(self):
+        return len(self.loglines)
+
+    def __str__(self):
+        target_str = ""
+        if self.target:
+            target_str += "#%s" % self.target
+
+        return "<Target%s: fname=%s, comp=%s, host=%s, off=%d, %d from %d lines, %d threads>" % (
+               target_str,
+               self.filename,
+               self.component,
+               self.host,
+               self.offset,
+               len(self.loglines),
+               self.total_lines,
+               len(self.thread_objs))
+
+    def __repr__(self):
+        ret = str(self)
+        for line in self.loglines:
+            ret += "\n| %s" % line.__str_target__()
+        return ret
+
+    def __setattr__(self, name, value):
+        assert isinstance(name, str)
+
+        if name in rv.ALL_VARS:
+            # check leagal
+            if name in rv.LINE_VARS:
+                raise LogError("(Target) cannot set line var %s!" % name)
+
+            # check types
+            if value is not None:
+                if name == rv.COMPONENT:
+                    value = self.sr.f_to_component(value)
+                    if not value:
+                        raise LogError("(Target) unrecognized component: %r" %
+                                value)
+                elif not isinstance(value, str):
+                    raise LogError("(Target) the log key '%s' is "
+                                   "not str: %r" % (name, value))
+
+            # cannot overwrite
+            old_v = self.__dict__.get(name)
+            if old_v is not None and old_v != value:
+                raise LogError("(Target) cannot overwrite attribute %s: "
+                               "old_v=%s, new_v=%s" % (name, old_v, value))
+        self.__dict__[name] = value
+
+    def _yield_lines(self):
+        with open(self.dir_, 'r') as reader:
+            for line in reader:
+                assert isinstance(line, str)
+                self.total_lines += 1
+                yield line
+
+    def _build_loglines(self, lines):
+        for line in lines:
+            assert isinstance(line, str)
+            ret, vs = self.plugin.do_filter_logline(line)
+            if not ret:
+                continue
+            try:
+                lg = LogLine(line, self, vs)
+            except LogError as e:
+                raise LogError("(Target) error when parse line '%s'"
+                        % line.strip(), e)
+            yield lg
+
+
+    def _buffer_lines(self, lines):
+        buffer_lines = Heap(key=lambda a: a.seconds)
+
+        prv_line = [None]
+        def _flush_line(flush=None):
+            while buffer_lines:
+                if flush and buffer_lines.distance < flush:
+                    break
+                line = buffer_lines.pop()
+                if prv_line[0] is not None:
+                    prv_line[0].nxt_logline = line
+                    line.prv_logline = prv_line[0]
+                    assert prv_line[0] <= line
+                yield line
+                prv_line[0] = line
+
+        for line in lines:
+            assert isinstance(line, LogLine)
+            buffer_lines.push(line)
+            for line in _flush_line(1):
+                yield line
+        for line in _flush_line():
+            yield line
+
+    def read(self):
+        lines = self._yield_lines()
+        lines = self._build_loglines(lines)
+        lines = self._buffer_lines(lines)
+        self.loglines = list(lines)
+
+        # required after line parsed
+        if not self.loglines:
+            self.errors["Empty loglines"] = self
+            return
+        if not self.component:
+            self.errors["Require 'component' after read file"] = self
+            return
+        if not self.host:
+            self.errors["Require 'host' after read file"] = self
+            return
+        if not self.target:
+            self.errors["Require 'target' after read file"] = self
+            return
+
+    def _prepare_lines(self, lines):
+        prv_line = None
+        prv_line_by_thread = {}
+        for line in lines:
+            assert isinstance(line, LogLine)
+            ret = self.plugin.do_preprocess_logline(line)
+            if not ret:
+                line.correct = False
+                continue
+            thread = line.thread
+            if thread is None:
+                raise LogError("(LogLine) require 'thread' when parse line: %r" % self)
+            if prv_line is not None:
+                prv_line.nxt_logline = line
+                line.prv_logline = prv_line
+            t_prv_line = prv_line_by_thread.get(thread)
+            if t_prv_line is not None:
+                t_prv_line.nxt_thread_logline = line
+                line.prv_thread_logline = t_prv_line
+            yield (line.thread, line)
+            prv_line = line
+            prv_line_by_thread[thread] = line
+
+    def _get_threadobj(self, thread):
+        assert isinstance(thread, str)
+        thread_obj = self.thread_objs.get(thread)
+        if thread_obj is None:
+            self._index_thread += 1
+            thread_obj = Thread(self._index_thread, self, thread)
+            self.thread_objs[thread] = thread_obj
+        return thread_obj
+
+    def prepare(self):
+        lines = self.loglines
+        requests = set()
+        self.loglines = []
+        for thread, logline in self._prepare_lines(lines):
+            self.loglines.append(logline)
+            if logline.request is not None:
+                requests.add(logline.request)
+            thread_obj = self._get_threadobj(thread)
+            thread_obj.append_logline(logline)
+        return requests
 
 
 @total_ordering
@@ -600,15 +1090,13 @@ class JoinInterval(IntervalBase):
 
 
 class ThreadInstance(object):
-    def __init__(self, thread, token, loglines, s_index):
-        assert isinstance(thread, str)
+    def __init__(self, thread_obj, token):
+        assert isinstance(thread_obj, Thread)
         assert isinstance(token, Token)
-        assert isinstance(loglines, list)
-        assert isinstance(s_index, int)
 
-        self.thread = thread
+        self.thread_obj = thread_obj
         self.token = token
-        self.threadgraph = self.token.thread_graph
+
         self.thread_vars = {}
         self.thread_vars_dup = defaultdict(set)
 
@@ -616,14 +1104,6 @@ class ThreadInstance(object):
         self.paces_by_mark = defaultdict(list)
 
         self.intervals = []
-
-        self.s_index = s_index
-        self.f_index = s_index + 1
-        self.loglines = loglines
-
-        self.component = None
-        self.host = None
-        self.target = None
 
         self.joined_paces = []
         self.joins_paces = []
@@ -642,6 +1122,30 @@ class ThreadInstance(object):
         # init
         self._apply_token()
         assert self.paces
+
+    @property
+    def thread(self):
+        return self.thread_obj.thread
+
+    @property
+    def target(self):
+        return self.thread_obj.target
+
+    @property
+    def component(self):
+        return self.thread_obj.component
+
+    @property
+    def host(self):
+        return self.thread_obj.host
+
+    @property
+    def threadgraph(self):
+        return self.token.thread_graph
+
+    @property
+    def target_obj(self):
+        return self.thread_obj.target_obj
 
     @property
     def request_state(self):
@@ -697,13 +1201,11 @@ class ThreadInstance(object):
         else:
             req_str = self.request
 
-        return "<ThIns#%s-%s: log#%d[%d, %d) comp#%s, host#%s, graph#%s, "\
+        return "<ThIns#%s-%s: log#%d, comp#%s, host#%s, graph#%s, "\
                "req#%s, %d(dup%d) vars, %d(act%d) joined_p, %d(act%d) joins_p%s>" % (
                 self.target,
                 self.thread,
                 self.len_paces,
-                self.s_index,
-                self.f_index,
                 self.component,
                 self.host,
                 self.threadgraph.name,
@@ -725,11 +1227,11 @@ class ThreadInstance(object):
         return ret_str
 
     def report(self, reason):
-        print "(ThreadInstance) report: %s" % reason
-        print "-------- Thread --------"
-        print "%r" % self
+        print("(ThreadInstance) report: %s" % reason)
+        print("-------- Thread --------")
+        print("%r" % self)
         report_loglines(self.loglines, self.s_index, self.f_index)
-        print "-------- end -----------"
+        print("-------- end -----------")
 
     def _apply_token(self):
         from_node = self.token.from_node
@@ -749,9 +1251,7 @@ class ThreadInstance(object):
             new_val = logline[key]
             if key in ("component", "target", "host", "thread"):
                 val = getattr(self, key)
-                if val is None:
-                    setattr(self, key, new_val)
-                elif val != logline[key]:
+                if val != logline[key]:
                     self.report("Thread var %s=%s, conflicts %s"
                             % (key, val, new_val))
                     raise StateError("(ThreadInstance) parse error: variable mismatch")
@@ -791,14 +1291,11 @@ class ThreadInstance(object):
 
         self.paces.append(pace)
 
-    def step(self, log_index):
-        assert isinstance(log_index, int)
-        assert log_index == self.f_index
+    def step(self, logline):
+        assert isinstance(logline, LogLine)
 
-        logline = self.loglines[log_index]
         if self.token.step(logline):
             self._apply_token()
-            self.f_index = log_index + 1
             return True
         else:
             return False
@@ -857,18 +1354,11 @@ class NestedRequest(ThreadInstance):
         self.threadins = threadins
 
         #### copy ####
-        self.thread = threadins.thread
-        self.threadgraph = threadins.threadgraph
+        self.thread_obj = threadins.thread_obj
+        self.token = threadins.token
         self.thread_vars = threadins.thread_vars
         self.thread_vars_dup = threadins.thread_vars_dup
 
-        self.s_index = threadins.s_index
-        self.f_index = threadins.f_index
-        self.loglines = threadins.loglines
-
-        self.component = threadins.component
-        self.host = threadins.host
-        self.target = threadins.target
         ##############
 
         self.paces = []

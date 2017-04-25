@@ -57,8 +57,6 @@ def main1(driver):
     tgs_engine.readfiles()
     tgs_engine.preparethreads()
 
-    print("%r" % report_i)
-
     # debug
     # for comp in driver.services.sr_components:
     #     print("%s" % log_collector.targetobjs_by_component[comp][0])
@@ -69,6 +67,8 @@ def main1(driver):
     state_engine.join_paces()
     state_engine.group_threads()
     state_engine.build_requests()
+
+    print("%r" % report_i)
 
     relation_parse(state_engine.pcs, tgs_engine)
 

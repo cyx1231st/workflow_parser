@@ -4,7 +4,6 @@ from collections import defaultdict
 from orderedset import OrderedSet
 
 from workflow_parser.service_registry import Component
-from workflow_parser.log_parser import LogLine
 
 # TODO: implement RequestGraph for nested-request support
 
@@ -118,11 +117,11 @@ class Node(object):
             self.marks.add(state_str)
 
 ########
-    def decide_edge(self, logline):
-        assert isinstance(logline, LogLine)
+    def decide_edge(self, keyword):
+        assert isinstance(keyword, str)
 
         for edge in self.edges:
-            if edge.decide(logline):
+            if edge.keyword in keyword:
                 self.master_graph.seen_edges.add(edge)
                 return edge
         return None
@@ -292,11 +291,6 @@ class Edge(object):
 
     def join_remote(self, edge, schemas=None, is_shared=False):
         return self._join(edge, schemas, True, is_shared)
-
-########
-    def decide(self, logline):
-        assert isinstance(logline, LogLine)
-        return self.keyword in logline.keyword
 
 
 class ThreadGraph(object):
@@ -584,46 +578,3 @@ class MasterGraph(object):
         for th_g in self.thread_graphs:
             print("%r\n" % th_g)
         print("--------------<<\n")
-
-
-class Token(object):
-    def __init__(self, start_node, edge, logline):
-        assert isinstance(start_node, StartNode)
-        assert isinstance(edge, Edge)
-        assert isinstance(logline, LogLine)
-        assert edge in start_node.edges
-
-        self.history = [(start_node, edge, logline)]
-        self.from_node = start_node
-        self.edge = edge
-        self.logline = logline
-        self.thread_graph = start_node.thread_graph
-
-    @property
-    def node(self):
-        return self.edge.node
-
-    @classmethod
-    def new(cls, master_graph, logline):
-        assert isinstance(logline, LogLine)
-        assert isinstance(master_graph, MasterGraph)
-
-        threadgraphs = master_graph.threadgraphs_by_component.get(logline.component, OrderedSet())
-        for t_g in threadgraphs:
-            for s_node in t_g.start_nodes:
-                edge = s_node.decide_edge(logline)
-                if edge:
-                    return cls(s_node, edge, logline)
-        return None
-
-    def step(self, logline):
-        assert isinstance(logline, LogLine)
-        edge = self.node.decide_edge(logline)
-        if edge:
-            self.from_node = self.node
-            self.edge = edge
-            self.logline = logline
-            self.history.append((self.from_node, edge, logline))
-            return True
-        else:
-            return False

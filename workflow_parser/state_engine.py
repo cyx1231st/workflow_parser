@@ -5,23 +5,24 @@ from collections import deque
 from collections import OrderedDict
 
 from workflow_parser.log_engine import TargetsCollector
-from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import MasterGraph
-from workflow_parser.state_graph import Token
+from workflow_parser.state_machine import BlankInterval
 from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import JoinInterval
+from workflow_parser.state_machine import LogLine
 from workflow_parser.state_machine import NestedRequest
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
+from workflow_parser.state_machine import Thread
 from workflow_parser.state_machine import ThreadInstance
-from workflow_parser.state_machine import BlankInterval
+from workflow_parser.state_machine import Token
 from workflow_parser.utils import report_loglines
 from workflow_parser.utils import Report
 
 
 class PacesCollector(object):
     def __init__(self):
-        self.ignored_loglines_total_by_component = defaultdict(lambda: [[], 0])
+        self.ignored_loglines_by_component = defaultdict(lambda: [])
 
         self.joins_paces = []
         self.joined_paces = []
@@ -39,11 +40,9 @@ class PacesCollector(object):
         self.thread_intervals = set()
         self.extended_intervals = set()
 
-    def collect_ignored(self, logline, loglines, index, thread, component, target):
+    def collect_ignored(self, logline):
         assert isinstance(logline, LogLine)
-        assert isinstance(index, int)
-        self.ignored_loglines_total_by_component[component][0].append(
-                (logline, loglines, index, thread, component, target))
+        self.ignored_loglines_by_component[logline.component].append(logline)
 
     def collect_join(self, threadins):
         assert isinstance(threadins, ThreadInstance)
@@ -100,6 +99,7 @@ class ThreadInssCollector(object):
         self.duplicated_vars = set()
 
         self.threadinss = []
+        self.thread_objs = []
 
         self.threadgroup_by_request = defaultdict(set)
         self.sum_threads_in_group = 0
@@ -112,22 +112,26 @@ class ThreadInssCollector(object):
         self.r_extra_end_threadinss = set()
         self.r_stray_threadinss = set()
 
-    def collect_thread(self, threadins):
-        assert isinstance(threadins, ThreadInstance)
+    def collect_threadobj(self, thread_obj):
+        assert isinstance(thread_obj, Thread)
 
-        if not threadins.is_complete:
-            self.incomplete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
-        else:
-            self.complete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
+        self.thread_objs.append(thread_obj)
 
-        if threadins.is_request_start:
-            self.start_threadinss.append(threadins)
+        for threadins in thread_obj.threadinss:
+            if not threadins.is_complete:
+                self.incomplete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
+            else:
+                self.complete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
 
-        self.threadinss.append(threadins)
+            if threadins.is_request_start:
+                self.start_threadinss.append(threadins)
 
-        self.duplicated_vars.update(threadins.thread_vars_dup.keys())
+            self.threadinss.append(threadins)
+            self.duplicated_vars.update(threadins.thread_vars_dup.keys())
+            self.pcs.collect_join(threadins)
 
-        self.pcs.collect_join(threadins)
+        for logline in thread_obj.ignored_loglines:
+            self.pcs.collect_ignored(logline)
 
     def collect_thread_group(self, requests, tgroup):
         assert isinstance(requests, set)
@@ -216,51 +220,16 @@ class StateEngine(object):
 
     def build_thread_instances(self):
         print("Build thread instances...")
-        for f_obj in self.tgs.itervalues():
-            for (thread, loglines) in f_obj.loglines_by_thread.iteritems():
-                c_index = 0
-                len_index = len(loglines)
-                assert len_index > 0
-                self.pcs.ignored_loglines_total_by_component[f_obj.component][1] += len_index
-                threadins = None
-                prv_blank_pace = None
-                while c_index != len_index:
-                    logline = loglines[c_index]
-                    if not threadins:
-                        token = Token.new(self.mastergraph, logline)
-                        if not token:
-                            # error
-                            # print("(ParserEngine) parse error: cannot decide graph")
-                            # report_loglines(loglines, c_index)
-                            # print "-------- end -----------"
-                            # raise StateError("(ParserEngine) parse error: cannot decide graph")
-                            import pdb; pdb.set_trace()
-                            self.pcs.collect_ignored(logline, loglines, c_index,
-                                    thread, f_obj.component, f_obj.target)
-                            logline.ignored = True
-                        else:
-                            threadins = ThreadInstance(thread, token, loglines, c_index)
-                            if prv_blank_pace:
-                                BlankInterval(prv_blank_pace, threadins.paces[0])
-                    else:
-                        is_success = threadins.step(c_index)
-                        if not is_success:
-                            self.tis.collect_thread(threadins)
-                            prv_blank_pace = threadins.paces[-1]
-                            threadins = None
-                            continue
-                    c_index += 1
-                if threadins:
-                    self.tis.collect_thread(threadins)
+        valid_loglines = 0
+        for target_obj in self.tgs.itervalues():
+            for thread_obj in target_obj.thread_objs.itervalues():
+                thread_obj.build_threadinss(self.mastergraph)
+                self.tis.collect_threadobj(thread_obj)
+                valid_loglines += thread_obj.cnt_valid_loglines
         print("-------------------------")
 
         #### summary ####
-        if_ignored = False
-        for comp, ltup in self.pcs.ignored_loglines_total_by_component.iteritems():
-            print("%s: %d loglines" % (comp, ltup[1]))
-            if len(ltup[0]):
-                if_ignored = True
-
+        print("%d valid loglines" % valid_loglines)
         print("%d thread instances" % len(self.tis.threadinss))
         if self.tis.complete_threadinss_by_graph:
             for gname, tis in self.tis.complete_threadinss_by_graph.iteritems():
@@ -269,6 +238,14 @@ class StateEngine(object):
         print("%d request start t_instances" %
                 len(self.tis.start_threadinss))
         print("%d paces to join" % len(self.pcs.joins_paces))
+
+        self.report.step("build_t",
+                         line=valid_loglines,
+                         thread=len(self.tis.thread_objs),
+                         threadins=len(self.tis.threadinss),
+                         request=len(self.tis.start_threadinss),
+                         join=len(self.pcs.joins_paces),
+                         joined=len(self.pcs.joined_paces))
         print()
         #################
 
@@ -285,16 +262,15 @@ class StateEngine(object):
                        len(self.tgs.requests)))
             print()
 
-        if if_ignored:
+        if self.pcs.ignored_loglines_by_component:
             def _report_ignored(tup):
                 # (logline, loglines, index, thread, component, target)
                 print("  example:")
                 report_loglines(tup[1], tup[2], blanks=4, printend=True)
             print("! WARN !")
-            for comp, ltup in self.pcs.ignored_loglines_total_by_component.iteritems():
-                if len(ltup[0]):
-                    print("%s: %d ignored loglines" % (comp, len(ltup[0])))
-                    _report_ignored(ltup[0][0])
+            for comp, loglines in self.pcs.ignored_loglines_by_component.iteritems():
+                print("%s: %d ignored loglines" % (comp, len(loglines)))
+                _report_ignored(loglines[0])
             print()
 
         edges = self.mastergraph.edges - self.mastergraph.seen_edges

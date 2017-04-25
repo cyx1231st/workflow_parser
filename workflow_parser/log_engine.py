@@ -7,8 +7,8 @@ import sys
 
 from workflow_parser.log_parser import DriverPlugin
 from workflow_parser.log_parser import LogError
-from workflow_parser.log_parser import Target
 from workflow_parser.service_registry import ServiceRegistry
+from workflow_parser.state_machine import Target
 from workflow_parser.utils import Report
 
 
@@ -183,30 +183,39 @@ class TargetsEngine(TargetsCollector):
         for target_obj in self.itervalues():
             requests = target_obj.prepare()
             # NOTE: for debug
-            # print("%s:  %s" % (target_obj.name, target_obj.loglines_by_thread.keys()))
+            # print("%s:  %s" % (target_obj.name, target_obj.thread_objs.keys()))
             # NOTE: requests collector?
             self.requests.update(requests)
         print("----------------")
 
         #### summary ####
-        sum_t = 0
+        sum_threads = 0
+        sum_loglines = 0
         for (comp, targets) in self.targets_by_component.iteritems():
-            cnt, sum_, min_, max_ = 0, 0, sys.maxint, 0
+            cnt_component_targets, cnt_component_threads = 0, 0
+            cnt_component_loglines = 0
+            min_target_threads, max_target_threads = sys.maxint, 0
             for target_obj in self.itervalues(targets):
-                lent = len(target_obj.loglines_by_thread)
-                cnt += 1
-                sum_ += lent
-                min_ = min(min_, lent)
-                max_ = max(max_, lent)
-            sum_t += sum_
-            print("%s: %.3f[%d, %d] threads"
-                  % (comp, sum_/float(cnt), min_, max_))
-        print("%d threads" % sum_t)
+                cnt_target_threads = len(target_obj.thread_objs)
+                cnt_component_targets += 1
+                cnt_component_threads += cnt_target_threads
+                cnt_component_loglines += len(target_obj.loglines)
+                min_target_threads = min(min_target_threads, cnt_target_threads)
+                max_target_threads = max(max_target_threads, cnt_target_threads)
+            sum_loglines += cnt_component_loglines
+            sum_threads += cnt_component_threads
+            print("%s: %.3f[%d, %d] threads, total %d loglines"
+                  % (comp,
+                     cnt_component_threads/float(cnt_component_targets),
+                     min_target_threads,
+                     max_target_threads,
+                     cnt_component_loglines))
+        print("%d loglines" % sum_loglines)
+        print("%d threads" % sum_threads)
         print("%d requests" % len(self.requests))
 
-        total_loglines = sum(len(to) for to in self.itervalues())
-        self.report.step("prepare", line=total_loglines,
-                                    thread=sum_t,
+        self.report.step("prepare", line=sum_loglines,
+                                    thread=sum_threads,
                                     request=len(self.requests))
         print()
         #################
