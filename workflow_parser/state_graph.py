@@ -395,7 +395,7 @@ class ThreadGraph(object):
 
         if isinstance(to_node_or_id, int):
             self.end_nodes.add(to_node)
-            self.end_nodes.discard(self)
+            self.end_nodes.discard(from_node)
 
         return edge, to_node
 
@@ -578,3 +578,50 @@ class MasterGraph(object):
         for th_g in self.thread_graphs:
             print("%r\n" % th_g)
         print("--------------<<\n")
+
+
+class Token(object):
+    def __init__(self, start_node, edge, keyword):
+        assert isinstance(start_node, StartNode)
+        assert isinstance(edge, Edge)
+        assert isinstance(keyword, str)
+        assert edge in start_node.edges
+
+        self.history = [(start_node, edge, keyword)]
+        self.from_node = start_node
+        self.edge = edge
+        self.keyword = keyword
+        self.thread_graph = start_node.thread_graph
+
+    @property
+    def node(self):
+        return self.edge.node
+
+    @classmethod
+    def new(cls, master_graph, keyword, component):
+        assert isinstance(master_graph, MasterGraph)
+        assert isinstance(keyword, str)
+        assert isinstance(component, Component)
+
+        threadgraphs = master_graph.threadgraphs_by_component.get(component, OrderedSet())
+        for t_g in threadgraphs:
+            for s_node in t_g.start_nodes:
+                edge = s_node.decide_edge(keyword)
+                if edge:
+                    return cls(s_node, edge, keyword)
+        return None
+
+    def step(self, keyword):
+        assert isinstance(keyword, str)
+        edge = self.node.decide_edge(keyword)
+        if edge:
+            assert isinstance(edge, Edge)
+            assert edge.thread_graph is self.thread_graph
+
+            self.from_node = self.node
+            self.edge = edge
+            self.keyword = keyword
+            self.history.append((self.from_node, edge, keyword))
+            return True
+        else:
+            return False

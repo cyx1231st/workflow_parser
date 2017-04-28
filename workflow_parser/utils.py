@@ -116,8 +116,8 @@ class Report(object):
         self.joineds.append(joined)
 
     def __repr__(self):
-        head = " "*7 +" line/p,compon, host ,target,thread,requst,td_ins, joins,joined"
-        fmt = "\n%7s" + ",%6s"*9
+        head = " "*7 +" line/pace,component,     host,   target,   thread,  request,  thd_ins,    joins,   joined"
+        fmt = "\n%7s" + ",%9s"*9
         ret = head
         for i, name in enumerate(self._steps):
             ret += fmt % (name, self.lines[i], self.components[i],

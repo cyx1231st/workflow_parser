@@ -1,21 +1,18 @@
 from __future__ import print_function
 
 from collections import defaultdict
-from collections import deque
 from collections import OrderedDict
 
 from workflow_parser.log_engine import TargetsCollector
+from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import MasterGraph
-from workflow_parser.state_machine import BlankInterval
 from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import JoinInterval
-from workflow_parser.state_machine import LogLine
 from workflow_parser.state_machine import NestedRequest
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
-from workflow_parser.state_machine import Thread
 from workflow_parser.state_machine import ThreadInstance
-from workflow_parser.state_machine import Token
+from workflow_parser.state_runtime import Thread
 from workflow_parser.utils import report_loglines
 from workflow_parser.utils import Report
 
@@ -221,7 +218,7 @@ class StateEngine(object):
     def build_thread_instances(self):
         print("Build thread instances...")
         valid_loglines = 0
-        for target_obj in self.tgs.itervalues():
+        for target_obj in self.tgs.target_objs:
             for thread_obj in target_obj.thread_objs.itervalues():
                 thread_obj.build_threadinss(self.mastergraph)
                 self.tis.collect_threadobj(thread_obj)
@@ -248,20 +245,6 @@ class StateEngine(object):
                          joined=len(self.pcs.joined_paces))
         print()
         #################
-
-        if len(self.pcs.joins_paces) != len(self.pcs.joined_paces):
-            print("! WARN !")
-            print("%d join paces doesn't match %d to-be-joined paces"
-                    % (len(self.pcs.joins_paces), len(self.pcs.joined_paces)))
-            print()
-
-        if len(self.tis.start_threadinss) != len(self.tgs.requests):
-            print("! WARN !")
-            print("%d requests doesn't match %d start t_instances!"
-                    % (len(self.tis.start_threadinss),
-                       len(self.tgs.requests)))
-            print()
-
         if self.pcs.ignored_loglines_by_component:
             def _report_ignored(tup):
                 # (logline, loglines, index, thread, component, target)

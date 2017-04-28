@@ -223,47 +223,47 @@ class DrawEngine(object):
                             lambda: defaultdict(
                                 dict)))
         for ti in threadinss:
-            # comp index, y index
-            host_dict[ti.host][ti.component][ti.target][ti.thread] = 0
+            # thread_object index
+            host_dict[ti.host][str(ti.component)][ti.target][ti.thread_obj.id_] = 0
 
         hosts = sorted(host_dict.keys())
-        tg_index = 1
         for host in hosts:
             c_dict = host_dict[host]
-            comps = sorted(map(lambda k: (str(k), k), c_dict.keys()))
+            comps = sorted(c_dict.keys())
             for comp in comps:
-                tg_dict = c_dict[comp[1]]
+                tg_dict = c_dict[comp]
                 tgs = sorted(tg_dict.keys())
                 for tg in tgs:
                     td_dict = tg_dict[tg]
-                    tds = sorted(td_dict.keys())
-                    td_index = 1
-                    for td in tds:
-                        td_dict[td] = y_index
-                        y_indexes_l.append("%s|td%d" % (tg, td_index))
-                        y_indexes_r.append("%s|%s" % (comp[0], host))
+                    tdids = sorted(td_dict.keys())
+                    for tdid in tdids:
+                        td_dict[tdid] = y_index
+                        y_indexes_l.append("%s|td%s" % (tg, tdid))
+                        y_indexes_r.append("%s|%s" % (host, comp))
                         y_index += 1
-                        td_index += 1
-                    tg_index += 1
 
+        threadins_y = {}
         for ti in threadinss:
-            ti.plot_y = host_dict[ti.host][ti.component][ti.target][ti.thread]
+            threadins_y[ti] = host_dict[ti.host][str(ti.component)]\
+                                       [ti.target][ti.thread_obj.id_]
+        return y_indexes_l, y_indexes_r, threadins_y
 
-        return y_indexes_l, y_indexes_r
-
-    def draw_requestins(self, requestins, name):
+    def draw_requestins(self, requestins, name, start_end=None):
         assert isinstance(requestins, RequestInstance)
         print("(DrawEngine) drawing %s..." % name)
 
         # prepare requests
-        start = requestins.start_seconds
-        last = requestins.last_seconds
+        if start_end is not None:
+            (start, last), (start_t, last_t) = start_end
+        else:
+            start = requestins.start_seconds
+            last = requestins.last_seconds
         all_lapse = last - start
         plot_main = requestins.start_interval.is_main
 
         threadinss = requestins.threadinss
-        y_indexes_l, y_indexes_r = self._prepare_thread_indexes(threadinss,
-                                                                plot_main)
+        y_indexes_l, y_indexes_r, tiy =\
+                self._prepare_thread_indexes(threadinss, plot_main)
 
         ## settings ##
         figsize = (30, .5*len(y_indexes_l))
@@ -299,14 +299,14 @@ class DrawEngine(object):
 
         # xy axis labels
         ax.set_xlabel("lapse (seconds)")
-        ax.set_ylabel("thread by targets")
+        ax.set_ylabel("target | thread")
         ax.set_yticks(range(len(y_indexes_l)))
         ax.set_ylim(.5, len(y_indexes_l)-0.5)
         ax.set_yticklabels(y_indexes_l)
         # ax2 = ax.twinx()
         # ax2.set_ylabel("component by hosts")
-        # ax2.set_ylim(0.5, len(y_indexes_r)-0.5)
         # ax2.set_yticks(range(len(y_indexes_r)))
+        # ax2.set_ylim(0.5, len(y_indexes_r)-0.5)
         # ax2.set_yticklabels(y_indexes_r)
 
         # ratios for markers
@@ -322,21 +322,21 @@ class DrawEngine(object):
             else:
                 t_marker = "."
                 color = "k"
-            ax.plot(ti.start_seconds-start, ti.plot_y,
+            ax.plot(ti.start_seconds-start, tiy[ti],
                      marker=t_marker,
                      color=color,
                      markersize=markersize)
 
             # annotate start edge
             ax.annotate("%s" % ti.intervals[0].from_edge.name,
-                         (ti.start_seconds-start, ti.plot_y),
-                         (ti.start_seconds-start, ti.plot_y+annot_off_y),
+                         (ti.start_seconds-start, tiy[ti]),
+                         (ti.start_seconds-start, tiy[ti]+annot_off_y),
                          **annot_kw)
 
             marker=7
             for int_ in ti.intervals:
                 from_x = int_.from_seconds - start
-                from_y = int_.threadins.plot_y
+                from_y = tiy[int_.threadins]
                 to_x = int_.to_seconds - start
                 to_y = from_y
 
@@ -369,12 +369,12 @@ class DrawEngine(object):
                     annot_off = -annot_off_y
 
                 if int_.lapse >= pres_lim:
-                    ax.annotate("%s=%.2f" % (int_.path_name, int_.lapse),
+                    ax.annotate("%s=%.2f" % (int_.entity.name, int_.lapse),
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
-                    ax.annotate("%s" % int_.path_name,
+                    ax.annotate("%s" % int_.entity.name,
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
@@ -392,7 +392,7 @@ class DrawEngine(object):
                     t_marker = marker
                     color=ti_color
                     t_markersize=node_markersize
-                ax.plot(int_.to_seconds-start, ti.plot_y,
+                ax.plot(int_.to_seconds-start, tiy[ti],
                          marker=t_marker,
                          color=color,
                          markersize=t_markersize)
@@ -409,14 +409,14 @@ class DrawEngine(object):
         ax = fig.axes[0]
         for int_ in requestins.join_ints:
             from_x = int_.from_seconds - start
-            from_y = int_.from_threadins.plot_y
+            from_y = tiy[int_.from_threadins]
             to_x = int_.to_seconds - start
-            to_y = int_.to_threadins.plot_y
+            to_y = tiy[int_.to_threadins]
             ti_color = int_.color_jt
             if to_y > from_y:
-                connstyle="arc3,rad=-0.05"
+                connstyle="arc3,rad=0"
             else:
-                connstyle="arc3,rad=0.05"
+                connstyle="arc3,rad=0"
             if int_.is_main:
                 width = main_linewidth
                 assert plot_main
@@ -436,9 +436,12 @@ class DrawEngine(object):
                                         color=ti_color,
                                         connectionstyle=connstyle,
                                         lw=width))
-            ax.annotate("%s=%.2f" % (int_.path_name, int_.lapse),
+            ax.annotate("%s=%.2f" % (int_.entity.name, int_.lapse),
                         ((from_x+to_x)/2, (from_y+to_y)/2+.5),
                         **annot_kw)
+
+        ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
+        ax.annotate(last_t, xy=(last-start, 0), xytext=(last-start, 0))
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_requestplot.png")
@@ -480,16 +483,10 @@ class DrawEngine(object):
         return x_list, y_list
 
 
-    def draw_stacked_intervals(self, thread_ints_df, main_ints_df, name):
+    def draw_stacked_intervals(self, start_end, thread_ints_df, main_ints_df, name):
         print("(DrawEngine) drawing %s..." % name)
 
-        start_i = thread_ints_df["from_sec"].argmin()
-        start_s = thread_ints_df.loc[start_i]["from_sec"]
-        start_t = thread_ints_df.loc[start_i]["from_time"]
-        end_i = thread_ints_df["to_sec"].argmax()
-        end_s = thread_ints_df.loc[end_i]["to_sec"]
-        end_t = thread_ints_df.loc[end_i]["to_time"]
-
+        (start_s, end_s), (start_t, end_t) = start_end
 
         ## main_stack
         # main_x_list
@@ -597,6 +594,52 @@ class DrawEngine(object):
         print("ok")
 
 
+    def draw_threadobj(self, thread_obj):
+        print("(DrawEngine) drawing %s..." % thread_obj.name)
+
+        ## settings ##
+        figsize = (60, 8)
+        ##############
+
+        #### sns #####
+        sns.set_style("whitegrid")
+        # marker bug
+        sns.set_context(rc={'lines.markeredgewidth': 0.5})
+        ##############
+
+        # figure and axes
+        fig = plt.figure(figsize=figsize)
+        fig.clear()
+        fig.suptitle("%s" % thread_obj, fontsize=14)
+        ax = fig.add_subplot(1,1,1)
+
+        ax.set_xlabel("lapse (seconds)")
+        ax.set_ylabel("wait time (seconds)")
+
+        for threadins in thread_obj.threadinss:
+            ax.plot([threadins.start_seconds, threadins.end_seconds],
+                     [0, 0],
+                     linestyle="-",
+                     color=threadins.component.color,
+                     label=None)
+            for joined_int in threadins.joined_ints:
+                ax.plot([joined_int.to_seconds, joined_int.to_seconds],
+                        [-joined_int.lapse, 0],
+                        linestyle="-",
+                        color=joined_int.color_jt,
+                        label=joined_int.join_obj.name)
+            for joins_int in threadins.joins_ints:
+                ax.plot([joins_int.from_seconds, joins_int.from_seconds],
+                        [0, joins_int.lapse],
+                        linestyle="-",
+                        color=joins_int.color_jt,
+                        label=joins_int.join_obj.name)
+
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig.savefig(self.out_path + thread_obj.name + "_threadplot.png")
+        print("ok")
+
+
     def draw_debug_groups(self, requests, threadgroup):
         print("(DrawEngine) drawing %s..." % requests)
 
@@ -644,8 +687,8 @@ class DrawEngine(object):
         plot_main = False
 
         threadinss = threadgroup
-        y_indexes_l, y_indexes_r = self._prepare_thread_indexes(threadinss,
-                                                                plot_main)
+        y_indexes_l, y_indexes_r, tiy =\
+                self._prepare_thread_indexes(threadinss, plot_main)
 
         # xy axis labels
         ax.set_xlabel("lapse (seconds)")
@@ -653,11 +696,11 @@ class DrawEngine(object):
         ax.set_yticks(range(len(y_indexes_l)))
         ax.set_ylim(.5, len(y_indexes_l)-0.5)
         ax.set_yticklabels(y_indexes_l)
-        # ax2 = ax.twinx()
-        # ax2.set_ylabel("component by hosts")
-        # ax2.set_ylim(0.5, len(y_indexes_r)-0.5)
-        # ax2.set_yticks(range(len(y_indexes_r)))
-        # ax2.set_yticklabels(y_indexes_r)
+        ax2 = ax.twinx()
+        ax2.set_ylabel("component by hosts")
+        ax2.set_yticks(range(len(y_indexes_r)))
+        ax2.set_ylim(0.5, len(y_indexes_r)-0.5)
+        ax2.set_yticklabels(y_indexes_r)
 
         # ratios for markers
         mark_lim = all_lapse * annot_mark_lim
@@ -672,21 +715,21 @@ class DrawEngine(object):
             else:
                 t_marker = "."
                 color = "k"
-            ax.plot(ti.start_seconds-start, ti.plot_y,
+            ax.plot(ti.start_seconds-start, tiy[ti],
                      marker=t_marker,
                      color=color,
                      markersize=markersize)
 
             # annotate start edge
             ax.annotate("%s" % ti.intervals[0].from_edge.name,
-                         (ti.start_seconds-start, ti.plot_y),
-                         (ti.start_seconds-start, ti.plot_y+annot_off_y),
+                         (ti.start_seconds-start, tiy[ti]),
+                         (ti.start_seconds-start, tiy[ti]+annot_off_y),
                          **annot_kw)
 
             marker=7
             for int_ in ti.intervals:
                 from_x = int_.from_seconds - start
-                from_y = int_.threadins.plot_y
+                from_y = tiy[int_.threadins]
                 to_x = int_.to_seconds - start
                 to_y = from_y
 
@@ -719,12 +762,12 @@ class DrawEngine(object):
                     annot_off = -annot_off_y
 
                 if int_.lapse >= pres_lim:
-                    ax.annotate("%s=%.2f" % (int_.node.id_, int_.lapse),
+                    ax.annotate("%s=%.2f" % (int_.node.name, int_.lapse),
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
-                    ax.annotate("%s" % int_.node.id_,
+                    ax.annotate("%s" % int_.node.name,
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
@@ -742,7 +785,7 @@ class DrawEngine(object):
                     t_marker = marker
                     color=ti_color
                     t_markersize=node_markersize
-                ax.plot(int_.to_seconds-start, ti.plot_y,
+                ax.plot(int_.to_seconds-start, tiy[ti],
                          marker=t_marker,
                          color=color,
                          markersize=t_markersize)
@@ -764,14 +807,14 @@ class DrawEngine(object):
         ax = fig.axes[0]
         for int_ in join_ints:
             from_x = int_.from_seconds - start
-            from_y = int_.from_threadins.plot_y
+            from_y = tiy[int_.from_threadins]
             to_x = int_.to_seconds - start
-            to_y = int_.to_threadins.plot_y
+            to_y = tiy[int_.to_threadins]
             ti_color = int_.color_jt
             if to_y > from_y:
-                connstyle="arc3,rad=-0.05"
+                connstyle="arc3,rad=0"
             else:
-                connstyle="arc3,rad=0.05"
+                connstyle="arc3,rad=0"
             if int_.is_main:
                 width = main_linewidth
                 assert plot_main

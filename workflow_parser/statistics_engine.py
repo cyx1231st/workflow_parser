@@ -22,6 +22,41 @@ def do_statistics(tgs, s_engine, d_engine):
 
     print("Preparing relations...")
 
+    if not rqs.requestinss:
+        print("No requests available, abort!")
+        return
+
+    ## adjust offset
+    first_req = None
+    last_req = None
+    for requestins in rqs.requestinss.itervalues():
+        if first_req is None:
+            first_req = requestins
+        elif first_req.start_seconds > requestins.start_seconds:
+            first_req = requestins
+
+        if last_req is None:
+            last_req = requestins
+        elif last_req.last_seconds < requestins.last_seconds:
+            last_req = requestins
+
+    start_s = first_req.start_seconds
+    start_t = first_req.start_time
+    end_s = last_req.last_seconds
+    end_t = last_req.last_time
+    print("lapse: %.4f, (%.4f, %.4f), (%s, %s)" % (
+            end_s - start_s,
+            start_s,
+            end_s,
+            start_t,
+            end_t))
+
+    for tg in tgs.target_objs:
+        tg.offset -= start_s
+    end_s = end_s - start_s
+    start_s = 0
+    start_end = ((start_s, end_s), (start_t, end_t))
+
     ## join intervals
     relations = pcs.join_intervals
     t_dict = {relation.from_target:(str(relation.from_component), relation.from_host)
@@ -112,9 +147,6 @@ def do_statistics(tgs, s_engine, d_engine):
 
     ## requests
     requestinss = rqs.requestinss
-    if not requestinss:
-        print("No requests available, abort!")
-        return
 
     rqs_index = [ri for ri in requestinss]
     rqs_df = pd.DataFrame(((requestinss[rq], requestinss[rq].len_paces,
@@ -186,6 +218,8 @@ def do_statistics(tgs, s_engine, d_engine):
     print("----------------------")
 
     if d_engine:
+        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[0])
+
         d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
         d_engine.draw_relation_heatmap(ca_local_relations_df, "component_local_relations", "f")
         d_engine.draw_relation_heatmap(ca_relations_df, "component_remote_relations", "f")
@@ -194,8 +228,10 @@ def do_statistics(tgs, s_engine, d_engine):
             d_engine.draw_countplot(rqs_df["paces"], "request_with_paces")
             d_engine.draw_countplot(rqs_df["hosts"], "request_with_hosts")
             d_engine.draw_countplot(rqs_df["threadinss"], "request_with_threads")
-        d_engine.draw_requestins(longest_lapse_requestins, "longest_lapse_requestins")
-        d_engine.draw_requestins(longest_paces_requestins, "longest_paces_requestins")
+        d_engine.draw_requestins(longest_lapse_requestins,
+                "longest_lapse_requestins", start_end)
+        d_engine.draw_requestins(longest_paces_requestins,
+                "longest_paces_requestins", start_end)
         d_engine.draw_boxplot(join_intervals_df, "join_intervals",
                               x="path", y="lapse",
                               hue="join_type", color_column="color_jt")
@@ -229,4 +265,4 @@ def do_statistics(tgs, s_engine, d_engine):
         d_engine.draw_violinplot(main_intervals_df, "main_intervals",
                                  x="path", y="lapse",
                                  nth=20)
-        d_engine.draw_stacked_intervals(extendedints_df, main_intervals_df, "stacked_main_paths")
+        d_engine.draw_stacked_intervals(start_end, extendedints_df, main_intervals_df, "stacked_main_paths")

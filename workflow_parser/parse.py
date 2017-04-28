@@ -15,13 +15,14 @@
 from __future__ import print_function
 
 import argparse
+import traceback
 
 from workflow_parser.draw_engine import DrawEngine
-from workflow_parser.log_engine import TargetsEngine
+from workflow_parser.log_engine import LogEngine
 from workflow_parser.state_engine import StateEngine
 from workflow_parser.statistics_engine import do_statistics
 from workflow_parser.relation_engine import relation_parse
-from workflow_parser.statistics import Report
+# from workflow_parser.statistics import Report
 from workflow_parser.utils import Report as ReportInternal
 
 
@@ -51,32 +52,32 @@ def main1(driver):
 
     report_i = ReportInternal()
 
-    # build targets
-    tgs_engine = TargetsEngine(driver.services, driver, report_i)
-    tgs_engine.loadfiles(args.folder)
-    tgs_engine.readfiles()
-    tgs_engine.preparethreads()
+    try:
+        # build logs
+        log_engine = LogEngine(driver.services, driver, report_i)
+        logfiles = log_engine.loadfiles(args.folder)
+        logfiles = log_engine.readfiles(logfiles)
+        log_engine.preparethreads(logfiles)
 
-    # debug
-    # for comp in driver.services.sr_components:
-    #     print("%s" % log_collector.targetobjs_by_component[comp][0])
-
-    # build states
-    state_engine = StateEngine(master, tgs_engine, report_i)
-    state_engine.build_thread_instances()
-    state_engine.join_paces()
-    state_engine.group_threads()
-    state_engine.build_requests()
-
+        # build states
+        state_engine = StateEngine(master, log_engine, report_i)
+        state_engine.build_thread_instances()
+        state_engine.join_paces()
+        state_engine.group_threads()
+        state_engine.build_requests()
+    except Exception:
+        print("\n%r\n" % report_i)
+        raise
     print("%r" % report_i)
+    print()
 
-    relation_parse(state_engine.pcs, tgs_engine)
+    relation_parse(state_engine.pcs, log_engine)
 
     if args.draw:
         draw_engine = DrawEngine("/home/vagrant/cyxvagrant/tmp/png/")
     else:
         draw_engine = None
-    do_statistics(tgs_engine, state_engine, draw_engine)
+    do_statistics(log_engine, state_engine, draw_engine)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)
