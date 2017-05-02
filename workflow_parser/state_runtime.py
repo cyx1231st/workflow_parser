@@ -38,6 +38,11 @@ class Thread(object):
     def host(self):
         return self.target_obj.host
 
+    @property
+    def lapse(self):
+        assert self.threadinss
+        return sum(ti.lapse for ti in self.threadinss)
+
     def __str__(self):
         return "<Thread#%s: %s, %d loglines, %d ignored, %d threadinss>" %\
                 (self.name,

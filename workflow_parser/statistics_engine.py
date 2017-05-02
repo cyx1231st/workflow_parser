@@ -219,6 +219,9 @@ def do_statistics(tgs, s_engine, d_engine):
 
     if d_engine:
         d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[0])
+        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[5])
+        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[2])
+        d_engine.draw_target(tgs.targetobjs_by_target["osd.1"])
 
         d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
         d_engine.draw_relation_heatmap(ca_local_relations_df, "component_local_relations", "f")
@@ -265,4 +268,4 @@ def do_statistics(tgs, s_engine, d_engine):
         d_engine.draw_violinplot(main_intervals_df, "main_intervals",
                                  x="path", y="lapse",
                                  nth=20)
-        d_engine.draw_stacked_intervals(start_end, extendedints_df, main_intervals_df, "stacked_main_paths")
+        d_engine.draw_stacked_intervals(start_end, requestinss, main_intervals_df, "stacked_main_paths")

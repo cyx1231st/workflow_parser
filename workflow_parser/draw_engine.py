@@ -2,13 +2,18 @@ from __future__ import print_function
 
 from collections import defaultdict
 from collections import OrderedDict
+import heapq
 from matplotlib import patches as mpatches
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sys import maxint
 
 from workflow_parser.state_machine import RequestInstance
+from workflow_parser.state_machine import ThreadInterval
+from workflow_parser.state_machine import JoinInterval
+from workflow_parser.state_runtime import Target
 
 
 def patch_violinplot():
@@ -26,6 +31,25 @@ class DrawEngine(object):
         assert isinstance(out_path, str)
 
         self.out_path = out_path
+
+    def draw_target(self, target_obj):
+        assert isinstance(target_obj, Target)
+
+        print("(DrawEngine) drawing %s..." % target_obj.target)
+        df = pd.DataFrame(((to.lapse,
+                            to.name)
+                           for to in target_obj.thread_objs.itervalues()),
+                          columns=["lapse", "thread"])
+
+        fig = plt.figure(figsize=(15, len(target_obj.thread_objs)*.5+2))
+        fig.clear()
+        fig.suptitle("%s barplot" % target_obj, fontsize=14)
+
+        sns.barplot(x="lapse", y="thread", data=df)
+
+        fig.savefig(self.out_path + target_obj.target + "_targetfig.png")
+        print("ok")
+
 
     def draw_relation_heatmap(self, relation_df, name, fmt="d"):
         assert isinstance(relation_df, pd.DataFrame)
@@ -447,10 +471,7 @@ class DrawEngine(object):
         fig.savefig(self.out_path + name + "_requestplot.png")
         print("ok")
 
-
-    def _convert_intervals_to_stack(self, df):
-        stack = [(round(sec, 7), 1) for sec in df["from_sec"]]
-        stack.extend((round(sec, 7), -1) for sec in df["to_sec"])
+    def _convert_stack(self, stack):
         stack.sort(key=lambda tup: tup[0])
 
         x_list = []
@@ -482,8 +503,38 @@ class DrawEngine(object):
 
         return x_list, y_list
 
+    def _convert_intervals_to_stack1(self, rows):
+        stack = [(round(row.from_seconds, 7), 1) for row in rows]
+        stack.extend((round(row.to_seconds, 7), -1) for row in rows)
+        return self._convert_stack(stack)
 
-    def draw_stacked_intervals(self, start_end, thread_ints_df, main_ints_df, name):
+    def _convert_intervals_to_stack(self, df):
+        stack = [(round(sec, 7), 1) for sec in df["from_sec"]]
+        stack.extend((round(sec, 7), -1) for sec in df["to_sec"])
+        return self._convert_stack(stack)
+
+    class SNode(object):
+        def __init__(self, type_=None, color=None):
+            self.tonode_by_type = {}
+            self.type_ = type_
+            self.color = color
+            self.content = []
+            self.key = maxint
+
+        def get_tonode(self, type_, color):
+            assert type_ is not None
+            tonode = self.tonode_by_type.get(type_)
+            if tonode is None:
+                tonode = DrawEngine.SNode(type_, color)
+                self.tonode_by_type[type_] = tonode
+            return tonode
+
+        def append(self, item, key):
+            self.content.append(item)
+            self.key = min(self.key, key)
+
+
+    def draw_stacked_intervals(self, start_end, requestinss, main_ints_df, name):
         print("(DrawEngine) drawing %s..." % name)
 
         (start_s, end_s), (start_t, end_t) = start_end
@@ -491,16 +542,66 @@ class DrawEngine(object):
         ## main_stack
         # main_x_list
         # main_ys_list
-        thread_ints_by_type = thread_ints_df.groupby("type")
+
+        def _get_type(int_):
+            if isinstance(int_, ThreadInterval):
+                return str(int_.component)
+            else:
+                assert isinstance(int_, JoinInterval)
+                if int_.is_remote:
+                    return "remote_join"
+                else:
+                    return "local_join"
+
+        component_workflow = self.SNode()
+        for requestins in requestinss.itervalues():
+            snode = component_workflow
+            for int_ in requestins.intervals_extended:
+                snode = snode.get_tonode(_get_type(int_), int_.color)
+                snode.append(int_, int_.from_seconds)
+
+        nodes = []
+        for node in component_workflow.tonode_by_type.itervalues():
+            heapq.heappush(nodes, (node.key, node))
+
         main_stacked_results = []
-        for type_, df in thread_ints_by_type:
-            color = df.iloc[0]["color"]
-            x_list, y_list = self._convert_intervals_to_stack(df)
-            main_stacked_results.append((type_, color, x_list, y_list))
+        while nodes:
+            node = heapq.heappop(nodes)[1]
+            x_list, y_list = self._convert_intervals_to_stack1(node.content)
+            main_stacked_results.append((node.type_, node.color, x_list, y_list))
+            for node_ in node.tonode_by_type.itervalues():
+                heapq.heappush(nodes, (node_.key, node_))
+
+        # type_ = None
+        # color = None
+        # same_type = []
+        # same_types = []
+        # for row_tup in thread_ints_ordered.itertuples():
+        #     r_type = row_tup.type
+        #     r_color = row_tup.color
+        #     if type_ is not None and type_ == r_type:
+        #         same_type.append(row_tup)
+        #     else:
+        #         assert r_type is not None
+        #         type_ = r_type
+        #         color = r_color
+        #         same_type = [row_tup]
+        #         same_types.append((type_, color, same_type))
+
+        # main_stacked_results = []
+        # for type_, color, rows in same_types:
+        #     x_list, y_list = self._convert_intervals_to_stack1(rows)
+        #     main_stacked_results.append((type_, color, x_list, y_list))
+
+        # thread_ints_by_type = thread_ints_df.groupby("type")
+        # main_stacked_results = []
+        # for type_, df in thread_ints_by_type:
+        #     color = df.iloc[0]["color"]
+        #     x_list, y_list = self._convert_intervals_to_stack(df)
+        #     main_stacked_results.append((type_, color, x_list, y_list))
 
         types = (tup[0] for tup in main_stacked_results)
         colors = (tup[1] for tup in main_stacked_results)
-
         main_x_list = set()
         for tup in main_stacked_results:
             main_x_list.update(tup[2])
@@ -531,7 +632,7 @@ class DrawEngine(object):
                 y_stacked[y_i] += val
                 y_max = max(y_max, y_stacked[y_i])
 
-        main_x_list = [x-start_s for x in main_x_list]
+        main_x_list = [x for x in main_x_list]
 
         ## individual stacks
         ints_by_entity = main_ints_df.groupby("path")
@@ -570,24 +671,24 @@ class DrawEngine(object):
             ax = fig.add_subplot(y_plots, 1, a_index)
             ax.set_xticklabels([])
             ax.set_ylabel(entity)
-            x_list = [x-start_s for x in x_list]
+            x_list = [x for x in x_list]
             ax.stackplot(x_list, y_list, colors=[color], linewidth=0)
-            ax.set_xlim(0, (end_s-start_s)*1.05)
+            ax.set_xlim(0, end_s*1.05)
             ax.set_ylim(0, y_max)
             a_index += 1
 
         ax = fig.add_subplot(y_plots,1,a_index)
         ax.set_xlabel("lapse (seconds)")
-        ax.set_xlim(0, (end_s-start_s)*1.05)
+        ax.set_xlim(0, end_s*1.05)
         ax.set_ylim(0, y_max)
         ax.set_ylabel("MAIN")
 
         ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
-        ax.annotate(end_t, xy=(end_s-start_s, 0), xytext=(end_s-start_s, 0))
-        ax.plot([0, end_s-start_s], [0, 0], 'r*')
+        ax.annotate(end_t, xy=(end_s, 0), xytext=(end_s, 0))
+        ax.plot([0, end_s], [0, 0], 'r*')
 
         ax.stackplot(main_x_list, *main_ys_list, colors=colors, linewidth=0)
-        ax.legend((mpatches.Patch(color=color) for color in colors), types)
+        # ax.legend((mpatches.Patch(color=color) for color in colors), types)
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_stackedplot.png")
@@ -676,8 +777,7 @@ class DrawEngine(object):
         ax = fig.add_subplot(1,1,1)
 
         # prepare requests
-        import sys
-        start = sys.maxint
+        start = maxint
         last = 0
         for ti in threadgroup:
             start = min(start, ti.start_seconds)

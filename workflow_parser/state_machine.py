@@ -728,6 +728,10 @@ class ThreadInstance(object):
         return self.paces[-1].seconds
 
     @property
+    def lapse(self):
+        return self.end_seconds - self.start_seconds
+
+    @property
     def start_time(self):
         return self.paces[0].time
 
@@ -1110,6 +1114,7 @@ class RequestInstance(object):
             self.errors["Contains no end thread"] = ""
         else:
             int_ = self.end_interval
+            assert isinstance(int_, ThreadInterval)
             to_pace = None
             while int_:
                 int_.is_main = True
@@ -1137,6 +1142,16 @@ class RequestInstance(object):
                 self.intervals_extended.append(
                         ThreadInterval(self.start_interval.from_pace,
                                        to_pace))
+        int_extended = []
+        for tint in reversed(self.intervals_extended):
+            if int_extended:
+                assert int_extended[-1].to_pace is tint.from_pace
+            else:
+                assert tint.from_pace is self.start_interval.from_pace
+            int_extended.append(tint)
+        assert int_extended[-1].to_pace is self.end_interval.to_pace
+        self.intervals_extended = int_extended
+
 
         # error: stray thread instances
         self.e_stray_threadinss = tis - seen_tis
