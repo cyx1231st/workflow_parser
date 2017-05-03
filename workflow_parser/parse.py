@@ -57,27 +57,29 @@ def main1(driver):
         log_engine = LogEngine(driver.services, driver, report_i)
         logfiles = log_engine.loadfiles(args.folder)
         logfiles = log_engine.readfiles(logfiles)
-        log_engine.preparethreads(logfiles)
+        targetobjs = log_engine.preparethreads(logfiles)
 
         # build states
-        state_engine = StateEngine(master, log_engine, report_i)
-        state_engine.build_thread_instances()
-        state_engine.join_paces()
-        state_engine.group_threads()
-        state_engine.build_requests()
+        state_engine = StateEngine(master, report_i)
+        threadinss = state_engine.build_thread_instances(targetobjs)
+        relations = state_engine.join_paces(threadinss)
+        threadgroup_by_request = state_engine.group_threads(threadinss)
+        requestinss = state_engine.build_requests(threadgroup_by_request)
     except Exception:
         print("\n%r\n" % report_i)
         raise
     print("%r" % report_i)
     print()
 
-    relation_parse(state_engine.pcs, log_engine)
+    # correct clocks
+    relation_parse(requestinss)
 
+    # statistics
     if args.draw:
         draw_engine = DrawEngine("/home/vagrant/cyxvagrant/tmp/png/")
     else:
         draw_engine = None
-    do_statistics(log_engine, state_engine, draw_engine)
+    do_statistics(requestinss, draw_engine)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)

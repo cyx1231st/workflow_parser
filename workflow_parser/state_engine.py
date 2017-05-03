@@ -3,8 +3,6 @@ from __future__ import print_function
 from collections import defaultdict
 from collections import OrderedDict
 
-from workflow_parser.log_engine import TargetsCollector
-from workflow_parser.log_parser import LogLine
 from workflow_parser.state_graph import MasterGraph
 from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import JoinInterval
@@ -12,246 +10,126 @@ from workflow_parser.state_machine import NestedRequest
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInstance
-from workflow_parser.state_runtime import Thread
 from workflow_parser.utils import report_loglines
 from workflow_parser.utils import Report
 
 
-class PacesCollector(object):
-    def __init__(self):
-        self.ignored_loglines_by_component = defaultdict(lambda: [])
-
-        self.joins_paces = []
-        self.joined_paces = []
-        self.joined_paces_by_jo = defaultdict(list)
-        self.joined_paces_by_jo_host = defaultdict(lambda: defaultdict(list))
-
-        self.unjoinspaces_by_edge = defaultdict(list)
-        self.unjoinedpaces_by_edge = defaultdict(list)
-        self.relations = set()
-        self.relation_by_jo = defaultdict(list)
-
-        self.r_unjoinspaces_by_edge = defaultdict(set)
-        self.join_intervals_by_type = defaultdict(set)
-        self.join_intervals = set()
-        self.thread_intervals = set()
-        self.extended_intervals = set()
-
-    def collect_ignored(self, logline):
-        assert isinstance(logline, LogLine)
-        self.ignored_loglines_by_component[logline.component].append(logline)
-
-    def collect_join(self, threadins):
-        assert isinstance(threadins, ThreadInstance)
-
-        self.joins_paces.extend(threadins.joins_paces)
-        self.joined_paces.extend(threadins.joined_paces)
-        for pace in threadins.joined_paces:
-            for joined_obj in pace.joined_objs:
-                self.joined_paces_by_jo[joined_obj].append(pace)
-                self.joined_paces_by_jo_host[joined_obj][pace.host].append(pace)
-
-    def collect_unjoin(self):
-        for pace in self.joins_paces:
-            if pace.joins_int is empty_join:
-                self.unjoinspaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joins_int, JoinInterval):
-                self.relations.add(pace.joins_int)
-                self.relation_by_jo[pace.joins_int.join_obj].append(pace.joins_int)
-            else:
-                assert False
-
-        for pace in self.joined_paces:
-            if pace.joined_int is empty_join:
-                self.unjoinedpaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joined_int, JoinInterval):
-                assert pace.joined_int in self.relations
-            else:
-                assert False
-
-    def collect_request(self, requestins):
-        assert isinstance(requestins, RequestInstance)
-
-        if requestins.e_unjoins_paces_by_edge:
-            for edge, paces in requestins.e_unjoins_paces_by_edge.iteritems():
-                self.r_unjoinspaces_by_edge[edge].update(paces)
-
-        if not requestins.errors:
-            self.join_intervals.update(requestins.join_ints)
-            for j_ins in requestins.join_ints:
-                self.join_intervals_by_type[j_ins.join_type].add(j_ins)
-            self.thread_intervals.update(requestins.td_ints)
-            self.extended_intervals.update(requestins.intervals_extended)
-
-
-class ThreadInssCollector(object):
-    def __init__(self, pcs):
-        assert isinstance(pcs, PacesCollector)
-
-        self.pcs = pcs
-
-        self.incomplete_threadinss_by_graph = defaultdict(list)
-        self.complete_threadinss_by_graph = defaultdict(list)
-        self.start_threadinss = []
-        self.duplicated_vars = set()
-
-        self.threadinss = []
-        self.thread_objs = []
-
-        self.threadgroup_by_request = defaultdict(set)
-        self.sum_threads_in_group = 0
-        self.threadgroups_with_multiple_requests = []
-        self.threadgroups_without_request = []
-
-        self.r_threadinss = set()
-        self.r_incomplete_threadinss = set()
-        self.r_extra_start_threadinss = set()
-        self.r_extra_end_threadinss = set()
-        self.r_stray_threadinss = set()
-
-    def collect_threadobj(self, thread_obj):
-        assert isinstance(thread_obj, Thread)
-
-        self.thread_objs.append(thread_obj)
-
-        for threadins in thread_obj.threadinss:
-            if not threadins.is_complete:
-                self.incomplete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
-            else:
-                self.complete_threadinss_by_graph[threadins.threadgraph.name].append(threadins)
-
-            if threadins.is_request_start:
-                self.start_threadinss.append(threadins)
-
-            self.threadinss.append(threadins)
-            self.duplicated_vars.update(threadins.thread_vars_dup.keys())
-            self.pcs.collect_join(threadins)
-
-        for logline in thread_obj.ignored_loglines:
-            self.pcs.collect_ignored(logline)
-
-    def collect_thread_group(self, requests, tgroup):
-        assert isinstance(requests, set)
-        assert isinstance(tgroup, set)
-
-        len_req = len(requests)
-        if len_req > 1:
-            self.threadgroups_with_multiple_requests.append((tgroup, requests))
-        elif len_req == 1:
-            self.threadgroup_by_request[requests.pop()].update(tgroup)
-        else:
-            self.threadgroups_without_request.append(tgroup)
-
-    def collect_request(self, requestins):
-        assert isinstance(requestins, RequestInstance)
-
-        self.r_threadinss.update(requestins.threadinss)
-        if requestins.e_incomplete_threadinss:
-            self.r_incomplete_threadinss.update(requestins.e_incomplete_threadinss)
-        if requestins.e_extra_s_threadinss:
-            self.r_extra_start_threadinss.update(requestins.e_extra_s_threadinss)
-        if requestins.e_extra_e_threadinss:
-            self.r_extra_end_threadinss.update(requestins.e_extra_e_threadinss)
-        if requestins.e_stray_threadinss:
-            self.r_stray_threadinss.update(requestins.e_stray_threadinss)
-
-
-class RequestsCollector(object):
-    def __init__(self, tis, pcs):
-        assert isinstance(tis, ThreadInssCollector)
-        assert isinstance(pcs, PacesCollector)
-
-        self.tis= tis
-        self.pcs= pcs
-
-        self.requestinss = {}
-        self.requests_vars = defaultdict(set)
-
-        # error report
-        self.error_requestinss = []
-        self.requests_by_errortype = defaultdict(list)
-        self.main_route_error = defaultdict(lambda: defaultdict(lambda: 0))
-
-        # warn report
-        self.warn_requestinss = []
-        self.requests_by_warntype = defaultdict(list)
-
-    def collect_request(self, requestins):
-        assert isinstance(requestins, RequestInstance)
-        if requestins.warns:
-            self.warn_requestinss.append(requestins)
-            for warn in requestins.warns.keys():
-                self.requests_by_warntype[warn].append(requestins)
-
-        if requestins.errors:
-            self.error_requestinss.append(requestins)
-            for error in requestins.errors.keys():
-                self.requests_by_errortype[error].append(requestins)
-                if error == "Main route parse error":
-                    e = requestins.errors[error][1]
-                    self.main_route_error[e.message][e.where] += 1
-        else:
-            assert requestins.request not in self.requestinss
-            self.requestinss[requestins.request] = requestins
-            self.requests_vars["request"].add(requestins.request)
-            for k, vs in requestins.request_vars.iteritems():
-                self.requests_vars[k].update(vs)
-
-        self.tis.collect_request(requestins)
-        self.pcs.collect_request(requestins)
-
-
-# TODO: add count checks
 class StateEngine(object):
-    def __init__(self, mastergraph, tgs, report):
+    def __init__(self, mastergraph, report):
         assert isinstance(mastergraph, MasterGraph)
-        assert isinstance(tgs, TargetsCollector)
         assert isinstance(report, Report)
 
         self.mastergraph = mastergraph
-        self.tgs = tgs
-        self.pcs = PacesCollector()
-        self.tis = ThreadInssCollector(self.pcs)
-        self.rqs = RequestsCollector(self.tis, self.pcs)
         self.report = report
 
-    def build_thread_instances(self):
-        print("Build thread instances...")
+    def build_thread_instances(self, targetobjs):
         valid_loglines = 0
-        for target_obj in self.tgs.target_objs:
+        thread_objs = []
+
+        print("Build thread instances...")
+        for target_obj in targetobjs:
             for thread_obj in target_obj.thread_objs.itervalues():
-                thread_obj.build_threadinss(self.mastergraph)
-                self.tis.collect_threadobj(thread_obj)
-                valid_loglines += thread_obj.cnt_valid_loglines
+                threadins = None
+                cnt_valid_loglines = 0
+                for logline in thread_obj.loglines:
+                    if threadins is not None:
+                        if threadins.step(logline):
+                            # success!
+                            pass
+                        else:
+                            threadins = None
+                    if threadins is None:
+                        threadins = ThreadInstance.create(self.mastergraph,
+                                                          logline,
+                                                          thread_obj)
+                        if threadins is not None:
+                            thread_obj.threadinss.append(threadins)
+                        else:
+                            # error
+                            # print("(ParserEngine) parse error: cannot decide graph")
+                            # report_loglines(loglines, c_index)
+                            # print "-------- end -----------"
+                            # raise StateError("(ParserEngine) parse error: cannot decide graph")
+                            import pdb; pdb.set_trace()
+                    if threadins is not None:
+                        cnt_valid_loglines += 1
+                    else:
+                        thread_obj.ignored_loglines.append(logline)
+                        logline.ignored = True
+
+                assert len(thread_obj.ignored_loglines) + cnt_valid_loglines\
+                        == len(thread_obj.loglines)
+
+                thread_objs.append(thread_obj)
+                valid_loglines += cnt_valid_loglines
         print("-------------------------")
+
+        #### collect ####
+        ignored_loglines_by_component = defaultdict(lambda: [])
+        components = set()
+        hosts = set()
+        targets = set()
+        threadinss = []
+        incomplete_threadinss_by_graph = defaultdict(list)
+        complete_threadinss_by_graph = defaultdict(list)
+        start_threadinss = []
+        duplicated_vars = set()
+        joins_paces = []
+        joined_paces = []
+
+        for thread_obj in thread_objs:
+            if thread_obj.ignored_loglines:
+                ignored_loglines_by_component[thread_obj.component]\
+                        .extend(thread_obj.ignored_loglines)
+            if thread_obj.threadinss:
+                components.add(thread_obj.component)
+                hosts.add(thread_obj.host)
+                targets.add(thread_obj.target)
+            for threadins in thread_obj.threadinss:
+                if not threadins.is_complete:
+                    incomplete_threadinss_by_graph[threadins.threadgraph.name]\
+                            .append(threadins)
+                else:
+                    complete_threadinss_by_graph[threadins.threadgraph.name]\
+                            .append(threadins)
+                if threadins.is_request_start:
+                    start_threadinss.append(threadins)
+                threadinss.append(threadins)
+                duplicated_vars.update(threadins.thread_vars_dup.keys())
+                joins_paces.extend(threadins.joins_paces)
+                joined_paces.extend(threadins.joined_paces)
 
         #### summary ####
         print("%d valid loglines" % valid_loglines)
-        print("%d thread instances" % len(self.tis.threadinss))
-        if self.tis.complete_threadinss_by_graph:
-            for gname, tis in self.tis.complete_threadinss_by_graph.iteritems():
+        print("%d thread instances" % len(threadinss))
+        if complete_threadinss_by_graph:
+            for gname, tis in complete_threadinss_by_graph.iteritems():
                 print("  %s: %d inss" % (gname, len(tis)))
 
-        print("%d request start t_instances" %
-                len(self.tis.start_threadinss))
-        print("%d paces to join" % len(self.pcs.joins_paces))
+        print("%d request start t_instances" % len(start_threadinss))
+        print("%d paces to join" % len(joins_paces))
+        print()
 
+        #### report #####
         self.report.step("build_t",
                          line=valid_loglines,
-                         thread=len(self.tis.thread_objs),
-                         threadins=len(self.tis.threadinss),
-                         request=len(self.tis.start_threadinss),
-                         join=len(self.pcs.joins_paces),
-                         joined=len(self.pcs.joined_paces))
-        print()
-        #################
-        if self.pcs.ignored_loglines_by_component:
+                         component=len(components),
+                         host=len(hosts),
+                         target=len(targets),
+                         thread=len(thread_objs),
+                         request=len(start_threadinss),
+                         threadins=len(threadinss),
+                         join=len(joins_paces),
+                         joined=len(joined_paces))
+
+        #### errors #####
+        if ignored_loglines_by_component:
             def _report_ignored(tup):
                 # (logline, loglines, index, thread, component, target)
                 print("  example:")
                 report_loglines(tup[1], tup[2], blanks=4, printend=True)
             print("! WARN !")
-            for comp, loglines in self.pcs.ignored_loglines_by_component.iteritems():
+            for comp, loglines in ignored_loglines_by_component.iteritems():
                 print("%s: %d ignored loglines" % (comp, len(loglines)))
                 _report_ignored(loglines[0])
             print()
@@ -263,33 +141,56 @@ class StateEngine(object):
                     ",".join(edge.name for edge in edges))
             print()
 
-        if self.tis.duplicated_vars:
+        if duplicated_vars:
             print("! WARN !")
             print("Duplicated vars in t_instances: %s" %
-                    ",".join(self.tis.duplicated_vars))
+                    ",".join(duplicated_vars))
             print()
 
-        if self.tis.incomplete_threadinss_by_graph:
+        if incomplete_threadinss_by_graph:
             print("! WARN !")
             print("Incompleted t_instances:")
-            for gname, tis in self.tis.incomplete_threadinss_by_graph.iteritems():
+            for gname, tis in incomplete_threadinss_by_graph.iteritems():
                 print("  %s: %d t_instances" % (gname, len(tis)))
             print()
 
-    def join_paces(self):
+        return threadinss
+
+    def join_paces(self, threadinss):
+        join_attempt_cnt = 0
+
         print("Join paces...")
-        self.pcs.joins_paces.sort()
-        self.pcs.joined_paces.sort()
-        for jo, p_list in self.pcs.joined_paces_by_jo.iteritems():
+        target_objs = {}
+        joins_paces = []
+        joined_paces = []
+        joined_paces_by_jo = defaultdict(list)
+        joined_paces_by_jo_host = defaultdict(lambda: defaultdict(list))
+        joined_paces_by_jo_target = defaultdict(lambda: defaultdict(list))
+        for threadins in threadinss:
+            assert isinstance(threadins, ThreadInstance)
+            target_objs[threadins.target] = threadins.target_obj
+            joins_paces.extend(threadins.joins_paces)
+            joined_paces.extend(threadins.joined_paces)
+            for pace in threadins.joined_paces:
+                for joined_obj in pace.joined_objs:
+                    joined_paces_by_jo[joined_obj].append(pace)
+                    joined_paces_by_jo_host[joined_obj][pace.host].append(pace)
+                    joined_paces_by_jo_target[joined_obj][pace.target].append(pace)
+        joins_paces.sort()
+        joined_paces.sort()
+        for jo, p_list in joined_paces_by_jo.iteritems():
             p_list.sort()
-            self.pcs.joined_paces_by_jo[jo] = OrderedDict.fromkeys(p_list)
-        for jo, paces_by_host in self.pcs.joined_paces_by_jo_host.iteritems():
+            joined_paces_by_jo[jo] = OrderedDict.fromkeys(p_list)
+        for jo, paces_by_host in joined_paces_by_jo_host.iteritems():
             for host, paces in paces_by_host.iteritems():
                 paces.sort()
-                self.pcs.joined_paces_by_jo_host[jo][host] = OrderedDict.fromkeys(paces)
+                joined_paces_by_jo_host[jo][host] = OrderedDict.fromkeys(paces)
+        for jo, paces_by_target in joined_paces_by_jo_target.iteritems():
+            for target, paces in paces_by_target.iteritems():
+                paces.sort()
+                joined_paces_by_jo_target[jo][target] = OrderedDict.fromkeys(paces)
 
-        join_attempt_cnt = 0
-        for joins_pace in self.pcs.joins_paces:
+        for joins_pace in joins_paces:
             join_objs = joins_pace.edge.joins_objs
             target_pace = None
             for join_obj in join_objs:
@@ -297,17 +198,23 @@ class StateEngine(object):
 
                 from_schema = {}
                 care_host = None
+                care_target = None
                 for schema in schemas:
                     from_schema_key = schema[0]
                     to_schema_key = schema[1]
                     if to_schema_key == "host":
-                        # TODO: add target speedup
                         care_host = joins_pace[from_schema_key]
+                    elif to_schema_key == "target":
+                        care_target = joins_pace[from_schema_key]
                     from_schema[from_schema_key] = joins_pace[from_schema_key]
-                if care_host is None:
-                    target_paces = self.pcs.joined_paces_by_jo[join_obj]
+                if care_target is not None:
+                    if care_host is not None:
+                        target_objs[care_target].host == care_host
+                    target_paces = joined_paces_by_jo_target[join_obj][care_target]
+                elif care_host is not None:
+                    target_paces = joined_paces_by_jo_host[join_obj][care_host]
                 else:
-                    target_paces = self.pcs.joined_paces_by_jo_host[join_obj][care_host]
+                    target_paces = joined_paces_by_jo[join_obj]
                 if target_paces:
                     assert isinstance(target_paces, OrderedDict)
 
@@ -353,26 +260,50 @@ class StateEngine(object):
                 # for k, v in to_schemas.iteritems():
                 #     print("  %s: %s" % (k, v))
                 # import pdb; pdb.set_trace()
-                joins_pace.joins_int = empty_join
+                joins_pace.assert_emptyjoin(True, True)
 
-        for joined_pace in self.pcs.joined_paces:
-            if joined_pace.joined_int is None:
-                joined_pace.joined_int = empty_join
+        for joined_pace in joined_paces:
+            joined_pace.assert_emptyjoin(False, False)
         print("-------------")
 
+        #### collect ####
+        unjoinspaces_by_edge = defaultdict(list)
+        unjoinedpaces_by_edge = defaultdict(list)
+        relations = set()
+        relation_by_jo = defaultdict(list)
+        for pace in joins_paces:
+            if pace.joins_int is empty_join:
+                unjoinspaces_by_edge[pace.edge].append(pace)
+            elif isinstance(pace.joins_int, JoinInterval):
+                relations.add(pace.joins_int)
+                relation_by_jo[pace.joins_int.join_obj].append(pace.joins_int)
+            else:
+                assert False
+        for pace in joined_paces:
+            if pace.joined_int is empty_join:
+                unjoinedpaces_by_edge[pace.edge].append(pace)
+            elif isinstance(pace.joined_int, JoinInterval):
+                assert pace.joined_int in relations
+            else:
+                assert False
+
         #### summary ####
-        self.pcs.collect_unjoin()
         print("%d join attempts" % join_attempt_cnt)
-        if self.pcs.relations:
-            print("%d relations:" % len(self.pcs.relations))
-            for jo, relations in self.pcs.relation_by_jo.iteritems():
+        if relations:
+            print("%d relations:" % len(relations))
+            for jo, _relations in relation_by_jo.iteritems():
                 print("  %s->%s: %d rels" % (jo.from_edge.name,
                                              jo.to_edge.name,
-                                             len(relations)))
+                                             len(_relations)))
         print()
-        #################
 
-        jos = set(self.pcs.relation_by_jo.keys())
+        #### report #####
+        self.report.step("join_ps",
+                         join=len(relations),
+                         joined=len(relations))
+
+        #### errors #####
+        jos = set(relation_by_jo.keys())
         g_jos = self.mastergraph.join_objs
         unseen_jos = g_jos - jos
         if unseen_jos:
@@ -381,24 +312,26 @@ class StateEngine(object):
                 print("%s unseen!" % jo)
             print()
 
-        if len(self.pcs.relations) != len(self.pcs.joins_paces):
+        if len(relations) != len(joins_paces):
             print("! WARN !")
-            for edge, notjoins_paces in self.pcs.unjoinspaces_by_edge.iteritems():
+            for edge, notjoins_paces in unjoinspaces_by_edge.iteritems():
                 print("%s: %d unjoins paces"
                         % (edge.name,
                            len(notjoins_paces)))
             print("--------")
-            for edge, notjoined_paces in self.pcs.unjoinedpaces_by_edge.iteritems():
+            for edge, notjoined_paces in unjoinedpaces_by_edge.iteritems():
                 print("%s: %d unjoined paces"
                         % (edge.name,
                            len(notjoined_paces)))
             print()
         else:
-            assert not self.pcs.unjoinedpaces_by_edge
-            assert not self.pcs.unjoinspaces_by_edge
+            assert not unjoinedpaces_by_edge
+            assert not unjoinspaces_by_edge
+
+        return relations
 
     # step 3: group threads by request
-    def group_threads(self):
+    def group_threads(self, threadinss_in):
         print("Group threads...")
         seen_threadinss = set()
         def group(threadins, t_set):
@@ -423,7 +356,8 @@ class StateEngine(object):
 
         # TODO ugly implementation
         threadinss = []
-        for threadins in self.tis.threadinss:
+        for threadins in threadinss_in:
+            assert isinstance(threadins, ThreadInstance)
             if threadins.is_shared:
                 generated = NestedRequest.generate(threadins)
                 threadinss.extend(generated)
@@ -431,48 +365,81 @@ class StateEngine(object):
                 threadinss.append(threadins)
         ##########################
 
+        threadgroup_by_request = defaultdict(set)
+        threadgroups_with_multiple_requests = []
+        threadgroups_without_request = []
         for threadins in threadinss:
             if not threadins.is_shared and threadins not in seen_threadinss:
                 new_t_set = set()
                 requests = group(threadins, new_t_set)
-                self.tis.collect_thread_group(requests, new_t_set)
+                len_req = len(requests)
+                if len_req > 1:
+                    threadgroups_with_multiple_requests.append((new_t_set, requests))
+                elif len_req == 1:
+                    threadgroup_by_request[requests.pop()].update(new_t_set)
+                else:
+                    threadgroups_without_request.append(new_t_set)
         print("----------------")
 
+        sum_lines = 0
+        components = set()
+        hosts = set()
+        targets = set()
+        threads = set()
+        sum_tis = 0
+        sum_joins = 0
+        sum_joined = 0
+        for tgroup in threadgroup_by_request.itervalues():
+            sum_tis += len(tgroup)
+            for tis in tgroup:
+                assert isinstance(tis, ThreadInstance)
+                sum_lines += len(tis.paces)
+                components.add(tis.component)
+                hosts.add(tis.host)
+                targets.add(tis.target_obj)
+                threads.add(tis.thread_obj)
+                sum_joins += len(tis.joins_ints)
+                sum_joined += len(tis.joined_ints)
+
+
         #### summary ####
-        print("%d request groups" % (len(self.tis.threadgroup_by_request)))
-        sum_tis = sum(len(tgroup) for tgroup in self.tis.threadgroup_by_request.itervalues())
-        self.tis.sum_threads_in_group = sum_tis
+        print("%d request groups" % (len(threadgroup_by_request)))
         print("%d thread instances" % sum_tis)
         print()
-        #################
 
-        if sum_tis != len(self.tis.threadinss):
+        #### report #####
+        self.report.step("group_t",
+                         line=sum_lines,
+                         component=len(components),
+                         host=len(hosts),
+                         target=len(targets),
+                         thread=len(threads),
+                         request=len(threadgroup_by_request),
+                         threadins=sum_tis,
+                         join=sum_joins,
+                         joined=sum_joined)
+
+        #### errors #####
+        if sum_tis != len(threadinss_in):
             print("! WARN !")
             print("%d thread instances, but previously built %d"
                     % (sum_tis,
-                       len(self.tis.threadinss)))
+                       len(threadinss_in)))
             print()
 
-        req_set = set(self.tis.threadgroup_by_request.keys())
-        unseen_reqs = self.tgs.requests - req_set
-        if unseen_reqs:
-            print("! WARN !")
-            print("%s requests missing" % len(unseen_reqs))
-            print()
-
-        if self.tis.threadgroups_without_request:
+        if threadgroups_without_request:
             print("! WARN !")
             print("%d groups of %d threadinstances cannot be identified" % (
-                    len(self.tis.threadgroups_without_request),
+                    len(threadgroups_without_request),
                     sum(len(tgroup) for tgroup in
-                        self.tis.threadgroups_without_request)))
+                        threadgroups_without_request)))
             print()
 
-        if self.tis.threadgroups_with_multiple_requests:
+        if threadgroups_with_multiple_requests:
             print("!! ERROR !!")
             print("%d thread groups have multiple requests" % (
-                    len(self.tis.threadgroups_with_multiple_requests)))
-            for i_group, reqs in self.tis.threadgroups_with_multiple_requests:
+                    len(threadgroups_with_multiple_requests)))
+            for i_group, reqs in threadgroups_with_multiple_requests:
                 # from workflow_parser.draw_engine import DrawEngine
                 # draw_engine.draw_debug_groups(reqs, i_group)
                 join_ints = set()
@@ -497,98 +464,172 @@ class StateEngine(object):
             print()
             raise StateError("(ParserEngine) thread group has multiple requests!")
 
-    def build_requests(self):
+        return threadgroup_by_request
+
+    def build_requests(self, threadgroup_by_request):
+        requestinss = {}
+        # error report
+        error_requestinss = []
+        requests_by_errortype = defaultdict(list)
+        main_route_error = defaultdict(lambda: defaultdict(lambda: 0))
+        # warn report
+        warn_requestinss = []
+        requests_by_warntype = defaultdict(list)
+        # others
+        incomplete_threadinss = set()
+        extra_start_threadinss = set()
+        extra_end_threadinss = set()
+        stray_threadinss = set()
+        unjoinspaces_by_edge = defaultdict(set)
+
         print("Build requests...")
-        for request, threads in self.tis.threadgroup_by_request.iteritems():
-            request_obj = RequestInstance(self.mastergraph, request, threads)
-            self.rqs.collect_request(request_obj)
+        for request, threads in threadgroup_by_request.iteritems():
+            requestins = RequestInstance(self.mastergraph, request, threads)
+
+            if requestins.warns:
+                warn_requestinss.append(requestins)
+                for warn in requestins.warns.keys():
+                    requests_by_warntype[warn].append(requestins)
+
+            if requestins.errors:
+                error_requestinss.append(requestins)
+                for error in requestins.errors.keys():
+                    requests_by_errortype[error].append(requestins)
+                    if error == "Main route parse error":
+                        e = requestins.errors[error][1]
+                        main_route_error[e.message][e.where] += 1
+            else:
+                assert requestins.request not in requestinss
+                requestinss[requestins.request] = requestins
+
+            if requestins.e_incomplete_threadinss:
+                incomplete_threadinss.update(requestins.e_incomplete_threadinss)
+            if requestins.e_extra_s_threadinss:
+                extra_start_threadinss.update(requestins.e_extra_s_threadinss)
+            if requestins.e_extra_e_threadinss:
+                extra_end_threadinss.update(requestins.e_extra_e_threadinss)
+            if requestins.e_stray_threadinss:
+                stray_threadinss.update(requestins.e_stray_threadinss)
+            if requestins.e_unjoins_paces_by_edge:
+                for edge, paces in requestins.e_unjoins_paces_by_edge.iteritems():
+                    unjoinspaces_by_edge[edge].update(paces)
         print("-----------------")
 
+        #### collect ####
+        cnt_lines = 0
+        components = set()
+        hosts = set()
+        target_objs = set()
+        thread_objs = set()
+        threadinss = set()
+        requests_vars = defaultdict(set)
+        join_intervals_by_type = defaultdict(set)
+        join_intervals = set()
+
+        thread_intervals = set()
+        extended_intervals = set()
+        for requestins in requestinss.itervalues():
+            assert isinstance(requestins, RequestInstance)
+            cnt_lines += requestins.len_paces
+            components.update(requestins.components)
+            hosts.update(requestins.hosts)
+            target_objs.update(requestins.target_objs)
+            thread_objs.update(requestins.thread_objs)
+            threadinss.update(requestins.threadinss)
+            requests_vars["request"].add(requestins.request)
+            for k, vs in requestins.request_vars.iteritems():
+                requests_vars[k].update(vs)
+            join_intervals.update(requestins.join_ints)
+            for j_ins in requestins.join_ints:
+                join_intervals_by_type[j_ins.join_type].add(j_ins)
+            thread_intervals.update(requestins.td_ints)
+            extended_intervals.update(requestins.intervals_extended)
+
         #### summary ####
-        print("%d request instances with %d thread instances"
-                % (len(self.rqs.requestinss),
-                   len(self.tis.r_threadinss)))
-        print("%d relations:" % len(self.pcs.join_intervals))
-        for j_type, j_inss in self.pcs.join_intervals_by_type.iteritems():
+        print("%d valid request instances with %d thread instances"
+                % (len(requestinss),
+                   len(threadinss)))
+        print("%d relations:" % len(join_intervals))
+        for j_type, j_inss in join_intervals_by_type.iteritems():
             print("  %d %s relations" % (len(j_inss), j_type))
 
-        print("%d vars:" % len(self.rqs.requests_vars))
-        for k, vs in self.rqs.requests_vars.iteritems():
+        print("%d vars:" % len(requests_vars))
+        for k, vs in requests_vars.iteritems():
             print("  %s: %d" % (k, len(vs)))
         print()
-        #################
 
-        if len(self.rqs.requestinss) != len(self.tis.threadgroup_by_request):
+        #### report #####
+        self.report.step("build_r",
+                         line=cnt_lines,
+                         component=len(components),
+                         host=len(hosts),
+                         target=len(target_objs),
+                         thread=len(thread_objs),
+                         request=len(requestinss),
+                         threadins=len(threadinss),
+                         join=len(join_intervals),
+                         joined=len(join_intervals))
+
+        #### errors #####
+        if len(requestinss) != len(threadgroup_by_request):
             print("! WARN !")
             print("%d request instances from %d request groups"
-                    % (len(self.rqs.requestinss),
-                       len(self.tis.threadgroup_by_request)))
+                    % (len(requestinss),
+                       len(threadgroup_by_request)))
             print()
 
-        if len(self.tis.r_threadinss) != self.tis.sum_threads_in_group:
+        if unjoinspaces_by_edge:
             print("! WARN !")
-            print("%d t_instances in requests, but assume %d"
-                    % (len(self.tis.r_threadinss),
-                       self.tis.sum_threads_in_group))
-            print()
-
-        if len(self.pcs.join_intervals) != len(self.pcs.relations):
-            print("! WARN !")
-            print("%d relations in requests, but assume %d"
-                    % (len(self.pcs.join_intervals),
-                       len(self.pcs.relations)))
-            print()
-
-        if self.pcs.r_unjoinspaces_by_edge:
-            print("! WARN !")
-            for edge, paces in self.pcs.r_unjoinspaces_by_edge.iteritems():
+            for edge, paces in unjoinspaces_by_edge.iteritems():
                 print("%s: %d unjoins paces" % (edge.name, len(paces)))
             print()
 
-        if self.rqs.error_requestinss:
+        if error_requestinss:
             print("!! ERROR !!")
-            print("%d error request instances" % len(self.rqs.error_requestinss))
-            for err, requestinss in self.rqs.requests_by_errortype.iteritems():
-                print("  %s: %d requests" % (err, len(requestinss)))
+            print("%d error request instances" % len(error_requestinss))
+            for err, requestinss_ in requests_by_errortype.iteritems():
+                print("  %s: %d requests" % (err, len(requestinss_)))
             print()
 
-        if self.rqs.main_route_error:
+        if main_route_error:
             print("!! ERROR !!")
             print("Tracing errors:")
-            for e_msg, where_count in self.rqs.main_route_error.iteritems():
+            for e_msg, where_count in main_route_error.iteritems():
                 print("  %s:" % e_msg)
                 for where, cnt in where_count.iteritems():
                     print("    %s: %d" % (where, cnt))
             print()
 
-        if self.rqs.warn_requestinss:
+        if warn_requestinss:
             print("! WARN !")
             print("%d warn request instances:" %
-                    len(self.rqs.warn_requestinss))
-            for warn, requestinss in self.rqs.requests_by_warntype.iteritems():
-                print("  %s: %d requests" % (warn, len(requestinss)))
+                    len(warn_requestinss))
+            for warn, requestinss_ in requests_by_warntype.iteritems():
+                print("  %s: %d requests" % (warn, len(requestinss_)))
             print()
 
-        if self.tis.r_incomplete_threadinss:
+        if incomplete_threadinss:
             print("! WARN !")
             print("%d incomplete threadinss in requests" %
-                    len(self.tis.r_incomplete_threadinss))
+                    len(incomplete_threadinss))
             print()
 
-        if self.tis.r_extra_start_threadinss:
+        if extra_start_threadinss:
             print("!! ERROR !!")
             print("%d extra start threadinss in requests" %
-                    len(self.tis.r_extra_start_threadinss))
+                    len(extra_start_threadinss))
             print()
 
-        if self.tis.r_extra_end_threadinss:
+        if extra_end_threadinss:
             print("!! ERROR !!")
             print("%d extra end threadinss in requests" %
-                    len(self.tis.r_extra_end_threadinss))
+                    len(extra_end_threadinss))
             print()
 
-        if self.tis.r_stray_threadinss:
+        if stray_threadinss:
             print("!! ERROR !!")
             print("%d stray threadinss in requests" %
-                    len(self.tis.r_stray_threadinss))
+                    len(stray_threadinss))
             print()
+
+        return requestinss

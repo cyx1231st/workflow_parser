@@ -1,10 +1,10 @@
 from __future__ import print_function
 
+from collections import defaultdict
 from collections import OrderedDict
 
-from workflow_parser.log_engine import TargetsCollector
-from workflow_parser.state_engine import PacesCollector
 from workflow_parser.state_machine import JoinInterval
+from workflow_parser.state_machine import RequestInstance
 
 
 class HostConstraint(object):
@@ -323,17 +323,23 @@ class CausalEngine(object):
         return True
 
 
-def relation_parse(pcs_collector, tgs_collector):
-    assert isinstance(pcs_collector, PacesCollector)
-    assert isinstance(tgs_collector, TargetsCollector)
+def relation_parse(requestinss):
+    remote_relations = set()
+    targetobjs_by_host = defaultdict(set)
+    for requestins in requestinss.itervalues():
+        assert isinstance(requestins, RequestInstance)
+        for j_ins in requestins.join_ints:
+            if j_ins.join_type == "remote":
+                remote_relations.add(j_ins)
+        for target_obj in requestins.target_objs:
+            targetobjs_by_host[target_obj.host].add(target_obj)
 
-    relations = pcs_collector.join_intervals_by_type["remote"]
-    if not relations:
+    if not remote_relations:
         print("No relations detected, skip relation engine.\n")
         return
 
     print("Preparing constraints...")
-    causal_engine = CausalEngine(relations)
+    causal_engine = CausalEngine(remote_relations)
     print("------------------------")
 
     #### summary ####
@@ -360,9 +366,9 @@ def relation_parse(pcs_collector, tgs_collector):
         for hostc in hosts:
             if hostc.low != 0:
                 print("adjust %r" % hostc)
-                for target in tgs_collector.targetobjs_by_host[hostc.hostname]:
+                for target in targetobjs_by_host[hostc.hostname]:
                     target.offset = hostc.low
-        for relation in relations:
+        for relation in remote_relations:
             assert not relation.is_violated
         #################
     else:

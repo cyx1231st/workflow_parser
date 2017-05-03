@@ -56,6 +56,10 @@ class DrawEngine(object):
         assert isinstance(name, str)
 
         print("(DrawEngine) drawing %s..." % name)
+        if relation_df.empty:
+            print("EMPTY INPUT!")
+            return
+
         relation_df = relation_df.ix[(relation_df.T!=0).any(),
                                      (relation_df!=0).any()]
         relation_df.reindex_axis(sorted(relation_df.columns), axis=1)

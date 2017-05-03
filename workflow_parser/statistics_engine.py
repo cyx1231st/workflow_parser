@@ -5,31 +5,35 @@ import pandas as pd
 import numpy as np
 
 from workflow_parser.draw_engine import DrawEngine
-from workflow_parser.log_engine import TargetsCollector
-from workflow_parser.state_engine import StateEngine
 from workflow_parser.state_machine import JoinInterval
+from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInterval
 
 
-def do_statistics(tgs, s_engine, d_engine):
-    assert isinstance(tgs, TargetsCollector)
-    assert isinstance(s_engine, StateEngine)
-    pcs = s_engine.pcs
-    tis = s_engine.tis
-    rqs = s_engine.rqs
+def do_statistics(requestinss, d_engine):
     if d_engine:
         assert isinstance(d_engine, DrawEngine)
-
-    print("Preparing relations...")
-
-    if not rqs.requestinss:
+    if not requestinss:
         print("No requests available, abort!")
         return
 
+    targetobjs_by_target = {}
+    join_intervals = set()
+    thread_intervals = set()
+    extended_intervals = set()
+    for requestins in requestinss.itervalues():
+        assert isinstance(requestins, RequestInstance)
+        for ti in requestins.threadinss:
+            targetobjs_by_target[ti.target] = ti.target_obj
+        join_intervals.update(requestins.join_ints)
+        thread_intervals.update(requestins.td_ints)
+        extended_intervals.update(requestins.intervals_extended)
+
+    print("Preparing relations...")
     ## adjust offset
     first_req = None
     last_req = None
-    for requestins in rqs.requestinss.itervalues():
+    for requestins in requestinss.itervalues():
         if first_req is None:
             first_req = requestins
         elif first_req.start_seconds > requestins.start_seconds:
@@ -51,14 +55,14 @@ def do_statistics(tgs, s_engine, d_engine):
             start_t,
             end_t))
 
-    for tg in tgs.target_objs:
+    for tg in targetobjs_by_target.itervalues():
         tg.offset -= start_s
     end_s = end_s - start_s
     start_s = 0
     start_end = ((start_s, end_s), (start_t, end_t))
 
     ## join intervals
-    relations = pcs.join_intervals
+    relations = join_intervals
     t_dict = {relation.from_target:(str(relation.from_component), relation.from_host)
               for relation in relations}
     t_dict.update({relation.to_target:(str(relation.to_component), relation.to_host)
@@ -146,11 +150,10 @@ def do_statistics(tgs, s_engine, d_engine):
     ca_relations_df.columns.name = "to_component"
 
     ## requests
-    requestinss = rqs.requestinss
-
     rqs_index = [ri for ri in requestinss]
     rqs_df = pd.DataFrame(((requestinss[rq], requestinss[rq].len_paces,
-                            requestinss[rq].len_hosts, requestinss[rq].len_threadinss,
+                            len(requestinss[rq].hosts),
+                            len(requestinss[rq].threadinss),
                             requestinss[rq].start_seconds, requestinss[rq].end_seconds,
                             requestinss[rq].lapse)
                            for rq in rqs_index),
@@ -174,7 +177,7 @@ def do_statistics(tgs, s_engine, d_engine):
                                    int_.path_type, int_.int_type,
                                    int_.color,
                                    int_.host, str(int_.component), int_.target)
-                                 for int_ in pcs.thread_intervals),
+                                 for int_ in thread_intervals),
                                 columns=["request",
                                          "lapse", "from_sec", "to_sec",
                                          "entity", "from_node", "to_node",
@@ -209,7 +212,7 @@ def do_statistics(tgs, s_engine, d_engine):
                                      int_.from_time,
                                      int_.to_time,
                                      int_.color)
-                                    for int_ in pcs.extended_intervals),
+                                    for int_ in extended_intervals),
                                    columns=["request", "type",
                                             "lapse", "from_sec", "to_sec",
                                             "from_time", "to_time",
@@ -218,10 +221,13 @@ def do_statistics(tgs, s_engine, d_engine):
     print("----------------------")
 
     if d_engine:
-        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[0])
-        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[5])
-        d_engine.draw_threadobj(tgs.targetobjs_by_target["osd.1"].threadobjs_list[2])
-        d_engine.draw_target(tgs.targetobjs_by_target["osd.1"])
+        # d_engine.draw_threadobj(targetobjs_by_target["osd.1"]
+        #         .threadobjs_list[0])
+        # d_engine.draw_threadobj(targetobjs_by_target["osd.1"]
+        #         .threadobjs_list[5])
+        # d_engine.draw_threadobj(targetobjs_by_target["osd.1"]
+        #         .threadobjs_list[2])
+        # d_engine.draw_target(targetobjs_by_target["osd.1"])
 
         d_engine.draw_relation_heatmap(host_relations_df, "host_relations")
         d_engine.draw_relation_heatmap(ca_local_relations_df, "component_local_relations", "f")

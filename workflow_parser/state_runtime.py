@@ -1,6 +1,5 @@
 import numbers
 
-from workflow_parser.state_graph import Token
 from workflow_parser.log_parser import LogLine
 from workflow_parser.log_parser import LogFile
 
@@ -16,11 +15,12 @@ class Thread(object):
         self.id_ = id_
         self.thread = thread
         self.target_obj = target_obj
+        # all the "correct" loglines in this thread
         self.loglines = []
 
-        self.cnt_valid_loglines = 0
-        self.ignored_loglines = []
+        # after thread instances are built
         self.threadinss = []
+        self.ignored_loglines = []
 
     @property
     def name(self):
@@ -71,43 +71,6 @@ class Thread(object):
         if self.loglines:
             assert self.loglines[-1] <= logline
         self.loglines.append(logline)
-
-    def build_threadinss(self, master_graph):
-        # TODO: remove these
-        from workflow_parser.state_machine import BlankInterval
-        from workflow_parser.state_machine import ThreadInstance
-
-        threadins = None
-        for logline in self.loglines:
-            if threadins is not None:
-                if threadins.step(logline):
-                    # success!
-                    pass
-                else:
-                    threadins = None
-            if threadins is None:
-                token = Token.new(master_graph, logline.keyword, self.component)
-                if token:
-                    threadins = ThreadInstance(self, token, logline)
-                    if self.threadinss:
-                        BlankInterval(self.threadinss[-1].end_pace,
-                                      threadins.start_pace)
-                    self.threadinss.append(threadins)
-                else:
-                    # error
-                    # print("(ParserEngine) parse error: cannot decide graph")
-                    # report_loglines(loglines, c_index)
-                    # print "-------- end -----------"
-                    # raise StateError("(ParserEngine) parse error: cannot decide graph")
-                    import pdb; pdb.set_trace()
-            if threadins is not None:
-                self.cnt_valid_loglines += 1
-            else:
-                self.ignored_loglines.append(logline)
-                logline.ignored = True
-
-        assert len(self.ignored_loglines) + self.cnt_valid_loglines\
-                == len(self.loglines)
 
 
 class Target(object):

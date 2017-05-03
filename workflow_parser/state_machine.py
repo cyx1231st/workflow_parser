@@ -225,11 +225,33 @@ class Pace(object):
         return ret_str
 
     def join_pace(self, next_pace, join_obj):
+        assert self.joins_int is None
+        if next_pace is None:
+            self.joins_int = empty_join
+            return None
+
         assert isinstance(next_pace, Pace)
         assert isinstance(join_obj, Join)
-
         relation = JoinInterval(join_obj, self, next_pace)
         return relation
+
+    def assert_emptyjoin(self, joins_or_joined, force):
+        if joins_or_joined:
+            if force:
+                assert self.joins_int is None
+                self.joins_int = empty_join
+            else:
+                assert self.joins_int is not empty_join
+                if self.joins_int is None:
+                    self.joins_int = empty_join
+        else:
+            if force:
+                assert self.joined_int is None
+                self.joined_int = empty_join
+            else:
+                assert self.joined_int is not empty_join
+                if self.joined_int is None:
+                    self.joined_int = empty_join
 
 
 class IntervalBase(object):
@@ -782,6 +804,22 @@ class ThreadInstance(object):
             ret_str += "\n  | %s" % pace.__str__thread__()
         return ret_str
 
+    @classmethod
+    def create(cls, master_graph, logline, thread_obj):
+        assert isinstance(master_graph, MasterGraph)
+        assert isinstance(logline, LogLine)
+        assert isinstance(thread_obj, Thread)
+
+        token = Token.new(master_graph, logline.keyword, thread_obj.component)
+        if token:
+            threadins = ThreadInstance(thread_obj, token, logline)
+            if thread_obj.threadinss:
+                BlankInterval(thread_obj.threadinss[-1].end_pace,
+                              threadins.start_pace)
+            return threadins
+        else:
+            return None
+
     def report(self, reason):
         print("(ThreadInstance) report: %s" % reason)
         print("-------- Thread --------")
@@ -970,7 +1008,6 @@ class RequestInstance(object):
         self.request = request
         self.mastergraph = mastergraph
         self.request_vars = defaultdict(set)
-        self.threadobjs = set()
 
         self.threadinss = []
         self.nestedreqs = set()
@@ -1044,7 +1081,6 @@ class RequestInstance(object):
             # threadinss
             self.threadinss.append(threadins)
             self.td_ints.update(threadins.intervals)
-            self.threadobjs.add(threadins.thread_obj)
 
             # nestedreqs
             if isinstance(threadins, NestedRequest):
@@ -1164,6 +1200,34 @@ class RequestInstance(object):
             self.warns["Has unjoins paces"] = "%d joins edges" % len(self.e_unjoins_paces_by_edge)
 
     @property
+    def components(self):
+        ret = set()
+        for ti in self.threadinss:
+            ret.add(ti.component)
+        return ret
+
+    @property
+    def hosts(self):
+        ret = set()
+        for ti in self.threadinss:
+            ret.add(ti.host)
+        return ret
+
+    @property
+    def target_objs(self):
+        ret = set()
+        for ti in self.threadinss:
+            ret.add(ti.target_obj)
+        return ret
+
+    @property
+    def thread_objs(self):
+        ret = set()
+        for ti in self.threadinss:
+            ret.add(ti.thread_obj)
+        return ret
+
+    @property
     def start_interval(self):
         return self.start_threadins.intervals[0]
 
@@ -1174,22 +1238,6 @@ class RequestInstance(object):
     @property
     def request_state(self):
         return self.end_threadins.request_state
-
-    @property
-    def len_threadinss(self):
-        return len(self.threadinss)
-
-    @property
-    def len_hosts(self):
-        return len(self.request_vars["host"])
-
-    @property
-    def len_targets(self):
-        return len(self.request_vars["target"])
-
-    @property
-    def len_threads(self):
-        return len(self.threadobjs)
 
     @property
     def start_seconds(self):
@@ -1228,10 +1276,10 @@ class RequestInstance(object):
                   self.end_seconds,
                   self.request_state,
                   self.len_paces,
-                  self.len_hosts,
-                  self.len_targets,
-                  self.len_threads,
-                  self.len_threadinss)
+                  len(self.hosts),
+                  len(self.target_objs),
+                  len(self.thread_objs),
+                  len(self.threadinss))
 
     def __repr__(self):
         return "<RIns#%s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
@@ -1241,8 +1289,8 @@ class RequestInstance(object):
                                           self.end_seconds,
                                           self.request_state,
                                           self.len_paces,
-                                          self.len_hosts,
-                                          self.len_threadinss)
+                                          len(self.hosts),
+                                          len(self.threadinss))
 
     def trace(self):
         print("%r" % self)

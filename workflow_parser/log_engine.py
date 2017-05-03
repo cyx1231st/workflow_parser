@@ -12,16 +12,7 @@ from workflow_parser.state_runtime import Target
 from workflow_parser.utils import Report
 
 
-# the bridge between log engine and state engine
-class TargetsCollector(object):
-    def __init__(self):
-        self.target_objs = None
-        self.targetobjs_by_host = None
-        self.targetobjs_by_target = None
-        self.requests = None
-
-
-class LogEngine(TargetsCollector):
+class LogEngine(object):
     def __init__(self, sr, plugin, report):
         assert isinstance(sr, ServiceRegistry)
         assert isinstance(report, Report)
@@ -29,8 +20,6 @@ class LogEngine(TargetsCollector):
         self.sr = sr
         self.plugin = plugin
         self.report = report
-
-        super(LogEngine, self).__init__()
 
     def loadfiles(self, log_folder):
         assert isinstance(log_folder, str)
@@ -54,7 +43,6 @@ class LogEngine(TargetsCollector):
 
         #### report #####
         self.report.step("load_t", target=total_files)
-        #################
 
         return logfiles
 
@@ -145,41 +133,27 @@ class LogEngine(TargetsCollector):
             for e_type, _logfiles in logfiles_by_errortype.iteritems():
                 print("%d files: %s" % (len(_logfiles), e_type))
             print()
-        #################
 
         return logfiles
 
     def preparethreads(self, logfiles_in):
-        requests = set()
-
+        hosts = set()
         target_objs = []
         targetobjs_by_component = defaultdict(list)
         requests_filtered = set()
-        targetobjs_by_host = defaultdict(list)
-        targetobjs_by_target = {}
 
         print("Prepare threads...")
         for logfile in logfiles_in:
             target_obj = Target(logfile)
 
-            requests.update(logfile.requests)
             if target_obj.loglines:
                 target_objs.append(target_obj)
                 requests_filtered.update(target_obj.requests)
                 targetobjs_by_component[target_obj.component].append(target_obj)
-                targetobjs_by_host[target_obj.host].append(target_obj)
-                targetobjs_by_target[target_obj.target] = target_obj
+                hosts.add(target_obj.host)
         print("----------------")
 
-        #### summary1 ###
-        total_requests = len(requests)
-        total_threads = sum(len(file.threads) for file in logfiles_in)
-
-        #### report1 ####
-        self.report.step("prepare", thread=total_threads,
-                                    request=total_requests)
-
-        #### summary2 ###
+        #### summary ####
         total_loglines_correct = sum(len(to.loglines) for to in target_objs)
         total_requests_correct = len(requests_filtered)
         total_threads_correct = sum(len(to.thread_objs) for to in target_objs)
@@ -217,20 +191,17 @@ class LogEngine(TargetsCollector):
                        component_loglines/float(len(target_objs_)),
                        min_target_loglines,
                        max_target_loglines))
+        print()
 
-        #### report2 ####
+        #### report #####
         self.report.step("prepare", line=total_loglines_correct,
                                     component=len(targetobjs_by_component),
-                                    host=len(targetobjs_by_host),
+                                    host=len(hosts),
                                     target=len(target_objs),
                                     thread=total_threads_correct,
                                     request=total_requests_correct)
-        print()
-        #################
 
+        #### errors #####
         self.plugin.do_report()
 
-        self.target_objs = target_objs
-        self.targetobjs_by_host = targetobjs_by_host
-        self.requests = requests_filtered
-        self.targetobjs_by_target = targetobjs_by_target
+        return target_objs
