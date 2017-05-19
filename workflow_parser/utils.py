@@ -99,11 +99,18 @@ class Report(object):
         self.threads = []
         self.requests = []
         self.threadinss = []
-        self.joins = []
-        self.joineds = []
+        self.innerjoins = []
+        self.innerjoineds = []
+        self.interfacejoins = []
+        self.interfacejoineds = []
+        self.leftinterfaces = []
+        self.rightinterfaces = []
 
     def step(self, name, line="x", component="x", host="x", target="x",
-             thread="x", request="x", threadins="x", join="x", joined="x"):
+             thread="x", request="x", threadins="x",
+             innerjoin="x", innerjoined="x",
+             interfacejoin="x", interfacejoined="x",
+             leftinterface="x", rightinterface="x"):
         self._steps.append(name)
         self.lines.append(line)
         self.components.append(component)
@@ -112,16 +119,26 @@ class Report(object):
         self.threads.append(thread)
         self.requests.append(request)
         self.threadinss.append(threadins)
-        self.joins.append(join)
-        self.joineds.append(joined)
+        self.innerjoins.append(innerjoin)
+        self.innerjoineds.append(innerjoined)
+        self.interfacejoins.append(interfacejoin)
+        self.interfacejoineds.append(interfacejoined)
+        self.leftinterfaces.append(leftinterface)
+        self.rightinterfaces.append(rightinterface)
 
     def __repr__(self):
-        head = " "*7 +" line/pace,component,     host,   target,   thread,  request,  thd_ins,    joins,   joined"
-        fmt = "\n%7s" + ",%9s"*9
+        head = " "*7 +" line/pace,component,     host,   target,"\
+               "   thread,  request,  thd_ins,"\
+               " innjoins,innjoined,"\
+               " l_interf, r_interf,"\
+               " infjoins,infjoined"
+        fmt = "\n%7s" + ",%9s"*13
         ret = head
         for i, name in enumerate(self._steps):
             ret += fmt % (name, self.lines[i], self.components[i],
                           self.hosts[i], self.targets[i], self.threads[i],
                           self.requests[i], self.threadinss[i],
-                          self.joins[i], self.joineds[i])
+                          self.innerjoins[i], self.innerjoineds[i],
+                          self.interfacejoins[i], self.interfacejoineds[i],
+                          self.leftinterfaces[i], self.rightinterfaces[i])
         return ret

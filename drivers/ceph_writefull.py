@@ -31,7 +31,7 @@ class CephWritefull(DriverBase):
     def build_graph(self, graph):
         # client issue writefull
         e1,  n1  = graph.build_thread(client,
-                               1, "IoCtx writefull start", True)
+                               1, "IoCtx writefull start", "write_full")
         e2,  n2  =  n1.build(  2, "objecter _op_submit start")
         e3,  n3  =  n2.build(  3, "objecter calculate start")
         e4,  n4  =  n3.build(  4, "objecter calculate finish")
@@ -136,18 +136,20 @@ class CephWritefull(DriverBase):
                               57, "replicatedbackend op_commit start")
         e61, n58 = n57.build( 58, "replicatedbackend op_commit finish")
 
-        # case call all commit
-        _  , _   = n57.build(n45, e47)
-        _  , _   = n54.build(n58, e61)
-
         # journal write
         e62, n59 = graph.build_thread(osd,
-                              59, "filejournal singlewrite")
+                              59, "filejournal singlewrite", "write_journal")
         _  , _   = n59.build(n59, e62)
         e63, n60 = n59.build( 60, "filejournal queue_completions_thru")
         e64, n61 = n60.build( 61, "filejournal queue_finisher start")
         e65, n62 = n61.build( 62, "filejournal queue_finisher finish")
         _  , _   = n62.build(n60, e63)
+
+        n62.set_state("SUCCESS")
+
+        # case call all commit
+        _  , _   = n57.build(n45, e47)
+        _  , _   = n54.build(n58, e61)
 
         # journaled ahead
         e66, n63 = graph.build_thread(osd,
@@ -215,40 +217,40 @@ class CephWritefull(DriverBase):
                                    "msg_op",
                                    ("target_t", "target"),
                                    ("target", "target_s")])
-        # filejournal queue writeq
-        #TODO: nested request
-        j4 = e32.join_local(e62, ["tracked_op_seq",
-                                  "seq"],
-                            is_shared=True)
-        # filejournal journaled ahead
-        j5 = e64.join_local(e66, ["tracked_op_seq",
-                                  "seq"])
+
         # filejournal write disk
-        j6 = e67.join_local(e72, ["tracked_op_seq",
+        j4 = e67.join_local(e72, ["tracked_op_seq",
                                   "seq"])
         # main osd on commit
-        j7 = e69.join_local(e60, ["tracked_op_seq"])
+        j5 = e69.join_local(e60, ["tracked_op_seq"])
         # replica osd on commit
-        j9 = e69.join_local(e80, ["tracked_op_seq"])
+        j6 = e69.join_local(e80, ["tracked_op_seq"])
         # replica osd reply main osd
-        j10 = e81.join_remote(e14, ["tid",
+        j7 = e81.join_remote(e14, ["tid",
                                     "msg_op",
                                     ("target_t", "target"),
                                     ("target", "target_s")])
         # main osd on apply
-        j11 = e77.join_local(e58, ["tracked_op_seq"])
+        j8 = e77.join_local(e58, ["tracked_op_seq"])
         # replica osd on apply
-        j12 = e77.join_local(e84, ["tracked_op_seq"])
+        j9 = e77.join_local(e84, ["tracked_op_seq"])
         # main osd send reply
         # NOTE: msg_op not match
-        j13 = e49.join_remote(e11, ["tid",
+        j10 = e49.join_remote(e11, ["tid",
                                     ("target_t", "target"),
                                     ("target", "target_s")])
         # main osd unlock ioctx
-        j14 = e13.join_local(e9, ["tid",
+        j11 = e13.join_local(e9, ["tid",
                                   ("target_s", "target_t")])
 
+        # filejournal queue writeq
+        i1 = e32.join_local(e66, ["tracked_op_seq", "seq"], "journal")
+
         n10.set_state("SUCCESS")
+
+        ########
+        i1.call_req(e62, ["tracked_op_seq", "seq"], False,
+                    e64, ["tracked_op_seq", "seq"], False)
 
     def filter_logfile(self, f_dir, f_name, var_dict):
         if f_name.startswith("out"):

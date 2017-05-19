@@ -3,13 +3,15 @@ from __future__ import print_function
 from collections import defaultdict
 from collections import OrderedDict
 
+from workflow_parser.schema_engine import SchemaEngine
 from workflow_parser.state_graph import MasterGraph
 from workflow_parser.state_machine import empty_join
-from workflow_parser.state_machine import JoinInterval
-from workflow_parser.state_machine import NestedRequest
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInstance
+from workflow_parser.state_machine import InterfaceInterval
+from workflow_parser.state_machine import InterfacejoinInterval
+from workflow_parser.state_machine import InnerjoinInterval
 from workflow_parser.utils import report_loglines
 from workflow_parser.utils import Report
 
@@ -74,8 +76,12 @@ class StateEngine(object):
         complete_threadinss_by_graph = defaultdict(list)
         start_threadinss = []
         duplicated_vars = set()
-        joins_paces = []
-        joined_paces = []
+        cnt_innerjoins_paces = 0
+        cnt_innerjoined_paces = 0
+        cnt_leftinterface_paces = 0
+        cnt_rightinterface_paces = 0
+        cnt_interfacejoins_paces = 0
+        cnt_interfacejoined_paces = 0
 
         for thread_obj in thread_objs:
             if thread_obj.ignored_loglines:
@@ -96,8 +102,12 @@ class StateEngine(object):
                     start_threadinss.append(threadins)
                 threadinss.append(threadins)
                 duplicated_vars.update(threadins.thread_vars_dup.keys())
-                joins_paces.extend(threadins.joins_paces)
-                joined_paces.extend(threadins.joined_paces)
+                cnt_innerjoins_paces += len(threadins.joins_paces)
+                cnt_innerjoined_paces += len(threadins.joined_paces)
+                cnt_interfacejoins_paces += len(threadins.interfacejoins_paces)
+                cnt_interfacejoined_paces += len(threadins.interfacejoined_paces)
+                cnt_leftinterface_paces += len(threadins.leftinterface_paces)
+                cnt_rightinterface_paces += len(threadins.rightinterface_paces)
 
         #### summary ####
         print("%d valid loglines" % valid_loglines)
@@ -107,7 +117,6 @@ class StateEngine(object):
                 print("  %s: %d inss" % (gname, len(tis)))
 
         print("%d request start t_instances" % len(start_threadinss))
-        print("%d paces to join" % len(joins_paces))
         print()
 
         #### report #####
@@ -119,8 +128,12 @@ class StateEngine(object):
                          thread=len(thread_objs),
                          request=len(start_threadinss),
                          threadins=len(threadinss),
-                         join=len(joins_paces),
-                         joined=len(joined_paces))
+                         innerjoin=cnt_innerjoins_paces,
+                         innerjoined=cnt_innerjoined_paces,
+                         interfacejoin=cnt_interfacejoins_paces,
+                         interfacejoined=cnt_interfacejoined_paces,
+                         leftinterface=cnt_leftinterface_paces,
+                         rightinterface=cnt_rightinterface_paces)
 
         #### errors #####
         if ignored_loglines_by_component:
@@ -161,184 +174,53 @@ class StateEngine(object):
 
         print("Join paces...")
         target_objs = {}
-        joins_paces = []
-        joined_paces = []
-        joined_paces_by_jo = defaultdict(list)
-        joined_paces_by_jo_host = defaultdict(lambda: defaultdict(list))
-        joined_paces_by_jo_target = defaultdict(lambda: defaultdict(list))
+
+        innerjoin_engine = SchemaEngine(InnerjoinInterval)
+        interface_engine = SchemaEngine(InterfaceInterval)
+        interfacejoin_engine = SchemaEngine(InterfacejoinInterval)
+
         for threadins in threadinss:
             assert isinstance(threadins, ThreadInstance)
             target_objs[threadins.target] = threadins.target_obj
-            joins_paces.extend(threadins.joins_paces)
-            joined_paces.extend(threadins.joined_paces)
-            for pace in threadins.joined_paces:
-                for joined_obj in pace.joined_objs:
-                    joined_paces_by_jo[joined_obj].append(pace)
-                    joined_paces_by_jo_host[joined_obj][pace.host].append(pace)
-                    joined_paces_by_jo_target[joined_obj][pace.target].append(pace)
-        joins_paces.sort()
-        joined_paces.sort()
-        for jo, p_list in joined_paces_by_jo.iteritems():
-            p_list.sort()
-            joined_paces_by_jo[jo] = OrderedDict.fromkeys(p_list)
-        for jo, paces_by_host in joined_paces_by_jo_host.iteritems():
-            for host, paces in paces_by_host.iteritems():
-                paces.sort()
-                joined_paces_by_jo_host[jo][host] = OrderedDict.fromkeys(paces)
-        for jo, paces_by_target in joined_paces_by_jo_target.iteritems():
-            for target, paces in paces_by_target.iteritems():
-                paces.sort()
-                joined_paces_by_jo_target[jo][target] = OrderedDict.fromkeys(paces)
+            innerjoin_engine.extend_fromitems(threadins.joins_paces)
+            innerjoin_engine.extend_toitems(threadins.joined_paces)
+            interface_engine.extend_fromitems(threadins.interfacejoins_paces)
+            interface_engine.extend_toitems(threadins.interfacejoined_paces)
+            interfacejoin_engine.extend_fromitems(threadins.rightinterface_paces)
+            interfacejoin_engine.extend_toitems(threadins.leftinterface_paces)
 
-        for joins_pace in joins_paces:
-            join_objs = joins_pace.edge.joins_objs
-            target_pace = None
-            for join_obj in join_objs:
-                schemas = join_obj.schemas
+        inner_relations = innerjoin_engine.proceed(target_objs)
+        interface_relations = interface_engine.proceed(target_objs)
 
-                from_schema = {}
-                care_host = None
-                care_target = None
-                for schema in schemas:
-                    from_schema_key = schema[0]
-                    to_schema_key = schema[1]
-                    if to_schema_key == "host":
-                        care_host = joins_pace[from_schema_key]
-                    elif to_schema_key == "target":
-                        care_target = joins_pace[from_schema_key]
-                    from_schema[from_schema_key] = joins_pace[from_schema_key]
-                if care_target is not None:
-                    if care_host is not None:
-                        target_objs[care_target].host == care_host
-                    target_paces = joined_paces_by_jo_target[join_obj][care_target]
-                elif care_host is not None:
-                    target_paces = joined_paces_by_jo_host[join_obj][care_host]
-                else:
-                    target_paces = joined_paces_by_jo[join_obj]
-                if target_paces:
-                    assert isinstance(target_paces, OrderedDict)
-
-                to_schemas = defaultdict(set)
-                for pace in target_paces:
-                    if pace.joined_int is not None:
-                        target_paces.pop(pace)
-                        continue
-
-                    join_attempt_cnt += 1
-                    match = True
-                    for schema in schemas:
-                        from_schema_key = schema[0]
-                        from_schema_val = from_schema[from_schema_key]
-                        to_schema_key = schema[1]
-                        to_schema_val = pace[to_schema_key]
-
-                        to_schemas[to_schema_key].add(to_schema_val)
-                        if from_schema_key == "request":
-                            assert to_schema_key == "request"
-                            if from_schema_val and to_schema_val and from_schema_val != to_schema_val:
-                                match = False
-                                break
-                        elif from_schema[from_schema_key] != to_schema_val:
-                            assert from_schema_val is not None
-                            assert to_schema_val is not None
-                            match = False
-                            break
-
-                    if match:
-                        target_pace = pace
-                        target_paces.pop(pace)
-                        break
-
-                if target_pace:
-                    break
-            if target_pace:
-                joins_pace.join_pace(target_pace, join_obj)
-            else:
-                # debug joins
-                # print("from_schema: %s" % from_schema)
-                # print("to_schemas:")
-                # for k, v in to_schemas.iteritems():
-                #     print("  %s: %s" % (k, v))
-                # import pdb; pdb.set_trace()
-                joins_pace.assert_emptyjoin(True, True)
-
-        for joined_pace in joined_paces:
-            joined_pace.assert_emptyjoin(False, False)
+        interfacejoin_engine.extend_fromitems(interface_relations)
+        interfacejoin_engine.extend_toitems(interface_relations)
+        interfacej_relations = interfacejoin_engine.proceed(target_objs)
         print("-------------")
 
-        #### collect ####
-        unjoinspaces_by_edge = defaultdict(list)
-        unjoinedpaces_by_edge = defaultdict(list)
-        relations = set()
-        relation_by_jo = defaultdict(list)
-        for pace in joins_paces:
-            if pace.joins_int is empty_join:
-                unjoinspaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joins_int, JoinInterval):
-                relations.add(pace.joins_int)
-                relation_by_jo[pace.joins_int.join_obj].append(pace.joins_int)
-            else:
-                assert False
-        for pace in joined_paces:
-            if pace.joined_int is empty_join:
-                unjoinedpaces_by_edge[pace.edge].append(pace)
-            elif isinstance(pace.joined_int, JoinInterval):
-                assert pace.joined_int in relations
-            else:
-                assert False
-
-        #### summary ####
-        print("%d join attempts" % join_attempt_cnt)
-        if relations:
-            print("%d relations:" % len(relations))
-            for jo, _relations in relation_by_jo.iteritems():
-                print("  %s->%s: %d rels" % (jo.from_edge.name,
-                                             jo.to_edge.name,
-                                             len(_relations)))
+        # #### summary ####
+        innerjoin_engine.report(self.mastergraph)
+        interface_engine.report(self.mastergraph)
+        interfacejoin_engine.report(self.mastergraph)
         print()
 
         #### report #####
         self.report.step("join_ps",
-                         join=len(relations),
-                         joined=len(relations))
+                         innerjoin=len(inner_relations),
+                         innerjoined=len(inner_relations),
+                         interfacejoin=len(interface_relations),
+                         interfacejoined=len(interface_relations),
+                         leftinterface=len(interfacej_relations),
+                         rightinterface=len(interfacej_relations))
 
-        #### errors #####
-        jos = set(relation_by_jo.keys())
-        g_jos = self.mastergraph.join_objs
-        unseen_jos = g_jos - jos
-        if unseen_jos:
-            print("! WARN !")
-            for jo in unseen_jos:
-                print("%s unseen!" % jo)
-            print()
+        return inner_relations, interface_relations, interfacej_relations
 
-        if len(relations) != len(joins_paces):
-            print("! WARN !")
-            for edge, notjoins_paces in unjoinspaces_by_edge.iteritems():
-                print("%s: %d unjoins paces"
-                        % (edge.name,
-                           len(notjoins_paces)))
-            print("--------")
-            for edge, notjoined_paces in unjoinedpaces_by_edge.iteritems():
-                print("%s: %d unjoined paces"
-                        % (edge.name,
-                           len(notjoined_paces)))
-            print()
-        else:
-            assert not unjoinedpaces_by_edge
-            assert not unjoinspaces_by_edge
-
-        return relations
 
     # step 3: group threads by request
-    def group_threads(self, threadinss_in):
+    def group_threads(self, threadinss):
         print("Group threads...")
         seen_threadinss = set()
         def group(threadins, t_set):
             assert isinstance(threadins, ThreadInstance)
-            if threadins.is_shared:
-                t_set.add(threadins)
-                return set()
 
             if threadins in seen_threadinss:
                 return set()
@@ -352,24 +234,19 @@ class StateEngine(object):
                 ret.update(group(joins_int.to_threadins, t_set))
             for joined_int in threadins.joined_ints:
                 ret.update(group(joined_int.from_threadins, t_set))
-            return ret
+            for ijoins_int in threadins.interfacejoined_ints:
+                ret.update(group(ijoins_int.to_threadins, t_set))
+            for ijoined_int in threadins.interfacejoined_ints:
+                ret.update(group(ijoined_int.from_threadins, t_set))
 
-        # TODO ugly implementation
-        threadinss = []
-        for threadins in threadinss_in:
-            assert isinstance(threadins, ThreadInstance)
-            if threadins.is_shared:
-                generated = NestedRequest.generate(threadins)
-                threadinss.extend(generated)
-            else:
-                threadinss.append(threadins)
+            return ret
         ##########################
 
         threadgroup_by_request = defaultdict(set)
         threadgroups_with_multiple_requests = []
         threadgroups_without_request = []
         for threadins in threadinss:
-            if not threadins.is_shared and threadins not in seen_threadinss:
+            if threadins not in seen_threadinss:
                 new_t_set = set()
                 requests = group(threadins, new_t_set)
                 len_req = len(requests)
@@ -389,6 +266,11 @@ class StateEngine(object):
         sum_tis = 0
         sum_joins = 0
         sum_joined = 0
+        sum_ijoins = 0
+        sum_ijoined = 0
+        sum_ljoin = 0
+        sum_rjoin = 0
+        interface_ints = set()
         for tgroup in threadgroup_by_request.itervalues():
             sum_tis += len(tgroup)
             for tis in tgroup:
@@ -400,7 +282,17 @@ class StateEngine(object):
                 threads.add(tis.thread_obj)
                 sum_joins += len(tis.joins_ints)
                 sum_joined += len(tis.joined_ints)
+                sum_ijoins += len(tis.interfacejoins_ints)
+                sum_ijoined += len(tis.interfacejoined_ints)
+                interface_ints.update(tis.interfacejoins_ints)
+                sum_ljoin += len(tis.leftinterface_ints)
+                sum_rjoin += len(tis.rightinterface_ints)
 
+        for interface in interface_ints:
+            if interface.joins_crossrequest_int is not None:
+                sum_rjoin += 1
+            if interface.joined_crossrequest_int is not None:
+                sum_ljoin += 1
 
         #### summary ####
         print("%d request groups" % (len(threadgroup_by_request)))
@@ -416,20 +308,25 @@ class StateEngine(object):
                          thread=len(threads),
                          request=len(threadgroup_by_request),
                          threadins=sum_tis,
-                         join=sum_joins,
-                         joined=sum_joined)
+                         innerjoin=sum_joins,
+                         innerjoined=sum_joined,
+                         interfacejoin=sum_ijoins,
+                         interfacejoined=sum_ijoined,
+                         leftinterface=sum_ljoin,
+                         rightinterface=sum_rjoin)
 
         #### errors #####
-        if sum_tis != len(threadinss_in):
+        if sum_tis != len(threadinss):
             print("! WARN !")
             print("%d thread instances, but previously built %d"
                     % (sum_tis,
-                       len(threadinss_in)))
+                       len(threadinss)))
             print()
 
         if threadgroups_without_request:
             print("! WARN !")
-            print("%d groups of %d threadinstances cannot be identified" % (
+            print("%d groups of %d threadinstances cannot be identified "
+                  "with request" % (
                     len(threadgroups_without_request),
                     sum(len(tgroup) for tgroup in
                         threadgroups_without_request)))
@@ -523,8 +420,8 @@ class StateEngine(object):
         thread_objs = set()
         threadinss = set()
         requests_vars = defaultdict(set)
+        innerjoin_intervals = set()
         join_intervals_by_type = defaultdict(set)
-        join_intervals = set()
 
         thread_intervals = set()
         extended_intervals = set()
@@ -539,7 +436,8 @@ class StateEngine(object):
             requests_vars["request"].add(requestins.request)
             for k, vs in requestins.request_vars.iteritems():
                 requests_vars[k].update(vs)
-            join_intervals.update(requestins.join_ints)
+
+            innerjoin_intervals.update(requestins.join_ints)
             for j_ins in requestins.join_ints:
                 join_intervals_by_type[j_ins.join_type].add(j_ins)
             thread_intervals.update(requestins.td_ints)
@@ -549,7 +447,7 @@ class StateEngine(object):
         print("%d valid request instances with %d thread instances"
                 % (len(requestinss),
                    len(threadinss)))
-        print("%d relations:" % len(join_intervals))
+        print("%d relations:" % len(innerjoin_intervals))
         for j_type, j_inss in join_intervals_by_type.iteritems():
             print("  %d %s relations" % (len(j_inss), j_type))
 
@@ -567,8 +465,8 @@ class StateEngine(object):
                          thread=len(thread_objs),
                          request=len(requestinss),
                          threadins=len(threadinss),
-                         join=len(join_intervals),
-                         joined=len(join_intervals))
+                         innerjoin=len(innerjoin_intervals),
+                         innerjoined=len(innerjoin_intervals))
 
         #### errors #####
         if len(requestinss) != len(threadgroup_by_request):

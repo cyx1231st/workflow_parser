@@ -1,11 +1,12 @@
 from __future__ import print_function
 
+from abc import ABCMeta
+from abc import abstractmethod
 from collections import defaultdict
+from collections import OrderedDict
 from orderedset import OrderedSet
 
 from workflow_parser.service_registry import Component
-
-# TODO: implement RequestGraph for nested-request support
 
 
 class Node(object):
@@ -22,6 +23,8 @@ class Node(object):
         self.is_lock = False
         self.marks = OrderedSet()
         self.request_state = None
+
+        thread_graph.nodes.add(self)
 
     @property
     def name(self):
@@ -127,7 +130,11 @@ class Node(object):
         return None
 
 
-class StartNode(Node):
+class ThreadStartNode(Node):
+    def __init__(self, id_, thread_graph):
+        super(ThreadStartNode, self).__init__(id_, thread_graph)
+        thread_graph.start_nodes.add(self)
+
     @property
     def is_thread_start(self):
         assert self in self.thread_graph.start_nodes
@@ -139,32 +146,45 @@ class StartNode(Node):
         return False
 
     @property
-    def is_request_start(self):
-        return self in self.master_graph.start_nodes
-
-    @property
     def is_request_end(self):
         assert self not in self.master_graph.end_nodes
         return False
 
 
-class Join(object):
-    def __init__(self, name, from_edge, to_edge, schemas, is_remote, is_shared):
+class RequestStartNode(ThreadStartNode):
+    def __init__(self, id_, thread_graph, request_name):
+        assert isinstance(request_name, str)
+        self.request_name = request_name
+        super(RequestStartNode, self).__init__(id_, thread_graph)
+        self.master_graph.start_nodes.add(self)
+
+    @property
+    def is_request_start(self):
+        assert self in self.master_graph.start_nodes
+        return True
+
+    def __str__state__(self):
+        state = super(RequestStartNode, self).__str__state__()
+        state += ", %s" % self.request_name
+        return state
+
+
+class JoinBase(object):
+    __metaclass__ = ABCMeta
+
+    def __init__(self, name, from_entity, to_entity, schemas, is_remote):
         assert isinstance(name, str)
-        assert isinstance(from_edge, Edge)
-        assert isinstance(to_edge, Edge)
+        assert from_entity.master_graph is to_entity.master_graph
         assert isinstance(is_remote, bool)
-        assert isinstance(is_shared, bool)
         if schemas is None:
             schemas = []
         assert isinstance(schemas, list)
 
         self.name = name
-        self.from_edge = from_edge
-        self.to_edge = to_edge
-        self.is_shared = is_shared
+        self.from_entity = from_entity
+        self.to_entity = to_entity
         self.is_remote = is_remote
-        self.master_graph = from_edge.master_graph
+        self.master_graph = from_entity.master_graph
 
         self.schemas = OrderedSet()
         for schema in schemas:
@@ -181,35 +201,180 @@ class Join(object):
         else:
             assert ("host", "host") not in self.schemas
             assert ("target", "target") not in self.schemas
-        if not is_shared:
-            self.schemas.add(("request", "request"))
+        assert ("thread", "thread") not in self.schemas
+
+    def __mark_str__(self):
+        if self.is_remote:
+            return ", remote"
+        else:
+            return ", local"
 
     def __repr__(self):
-        marks_str = ""
-        if self.is_shared:
-            marks_str += ", shared"
-
-        if self.is_remote:
-            name = "RemoteJoin"
-        else:
-            name = "LocalJoin"
-
-        return "<%s#%s: Edge#%s->%s [%s|-->%s], %d schemas%s>" % (
-                name,
+        return "<%s#%s: %s->%s, %d schemas%s>" % (
+                self.__class__.__name__,
                 self.name,
-                self.from_edge.name,
-                self.to_edge.name,
-                self.from_edge.keyword,
-                self.to_edge.keyword,
+                self.from_entity.name,
+                self.to_entity.name,
                 len(self.schemas),
-                marks_str)
+                self.__mark_str__())
+
+    @abstractmethod
+    def get_from_edge(edge, is_joins):
+        """IMPORTANT: this is static method, override it with @staticmethod!"""
+        pass
+
+
+class InnerJoin(JoinBase):
+    def __init__(self, name, from_edge, to_edge, schemas, is_remote):
+        super(InnerJoin, self).__init__(name, from_edge, to_edge,
+                                          schemas, is_remote)
+        assert isinstance(from_edge, Edge)
+        assert isinstance(to_edge, Edge)
+        assert self not in from_edge.joins_objs
+        assert self not in to_edge.joined_objs
+
+        self.schemas.add(("request", "request"))
+        from_edge.joins_objs.add(self)
+        to_edge.joined_objs.add(self)
+
+    @property
+    def from_edge(self):
+        return self.from_entity
+
+    @property
+    def to_edge(self):
+        return self.to_entity
+
+    def __mark_str__(self):
+        mark = super(InnerJoin, self).__mark_str__()
+        mark += ", [%s|-->%s]" % (self.from_edge.keyword,
+                                  self.to_edge.keyword)
+        return mark
+
+    @staticmethod
+    def get_from_edge(edge, is_joins):
+        assert isinstance(edge, Edge)
+        assert isinstance(is_joins, bool)
+        if is_joins:
+            return edge.joins_objs
+        else:
+            return edge.joined_objs
+
+
+class RequestInterface(InnerJoin):
+    def __init__(self, name, from_edge, to_edge, schemas, is_remote):
+        super(RequestInterface, self).__init__("i_"+name, from_edge, to_edge,
+                                               schemas, is_remote)
+        self.join_pairs = []
+
+        assert isinstance(from_edge, Edge)
+        assert isinstance(to_edge, Edge)
+        assert from_edge.joins_interface is None
+        from_edge.joins_interface = self
+        assert to_edge.joined_interface is None
+        to_edge.joined_interface = self
+        from_edge.joins_objs.discard(self)
+        to_edge.joined_objs.discard(self)
+
+    def __mark_str__(self):
+        mark = super(InnerJoin, self).__mark_str__()
+        mark += ", [%s|~~>%s]" % (self.from_edge.keyword,
+                                  self.to_edge.keyword)
+        for joins, joined in self.join_pairs:
+            mark += ", [=>%s %s | %s %s=>]" % (
+                    joins.edge.name,
+                    joins.edge.keyword,
+                    joined.edge.name,
+                    joined.edge.keyword)
+
+        if not self.join_pairs:
+            mark += ", EMPTY INTERFACE"
+        return mark
+
+    def call_req(self, joins_edge, joins_schema, joins_isremote,
+                       joined_edge, joined_schema, joined_isremote):
+        joins = InterfaceJoin(True, self, joins_edge, joins_schema,
+                joins_isremote)
+        joined = InterfaceJoin(False, self, joined_edge, joined_schema,
+                joined_isremote)
+        joins.pair = joined
+        joined.pair = joins
+        self.join_pairs.append((joins, joined))
+
+    @staticmethod
+    def get_from_edge(edge, is_joins):
+        assert isinstance(edge, Edge)
+        assert isinstance(is_joins, bool)
+        if is_joins:
+            return edge.joins_interface
+        else:
+            return edge.joined_interface
+
+
+class InterfaceJoin(JoinBase):
+    def __init__(self, is_left, interface, edge, schemas, is_remote):
+        assert isinstance(is_left, bool)
+        assert isinstance(interface, RequestInterface)
+        assert isinstance(edge, Edge)
+        assert ("request", "request") not in schemas
+
+        self.is_left = is_left
+        self.interface = interface
+        self.edge = edge
+        self.pair = None
+        if is_left:
+            super(InterfaceJoin, self).__init__("l"+interface.name,
+                                                interface, edge,
+                                                schemas, is_remote)
+            assert edge.left_interface is None
+            edge.left_interface = self
+        else:
+            super(InterfaceJoin, self).__init__("r"+interface.name,
+                                                edge, interface,
+                                                schemas, is_remote)
+            assert edge.right_interface is None
+            edge.right_interface = self
+
+    @property
+    def upper_edge(self):
+        if self.is_left:
+            return self.interface.from_edge
+        else:
+            return self.interface.to_edge
+
+    def __mark_str__(self):
+        mark = super(InterfaceJoin, self).__mark_str__()
+        if self.is_left:
+            mark += ", left"
+        else:
+            mark += ", right"
+        return mark
+
+    @staticmethod
+    def get_from_edge(edge, is_joins):
+        assert isinstance(is_joins, bool)
+
+        if isinstance(edge, Edge):
+            if is_joins:
+                return edge.right_interface
+            else:
+                return edge.left_interface
+        else:
+            assert isinstance(edge, RequestInterface)
+            ret = []
+            for l, r in edge.join_pairs:
+                if is_joins:
+                    ret.append(l)
+                else:
+                    ret.append(r)
+            return ret
 
 
 class Edge(object):
     def __init__(self, name, node, keyword):
         assert isinstance(name, str)
         assert isinstance(node, Node)
-        assert not isinstance(node, StartNode)
+        assert not isinstance(node, ThreadStartNode)
         assert isinstance(keyword, str)
 
         self.name = name
@@ -217,8 +382,15 @@ class Edge(object):
         self.master_graph = node.master_graph
         self.node = node
         self.keyword = keyword
+
+        # in request
         self.joins_objs = OrderedSet()
         self.joined_objs = OrderedSet()
+        self.joins_interface = None
+        self.joined_interface = None
+        # cross request
+        self.left_interface = None
+        self.right_interface = None
 
     @property
     def component(self):
@@ -234,10 +406,28 @@ class Edge(object):
 
     def __str__join__(self):
         join_str=""
-        if self.joins_objs:
-            join_str += ", joins(%s)" % ",".join(jo.name for jo in self.joins_objs)
-        if self.joined_objs:
-            join_str += ", joined(%s)" % ",".join(jo.name for jo in self.joined_objs)
+        for jo in self.joins_objs:
+            assert isinstance(jo, InnerJoin)
+            join_str += ", %s->%s" % (jo.name, jo.to_edge.name)
+        for jo in self.joined_objs:
+            assert isinstance(jo, InnerJoin)
+            join_str += ", %s<-%s" % (jo.name, jo.from_edge.name)
+        if self.joins_interface:
+            assert isinstance(self.joins_interface, RequestInterface)
+            join_str += ", %s~~>%s" % (self.joins_interface.name,
+                                       self.joins_interface.to_edge.name)
+        if self.joined_interface:
+            assert isinstance(self.joined_interface, RequestInterface)
+            join_str += ", %s<~~%s" % (self.joined_interface.name,
+                                       self.joined_interface.from_edge.name)
+        if self.right_interface:
+            assert isinstance(self.right_interface, InterfaceJoin)
+            join_str += ", %s=>%s" % (self.right_interface.name,
+                                      self.right_interface.upper_edge.name)
+        if self.left_interface:
+            assert isinstance(self.left_interface, InterfaceJoin)
+            join_str += ", %s<=%s" % (self.left_interface.name,
+                                      self.left_interface.upper_edge.name)
         return join_str
 
     def __str__(self):
@@ -268,29 +458,33 @@ class Edge(object):
             ret_str += "\n  joined:"
             for join_obj in self.joined_objs:
                 ret_str += "\n    %s" % join_obj
+        if self.joins_interface:
+            ret_str += "\n  joins interface: %s" % self.joins_interface
+        if self.joined_interface:
+            ret_str += "\n  joined interface: %s" % self.joined_interface
+        if self.left_interface:
+            ret_str += "\n  left interface: %s" % self.left_interface
+        if self.right_interface:
+            ret_str += "\n  right interface: %s" % self.right_interface
+
         return ret_str
 
 #-------
-    def _join(self, edge, schemas, is_remote, is_shared):
-        assert isinstance(edge, Edge)
-        assert isinstance(is_remote, bool)
-        assert isinstance(is_shared, bool)
-        # assert edge not in self.joins
-        # assert self not in edge.joined
-
-        join_obj = self.master_graph._create_joinobj(self, edge, schemas,
-                                                     is_remote, is_shared)
-        self.joins_objs.add(join_obj)
-        edge.joined_objs.add(join_obj)
-        if is_shared:
-            edge.thread_graph.is_shared = True
+    def _join(self, edge, schemas, interface, is_remote):
+        if interface is None:
+            join_obj = self.master_graph._create_innerjoin(
+                    self, edge, schemas, is_remote)
+        else:
+            assert isinstance(interface, str)
+            join_obj = self.master_graph._create_interface(
+                    self, edge, schemas, is_remote, interface)
         return join_obj
 
-    def join_local(self, edge, schemas=None, is_shared=False):
-        return self._join(edge, schemas, False, is_shared)
+    def join_local(self, edge, schemas=None, interface=None):
+        return self._join(edge, schemas, interface, False)
 
-    def join_remote(self, edge, schemas=None, is_shared=False):
-        return self._join(edge, schemas, True, is_shared)
+    def join_remote(self, edge, schemas=None, interface=None):
+        return self._join(edge, schemas, interface, True)
 
 
 class ThreadGraph(object):
@@ -302,7 +496,6 @@ class ThreadGraph(object):
         self.name = name
         self.component = component
         self.master_graph = master_graph
-        self.is_shared = False
 
         self.nodes = OrderedSet()
         self.start_nodes = OrderedSet()
@@ -310,17 +503,13 @@ class ThreadGraph(object):
         self.edges = OrderedSet()
 
     def __str__(self):
-        mark_str = ""
-        if self.is_shared:
-            mark_str += ", shared"
-        return ("<ThreadGraph#%s: %d(s%d, e%d) nodes, %d edges, %s%s>"
+        return ("<ThreadGraph#%s: %d(s%d, e%d) nodes, %d edges, %s>"
                     % (self.name,
                        len(self.nodes),
                        len(self.start_nodes),
                        len(self.end_nodes),
                        len(self.edges),
-                       self.component,
-                       mark_str))
+                       self.component))
 
     def __repr__(self):
         ret_str = [""]
@@ -368,8 +557,8 @@ class ThreadGraph(object):
             keyword = keyword_or_edge
             if isinstance(to_node_or_id, int):
                 to_node_id = to_node_or_id
-                to_node = self.master_graph._create_node(self, to_node_id)
-                self.nodes.add(to_node)
+                to_node = self.master_graph._create_node(
+                        self, node_id=to_node_id)
             else:
                 assert isinstance(to_node_or_id, Node)
                 to_node = to_node_or_id
@@ -427,6 +616,7 @@ class MasterGraph(object):
 
         self.name = name
         self.join_objs = OrderedSet()
+        self.interfaces = OrderedDict()
 
         self.edges = OrderedSet()
         self.edges_by_from_to = {}
@@ -447,7 +637,8 @@ class MasterGraph(object):
         self._thread_index = 0
         self._edge_index = 0
         self._start_node_index = 0
-        self._joinobj_index = 0
+        self._innerjoin_index = 0
+        self._interfacejoin_index = 0
 
     @property
     def components(self):
@@ -465,7 +656,8 @@ class MasterGraph(object):
 
     def __str__(self):
         return ("<Master#%s: %d(s%d) nodes, %d(%d) edges, %d threads, "
-                "%d components, %d req_states, %d marks, %d joins>" %
+                "%d components, %d req_states, %d marks, "
+                "%d joins, %d interfaces>" %
                 (self.name,
                  len(self.nodes_by_id),
                  len(self.start_nodes),
@@ -475,7 +667,8 @@ class MasterGraph(object):
                  len(self.components),
                  len(self.request_states),
                  len(self.marks),
-                 len(self.join_objs)))
+                 len(self.join_objs),
+                 len(self.interfaces)))
 
     def __repr__(self):
         ret_str = str(self)
@@ -488,15 +681,19 @@ class MasterGraph(object):
         ret_str += "\n  End nodes:"
         for node in self.end_nodes:
             ret_str += "\n    %s" % node
-        ret_str += "\n  Components:%s"\
+        ret_str += "\n  Components: %s"\
                    % (",".join(str(c) for c in self.components))
-        ret_str += "\n  Request states:%s"\
+        ret_str += "\n  Request states: %s"\
                    % (",".join(s for s in self.request_states))
-        ret_str += "\n  Marks:%s"\
-                   % (",".join(m for m in self.marks))
+        if self.marks:
+            ret_str += "\n  Marks:%s"\
+                       % (",".join(m for m in self.marks))
         ret_str += "\n  Joins:"
         for join_obj in self.join_objs:
             ret_str += "\n    %s" % join_obj
+        ret_str += "\n  Interfaces:"
+        for interface in self.interfaces.itervalues():
+            ret_str += "\n    %s" % interface
         return ret_str
 
     def _create_thread(self, component):
@@ -516,17 +713,21 @@ class MasterGraph(object):
             self._thread_index += 1
             thread_graph.name = "t%d" % self._thread_index
 
-    def _create_node(self, thread_graph, node_id=None):
+    def _create_node(self, thread_graph, node_id=None, request_name=None):
         assert isinstance(thread_graph, ThreadGraph)
         assert thread_graph.master_graph is self
 
         if node_id is not None:
             assert isinstance(node_id, int)
+            assert request_name is None
             node = Node(node_id, thread_graph)
         else:
             self._start_node_index += 1
             node_id = "s%d" % self._start_node_index
-            node = StartNode(node_id, thread_graph)
+            if request_name is None:
+                node = ThreadStartNode(node_id, thread_graph)
+            else:
+                node = RequestStartNode(node_id, thread_graph, request_name)
 
         assert node_id not in self.nodes_by_id
         self.nodes_by_id[node.id_] = node
@@ -543,26 +744,35 @@ class MasterGraph(object):
         self.edges.add(edge)
         return edge
 
-    def _create_joinobj(self, from_edge, to_edge, schemas, is_remote, is_shared):
+    def _create_innerjoin(self, from_edge, to_edge,
+                          schemas, is_remote):
         assert from_edge in self.edges
         assert to_edge in self.edges
 
-        self._joinobj_index += 1
-        name = "j%d" % self._joinobj_index
-        join_obj = Join(name, from_edge, to_edge,
-                        schemas, is_remote, is_shared)
+        self._innerjoin_index += 1
+        name = "j%d" % self._innerjoin_index
+        join_obj = InnerJoin(name, from_edge, to_edge,
+                             schemas, is_remote)
+        assert isinstance(join_obj, JoinBase)
         self.join_objs.add(join_obj)
+        return join_obj
+
+    def _create_interface(self, from_edge, to_edge,
+                          schemas, is_remote, interface):
+        assert isinstance(interface, str)
+        assert interface not in self.interfaces
+        assert from_edge in self.edges
+        assert to_edge in self.edges
+        join_obj = RequestInterface(interface, from_edge, to_edge,
+                                    schemas, is_remote)
+        self.interfaces[interface] = join_obj
         return join_obj
 
 #-------
     def build_thread(self, component, to_node_or_id, keyword_or_edge,
-                     is_request_start=False):
+                     request_name=None):
         thread = self._create_thread(component)
-        from_node = self._create_node(thread)
-        thread.start_nodes.add(from_node)
-        thread.nodes.add(from_node)
-        if is_request_start:
-            self.start_nodes.add(from_node)
+        from_node = self._create_node(thread, request_name=request_name)
         return from_node.build(to_node_or_id, keyword_or_edge)
 
 ########
@@ -582,7 +792,7 @@ class MasterGraph(object):
 
 class Token(object):
     def __init__(self, start_node, edge, keyword):
-        assert isinstance(start_node, StartNode)
+        assert isinstance(start_node, ThreadStartNode)
         assert isinstance(edge, Edge)
         assert isinstance(keyword, str)
         assert edge in start_node.edges
