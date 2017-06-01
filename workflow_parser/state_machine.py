@@ -50,8 +50,7 @@ class Pace(object):
 
         self.joins_int = None
         self.joined_int = None
-        self.joins_interface_int = None
-        self.joined_interface_int = None
+
         self.joins_crossrequest_int = None
         self.joined_crossrequest_int = None
 
@@ -99,31 +98,16 @@ class Pace(object):
     @property
     def joins_pace(self):
         if self.joins_int and self.joins_int is not empty_join:
-            assert isinstance(self.joins_int, InnerjoinInterval)
-            try:
-                assert not self.joins_interface_int
-            except Exception:
-                import pdb; pdb.set_trace()
+            assert isinstance(self.joins_int, InnerjoinIntervalBase)
             return self.joins_int.to_pace
-        elif self.joins_interface_int and\
-                self.joins_interface_int is not empty_join:
-            assert isinstance(self.joins_interface_int, InterfaceInterval)
-            assert not self.joins_int
-            return self.joins_interface_int.to_pace
         else:
             return None
 
     @property
     def joined_pace(self):
         if self.joined_int and self.joined_int is not empty_join:
-            assert isinstance(self.joined_int, InnerjoinInterval)
-            assert not self.joined_interface_int
+            assert isinstance(self.joined_int, InnerjoinIntervalBase)
             return self.joined_int.from_pace
-        elif self.joined_interface_int and\
-                self.joined_interface_int is not empty_join:
-            assert isinstance(self.joined_interface_int, InterfaceInterval)
-            assert not self.joined_int
-            return self.joined_interface_int.from_pace
         else:
             return None
 
@@ -234,36 +218,6 @@ class Pace(object):
         ret_str = str(self)
         ret_str += "\n  >>%s" % self.logline.line
         return ret_str
-
-    def join_pace(self, next_pace, join_obj):
-        assert isinstance(next_pace, Pace)
-        if isinstance(join_obj, InterfaceJoin):
-            assert False
-        elif isinstance(join_obj, InnerJoin):
-            relation = InnerjoinInterval(join_obj, self, next_pace)
-        elif isinstance(join_obj, RequestInterface):
-            assert False
-        else:
-            assert False
-        return relation
-
-    def assert_emptyjoin(self, joins_or_joined, force):
-        if joins_or_joined:
-            if force:
-                assert self.joins_int is None
-                self.joins_int = empty_join
-            else:
-                assert self.joins_int is not empty_join
-                if self.joins_int is None:
-                    self.joins_int = empty_join
-        else:
-            if force:
-                assert self.joined_int is None
-                self.joined_int = empty_join
-            else:
-                assert self.joined_int is not empty_join
-                if self.joined_int is None:
-                    self.joined_int = empty_join
 
 
 class IntervalBase(object):
@@ -425,7 +379,9 @@ class ThreadInterval(ThreadIntervalBase):
         self.from_pace.nxt_int = self
         self.to_pace.prv_int = self
 
-        self.threadins = from_pace.threadins
+    @property
+    def threadins(self):
+        return self.from_pace.threadins
 
     @property
     def prv_blank_int(self):
@@ -437,17 +393,11 @@ class ThreadInterval(ThreadIntervalBase):
 
     @property
     def joins_int(self):
-        if self.to_pace.joins_int:
-            return self.to_pace.joins_int
-        else:
-            return self.to_pace.joins_interface_int
+        return self.to_pace.joins_int
 
     @property
     def joined_int(self):
-        if self.from_pace.joined_int:
-            return self.from_pace.joined_int
-        else:
-            return self.from_pace.joined_interface_int
+        return self.from_pace.joined_int
 
     @property
     def node(self):
@@ -548,6 +498,7 @@ class ThreadInterval(ThreadIntervalBase):
 
 class JoinIntervalBase(IntervalBase):
     __metaclass__ = ABCMeta
+
     joinobj_type = JoinBase
     entity_joins_int = "Error not assigned"
     entity_joined_int = "Error not assigned"
@@ -638,14 +589,6 @@ class JoinIntervalBase(IntervalBase):
             return "local"
 
     @classmethod
-    def get_joinobj_from_item(cls, item, is_joins):
-        if isinstance(item, Pace):
-            return cls.joinobj_type.get_from_edge(item.edge, is_joins)
-        else:
-            assert isinstance(item, InterfaceInterval)
-            return cls.joinobj_type.get_from_edge(item.join_obj, is_joins)
-
-    @classmethod
     def assert_emptyjoin(cls, pace, is_joins, is_forced):
         if is_joins:
             if is_forceed:
@@ -677,6 +620,10 @@ class JoinIntervalBase(IntervalBase):
 
 
 class InnerjoinIntervalBase(JoinIntervalBase):
+    joinobj_type = InnerJoin
+    entity_joins_int = "joins_int"
+    entity_joined_int = "joined_int"
+
     def __init__(self, join_obj, from_pace, to_pace):
         super(InnerjoinIntervalBase, self).__init__(join_obj, from_pace, to_pace)
 
@@ -710,12 +657,16 @@ class InnerjoinIntervalBase(JoinIntervalBase):
         assert self.joins_int and self.joins_int.is_main
         return self.joins_int
 
+    @classmethod
+    def create(cls, join_obj, from_item, to_item):
+        if isinstance(join_obj, RequestInterface):
+            return InterfaceInterval(join_obj, from_item, to_item)
+        else:
+            assert isinstance(join_obj, InnerJoin)
+            return InnerjoinInterval(join_obj, from_item, to_item)
+
 
 class InnerjoinInterval(InnerjoinIntervalBase):
-    joinobj_type = InnerJoin
-    entity_joins_int = "joins_int"
-    entity_joined_int = "joined_int"
-
     def __init__(self, join_obj, from_pace, to_pace):
         super(InnerjoinInterval, self).__init__(join_obj, from_pace, to_pace)
 
@@ -746,8 +697,6 @@ class InnerjoinInterval(InnerjoinIntervalBase):
 
 class InterfaceInterval(InnerjoinIntervalBase):
     joinobj_type = RequestInterface
-    entity_joins_int = "joins_interface_int"
-    entity_joined_int = "joined_interface_int"
 
     def __init__(self, join_obj, from_pace, to_pace):
         super(InterfaceInterval, self).__init__(join_obj, from_pace, to_pace)
@@ -832,6 +781,10 @@ class InterfacejoinInterval(JoinIntervalBase):
         else:
             return self.interface_int.joins_crossrequest_int
 
+    @classmethod
+    def create(cls, join_obj, from_item, to_item):
+        return cls(join_obj, from_item, to_item)
+
 
 class ThreadInstance(object):
     def __init__(self, thread_obj, token, logline):
@@ -852,8 +805,6 @@ class ThreadInstance(object):
 
         self.joined_paces = set()
         self.joins_paces = set()
-        self.interfacejoins_paces = set()
-        self.interfacejoined_paces = set()
         self.leftinterface_paces = set()
         self.rightinterface_paces = set()
 
@@ -1015,10 +966,6 @@ class ThreadInstance(object):
             self.joins_paces.add(pace)
         if edge.joined_objs:
             self.joined_paces.add(pace)
-        if edge.joins_interface:
-            self.interfacejoins_paces.add(pace)
-        if edge.joined_interface:
-            self.interfacejoined_paces.add(pace)
         if edge.left_interface:
             self.leftinterface_paces.add(pace)
         if edge.right_interface:
@@ -1189,23 +1136,18 @@ class RequestInstance(object):
                     # cnt_unjoined_paces_by_edgename
                     self.e_unjoins_paces_by_edge[joins_pace.edge].add(joins_pace)
                 else:
-                    assert isinstance(relation, InnerjoinInterval)
+                    assert isinstance(relation, InnerjoinIntervalBase)
                     assert joins_pace.joins_pace.joined_pace is joins_pace
+                    if isinstance(relation, InnerjoinInterval):
+                        pass
+                    else:
+                        assert isinstance(relation, InterfaceInterval)
+                        self.interface_ints.add(relation)
+                        reqjoins = relation.joins_crossrequest_int
+                        if reqjoins is empty_join:
+                            self.e_unjoins_paces_by_edge[relation.join_obj].add(relation)
                     self.join_ints.add(relation)
                     _process(joins_pace.joins_pace.threadins)
-            for ijoins_pace in threadins.interfacejoins_paces:
-                relation = ijoins_pace.joins_interface_int
-                if relation is empty_join:
-                    self.e_unjoins_paces_by_edge[ijoins_pace.edge].add(ijoins_pace)
-                else:
-                    assert isinstance(relation, InterfaceInterval)
-                    assert ijoins_pace.joins_pace.joined_pace is ijoins_pace
-                    self.interface_ints.add(relation)
-                    reqjoins = relation.joins_crossrequest_int
-                    assert reqjoins
-                    if reqjoins is empty_join:
-                        self.e_unjoins_paces_by_edge[relation.join_obj].add(relation)
-                    _process(ijoins_pace.joins_pace.threadins)
             for ljoin_pace in threadins.leftinterface_ints:
                 relation = ljoin_pace.joined_crossrequest_int
                 if relation is empty_join:

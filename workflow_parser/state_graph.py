@@ -154,8 +154,9 @@ class ThreadStartNode(Node):
 class RequestStartNode(ThreadStartNode):
     def __init__(self, id_, thread_graph, request_name):
         assert isinstance(request_name, str)
-        self.request_name = request_name
         super(RequestStartNode, self).__init__(id_, thread_graph)
+
+        self.request_name = request_name
         self.master_graph.start_nodes.add(self)
 
     @property
@@ -218,11 +219,6 @@ class JoinBase(object):
                 len(self.schemas),
                 self.__mark_str__())
 
-    @abstractmethod
-    def get_from_edge(edge, is_joins):
-        """IMPORTANT: this is static method, override it with @staticmethod!"""
-        pass
-
 
 class InnerJoin(JoinBase):
     def __init__(self, name, from_edge, to_edge, schemas, is_remote):
@@ -234,6 +230,7 @@ class InnerJoin(JoinBase):
         assert self not in to_edge.joined_objs
 
         self.schemas.add(("request", "request"))
+        # NOTE: current multiple joins_objs are or-split
         from_edge.joins_objs.add(self)
         to_edge.joined_objs.add(self)
 
@@ -251,15 +248,6 @@ class InnerJoin(JoinBase):
                                   self.to_edge.keyword)
         return mark
 
-    @staticmethod
-    def get_from_edge(edge, is_joins):
-        assert isinstance(edge, Edge)
-        assert isinstance(is_joins, bool)
-        if is_joins:
-            return edge.joins_objs
-        else:
-            return edge.joined_objs
-
 
 class RequestInterface(InnerJoin):
     def __init__(self, name, from_edge, to_edge, schemas, is_remote):
@@ -269,12 +257,20 @@ class RequestInterface(InnerJoin):
 
         assert isinstance(from_edge, Edge)
         assert isinstance(to_edge, Edge)
-        assert from_edge.joins_interface is None
-        from_edge.joins_interface = self
-        assert to_edge.joined_interface is None
-        to_edge.joined_interface = self
-        from_edge.joins_objs.discard(self)
-        to_edge.joined_objs.discard(self)
+
+    @property
+    def joins_interfaces(self):
+        ret = []
+        for l, r in self.join_pairs:
+            ret.append(l)
+        return ret
+
+    @property
+    def joined_interfaces(self):
+        ret = []
+        for l, r in self.join_pairs:
+            ret.append(r)
+        return ret
 
     def __mark_str__(self):
         mark = super(InnerJoin, self).__mark_str__()
@@ -300,15 +296,6 @@ class RequestInterface(InnerJoin):
         joins.pair = joined
         joined.pair = joins
         self.join_pairs.append((joins, joined))
-
-    @staticmethod
-    def get_from_edge(edge, is_joins):
-        assert isinstance(edge, Edge)
-        assert isinstance(is_joins, bool)
-        if is_joins:
-            return edge.joins_interface
-        else:
-            return edge.joined_interface
 
 
 class InterfaceJoin(JoinBase):
@@ -350,25 +337,6 @@ class InterfaceJoin(JoinBase):
             mark += ", right"
         return mark
 
-    @staticmethod
-    def get_from_edge(edge, is_joins):
-        assert isinstance(is_joins, bool)
-
-        if isinstance(edge, Edge):
-            if is_joins:
-                return edge.right_interface
-            else:
-                return edge.left_interface
-        else:
-            assert isinstance(edge, RequestInterface)
-            ret = []
-            for l, r in edge.join_pairs:
-                if is_joins:
-                    ret.append(l)
-                else:
-                    ret.append(r)
-            return ret
-
 
 class Edge(object):
     def __init__(self, name, node, keyword):
@@ -383,11 +351,9 @@ class Edge(object):
         self.node = node
         self.keyword = keyword
 
-        # in request
+        # inner request
         self.joins_objs = OrderedSet()
         self.joined_objs = OrderedSet()
-        self.joins_interface = None
-        self.joined_interface = None
         # cross request
         self.left_interface = None
         self.right_interface = None
@@ -408,18 +374,17 @@ class Edge(object):
         join_str=""
         for jo in self.joins_objs:
             assert isinstance(jo, InnerJoin)
-            join_str += ", %s->%s" % (jo.name, jo.to_edge.name)
+            if isinstance(jo, RequestInterface):
+                join_str += ", %s~~>%s" % (jo.name, jo.to_edge.name)
+            else:
+                join_str += ", %s->%s" % (jo.name, jo.to_edge.name)
         for jo in self.joined_objs:
             assert isinstance(jo, InnerJoin)
-            join_str += ", %s<-%s" % (jo.name, jo.from_edge.name)
-        if self.joins_interface:
-            assert isinstance(self.joins_interface, RequestInterface)
-            join_str += ", %s~~>%s" % (self.joins_interface.name,
-                                       self.joins_interface.to_edge.name)
-        if self.joined_interface:
-            assert isinstance(self.joined_interface, RequestInterface)
-            join_str += ", %s<~~%s" % (self.joined_interface.name,
-                                       self.joined_interface.from_edge.name)
+            if isinstance(jo, RequestInterface):
+                join_str += ", %s<~~%s" % (jo.name, jo.from_edge.name)
+            else:
+                join_str += ", %s<-%s" % (jo.name, jo.from_edge.name)
+
         if self.right_interface:
             assert isinstance(self.right_interface, InterfaceJoin)
             join_str += ", %s=>%s" % (self.right_interface.name,
@@ -458,10 +423,6 @@ class Edge(object):
             ret_str += "\n  joined:"
             for join_obj in self.joined_objs:
                 ret_str += "\n    %s" % join_obj
-        if self.joins_interface:
-            ret_str += "\n  joins interface: %s" % self.joins_interface
-        if self.joined_interface:
-            ret_str += "\n  joined interface: %s" % self.joined_interface
         if self.left_interface:
             ret_str += "\n  left interface: %s" % self.left_interface
         if self.right_interface:

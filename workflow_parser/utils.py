@@ -130,8 +130,8 @@ class Report(object):
         head = " "*7 +" line/pace,component,     host,   target,"\
                "   thread,  request,  thd_ins,"\
                " innjoins,innjoined,"\
-               " l_interf, r_interf,"\
-               " infjoins,infjoined"
+               " infjoins,infjoined,"\
+               " l_interf, r_interf"
         fmt = "\n%7s" + ",%9s"*13
         ret = head
         for i, name in enumerate(self._steps):

@@ -35,34 +35,40 @@ class SchemaEngine(object):
         if isinstance(join_objs, self.joininterval_type.joinobj_type):
             return [join_objs]
         else:
-            assert join_objs
+            assert isinstance(join_objs, Iterable)
             return join_objs
 
-    def extend_fromitems(self, from_items):
+    def register_fromitems(self, from_items, f_get_objs):
         for from_item in from_items:
+            joins_objs = f_get_objs(from_item)
+            joins_objs = self._convert_joinobj_to_list(joins_objs)
+            for join_obj in joins_objs:
+                assert isinstance(join_obj, self.joininterval_type.joinobj_type)
+
             if isinstance(from_item, Pace):
-                self.joins_items.append((from_item, from_item))
+                from_pace = from_item
             else:
-                self.joins_items.append((from_item.from_pace, from_item))
+                from_pace = from_item.from_pace
+                assert isinstance(from_pace, Pace)
+            self.joins_items.append((from_pace, joins_objs, from_item))
 
-    def _register_toitem(self, to_item, obj):
-        assert isinstance(obj, self.joininterval_type.joinobj_type)
-        if isinstance(to_item, Pace):
-            to_pace = to_item
-        else:
-            to_pace = to_item.to_pace
-        item = (to_pace, to_item)
-        self.joined_items.append(item)
-        self.joineditems_by_jo[obj].append(item)
-        self.joineditems_by_jo_host[obj][to_pace.host].append(item)
-        self.joineditems_by_jo_target[obj][to_pace.target].append(item)
-
-    def extend_toitems(self, to_items):
+    def register_toitems(self, to_items, f_get_objs):
         for to_item in to_items:
-            objs = self.joininterval_type.get_joinobj_from_item(to_item, False)
-            objs = self._convert_joinobj_to_list(objs)
-            for obj in objs:
-                self._register_toitem(to_item, obj)
+            join_objs = f_get_objs(to_item)
+            join_objs = self._convert_joinobj_to_list(join_objs)
+            for obj in join_objs:
+                assert isinstance(obj, self.joininterval_type.joinobj_type)
+                if isinstance(to_item, Pace):
+                    to_pace = to_item
+                else:
+                    to_pace = to_item.to_pace
+                    assert isinstance(to_pace, Pace)
+
+                item = (to_pace, to_item)
+                self.joined_items.append(item)
+                self.joineditems_by_jo[obj].append(item)
+                self.joineditems_by_jo_host[obj][to_pace.host].append(item)
+                self.joineditems_by_jo_target[obj][to_pace.target].append(item)
 
     def proceed(self, target_objs):
         join_attempt_cnt = 0
@@ -85,14 +91,11 @@ class SchemaEngine(object):
                 items.sort(key=sort_key)
                 self.joineditems_by_jo_target[jo][target] = OrderedDict.fromkeys(items)
 
-        for joins_pace, joins_item in self.joins_items:
-            objs = self.joininterval_type.get_joinobj_from_item(joins_item, True)
-            objs = self._convert_joinobj_to_list(objs)
+        for joins_pace, join_objs, joins_item in self.joins_items:
             target_item = None
-            for join_obj in objs:
-                assert isinstance(join_obj, self.joininterval_type.joinobj_type)
-                schemas = join_obj.schemas
 
+            for join_obj in join_objs:
+                schemas = join_obj.schemas
                 from_schema = {}
                 care_host = None
                 care_target = None
@@ -144,13 +147,13 @@ class SchemaEngine(object):
                         target_item = item
                         target_items.pop(item_pair)
                         break
-
                 if target_item:
                     break
+
             if target_item:
-                relation = self.joininterval_type(join_obj,
-                                                  joins_item,
-                                                  target_item)
+                relation = self.joininterval_type.create(join_obj,
+                                                         joins_item,
+                                                         target_item)
                 relations.append(relation)
             else:
                 # debug joins
@@ -176,7 +179,7 @@ class SchemaEngine(object):
         unjoinedpaces_by_edge = defaultdict(list)
         relations = set()
         relation_by_jo = defaultdict(list)
-        for pace, item in self.joins_items:
+        for pace, _, item in self.joins_items:
             joins_int = getattr(item, self.joininterval_type.entity_joins_int)
             if joins_int is empty_join:
                 if isinstance(item, Pace):

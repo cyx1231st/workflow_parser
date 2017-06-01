@@ -9,6 +9,7 @@ from workflow_parser.state_machine import empty_join
 from workflow_parser.state_machine import StateError
 from workflow_parser.state_machine import RequestInstance
 from workflow_parser.state_machine import ThreadInstance
+from workflow_parser.state_machine import InnerjoinIntervalBase
 from workflow_parser.state_machine import InterfaceInterval
 from workflow_parser.state_machine import InterfacejoinInterval
 from workflow_parser.state_machine import InnerjoinInterval
@@ -80,8 +81,6 @@ class StateEngine(object):
         cnt_innerjoined_paces = 0
         cnt_leftinterface_paces = 0
         cnt_rightinterface_paces = 0
-        cnt_interfacejoins_paces = 0
-        cnt_interfacejoined_paces = 0
 
         for thread_obj in thread_objs:
             if thread_obj.ignored_loglines:
@@ -104,8 +103,6 @@ class StateEngine(object):
                 duplicated_vars.update(threadins.thread_vars_dup.keys())
                 cnt_innerjoins_paces += len(threadins.joins_paces)
                 cnt_innerjoined_paces += len(threadins.joined_paces)
-                cnt_interfacejoins_paces += len(threadins.interfacejoins_paces)
-                cnt_interfacejoined_paces += len(threadins.interfacejoined_paces)
                 cnt_leftinterface_paces += len(threadins.leftinterface_paces)
                 cnt_rightinterface_paces += len(threadins.rightinterface_paces)
 
@@ -130,8 +127,6 @@ class StateEngine(object):
                          threadins=len(threadinss),
                          innerjoin=cnt_innerjoins_paces,
                          innerjoined=cnt_innerjoined_paces,
-                         interfacejoin=cnt_interfacejoins_paces,
-                         interfacejoined=cnt_interfacejoined_paces,
                          leftinterface=cnt_leftinterface_paces,
                          rightinterface=cnt_rightinterface_paces)
 
@@ -175,44 +170,58 @@ class StateEngine(object):
         print("Join paces...")
         target_objs = {}
 
-        innerjoin_engine = SchemaEngine(InnerjoinInterval)
-        interface_engine = SchemaEngine(InterfaceInterval)
+        innerjoin_engine = SchemaEngine(InnerjoinIntervalBase)
         interfacejoin_engine = SchemaEngine(InterfacejoinInterval)
 
         for threadins in threadinss:
             assert isinstance(threadins, ThreadInstance)
             target_objs[threadins.target] = threadins.target_obj
-            innerjoin_engine.extend_fromitems(threadins.joins_paces)
-            innerjoin_engine.extend_toitems(threadins.joined_paces)
-            interface_engine.extend_fromitems(threadins.interfacejoins_paces)
-            interface_engine.extend_toitems(threadins.interfacejoined_paces)
-            interfacejoin_engine.extend_fromitems(threadins.rightinterface_paces)
-            interfacejoin_engine.extend_toitems(threadins.leftinterface_paces)
+
+            innerjoin_engine.register_fromitems(
+                    threadins.joins_paces,
+                    lambda p: p.edge.joins_objs)
+            innerjoin_engine.register_toitems(
+                    threadins.joined_paces,
+                    lambda p: p.edge.joined_objs)
+
+            interfacejoin_engine.register_fromitems(
+                    threadins.rightinterface_paces,
+                    lambda p: p.edge.right_interface)
+            interfacejoin_engine.register_toitems(
+                    threadins.leftinterface_paces,
+                    lambda p: p.edge.left_interface)
 
         inner_relations = innerjoin_engine.proceed(target_objs)
-        interface_relations = interface_engine.proceed(target_objs)
+        request_interfaces = [item for item in inner_relations
+                              if isinstance(item, InterfaceInterval)]
 
-        interfacejoin_engine.extend_fromitems(interface_relations)
-        interfacejoin_engine.extend_toitems(interface_relations)
+        interfacejoin_engine.register_fromitems(
+                request_interfaces,
+                lambda i: i.join_obj.joins_interfaces)
+        interfacejoin_engine.register_toitems(
+                request_interfaces,
+                lambda i: i.join_obj.joined_interfaces)
+
         interfacej_relations = interfacejoin_engine.proceed(target_objs)
+        left_interfacejs = [item for item in interfacej_relations if
+                item.is_left]
         print("-------------")
 
         # #### summary ####
         innerjoin_engine.report(self.mastergraph)
-        interface_engine.report(self.mastergraph)
         interfacejoin_engine.report(self.mastergraph)
         print()
 
         #### report #####
         self.report.step("join_ps",
-                         innerjoin=len(inner_relations),
-                         innerjoined=len(inner_relations),
-                         interfacejoin=len(interface_relations),
-                         interfacejoined=len(interface_relations),
-                         leftinterface=len(interfacej_relations),
-                         rightinterface=len(interfacej_relations))
+                         innerjoin=len(inner_relations)-len(request_interfaces),
+                         innerjoined=len(inner_relations)-len(request_interfaces),
+                         interfacejoin=len(request_interfaces),
+                         interfacejoined=len(request_interfaces),
+                         leftinterface=len(left_interfacejs),
+                         rightinterface=len(interfacej_relations)-len(left_interfacejs))
 
-        return inner_relations, interface_relations, interfacej_relations
+        return inner_relations, request_interfaces, interfacej_relations
 
 
     # step 3: group threads by request
@@ -234,7 +243,7 @@ class StateEngine(object):
                 ret.update(group(joins_int.to_threadins, t_set))
             for joined_int in threadins.joined_ints:
                 ret.update(group(joined_int.from_threadins, t_set))
-            for ijoins_int in threadins.interfacejoined_ints:
+            for ijoins_int in threadins.interfacejoins_ints:
                 ret.update(group(ijoins_int.to_threadins, t_set))
             for ijoined_int in threadins.interfacejoined_ints:
                 ret.update(group(ijoined_int.from_threadins, t_set))
