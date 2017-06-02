@@ -1026,9 +1026,10 @@ class ThreadInstance(object):
 
 
 class RequestInstance(object):
+    _index_dict = defaultdict(lambda: 0)
+
     def __init__(self, mastergraph, request, threadinss):
         assert isinstance(mastergraph, MasterGraph)
-        assert isinstance(request, str)
         assert isinstance(threadinss, set)
 
         self.request = request
@@ -1148,14 +1149,14 @@ class RequestInstance(object):
                             self.e_unjoins_paces_by_edge[relation.join_obj].add(relation)
                     self.join_ints.add(relation)
                     _process(joins_pace.joins_pace.threadins)
-            for ljoin_pace in threadins.leftinterface_ints:
+            for ljoin_pace in threadins.leftinterface_paces:
                 relation = ljoin_pace.joined_crossrequest_int
                 if relation is empty_join:
                     self.e_unjoins_paces_by_edge[ljoin_pace.edge].add(ljoin_pace)
                 else:
                     assert isinstance(relation, InterfacejoinInterval)
                     self.l_interface_joins.add(relation)
-            for rjoin_pace in threadins.rightinterface_ints:
+            for rjoin_pace in threadins.rightinterface_paces:
                 relation = rjoin_pace.joins_crossrequest_int
                 if relation is empty_join:
                     self.e_unjoins_paces_by_edge[rjoin_pace.edge].add(rjoin_pace)
@@ -1232,6 +1233,15 @@ class RequestInstance(object):
         # error: unjoins paces
         if self.e_unjoins_paces_by_edge:
             self.warns["Has unjoins paces"] = "%d joins edges" % len(self.e_unjoins_paces_by_edge)
+
+        if not self.errors and self.request is None:
+            self._index_dict[self.request_type] += 1
+            self.request = "%s%d" % (self.request_type,
+                    self._index_dict[self.request_type])
+
+    @property
+    def request_type(self):
+        return self.start_threadins.start_pace.from_node.request_name
 
     @property
     def components(self):

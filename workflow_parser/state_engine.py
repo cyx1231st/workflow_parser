@@ -267,68 +267,58 @@ class StateEngine(object):
                     threadgroups_without_request.append(new_t_set)
         print("----------------")
 
-        sum_lines = 0
         components = set()
         hosts = set()
         targets = set()
         threads = set()
-        sum_tis = 0
-        sum_joins = 0
-        sum_joined = 0
-        sum_ijoins = 0
-        sum_ijoined = 0
-        sum_ljoin = 0
-        sum_rjoin = 0
-        interface_ints = set()
-        for tgroup in threadgroup_by_request.itervalues():
-            sum_tis += len(tgroup)
-            for tis in tgroup:
-                assert isinstance(tis, ThreadInstance)
-                sum_lines += len(tis.paces)
-                components.add(tis.component)
-                hosts.add(tis.host)
-                targets.add(tis.target_obj)
-                threads.add(tis.thread_obj)
-                sum_joins += len(tis.joins_ints)
-                sum_joined += len(tis.joined_ints)
-                sum_ijoins += len(tis.interfacejoins_ints)
-                sum_ijoined += len(tis.interfacejoined_ints)
-                interface_ints.update(tis.interfacejoins_ints)
-                sum_ljoin += len(tis.leftinterface_ints)
-                sum_rjoin += len(tis.rightinterface_ints)
+        sum_dict = defaultdict(lambda: 0)
 
-        for interface in interface_ints:
-            if interface.joins_crossrequest_int is not None:
-                sum_rjoin += 1
-            if interface.joined_crossrequest_int is not None:
-                sum_ljoin += 1
+        def collect_group(tgroup):
+            for tiss in tgroup:
+                for tis in tiss:
+                    assert isinstance(tis, ThreadInstance)
+                    components.add(tis.component)
+                    hosts.add(tis.host)
+                    targets.add(tis.target_obj)
+                    threads.add(tis.thread_obj)
+                    sum_dict['sum_tis'] += 1
+                    sum_dict['sum_lines'] += len(tis.paces)
+                    sum_dict['sum_joins'] += len(tis.joins_ints)
+                    sum_dict['sum_joined'] += len(tis.joined_ints)
+                    sum_dict['sum_ijoins'] += len(tis.interfacejoins_ints)
+                    sum_dict['sum_ijoined'] += len(tis.interfacejoined_ints)
+                    sum_dict['sum_ljoin'] += len(tis.leftinterface_ints)
+                    sum_dict['sum_rjoin'] += len(tis.rightinterface_ints)
+
+        collect_group(threadgroup_by_request.itervalues())
+        collect_group(threadgroups_without_request)
 
         #### summary ####
         print("%d request groups" % (len(threadgroup_by_request)))
-        print("%d thread instances" % sum_tis)
+        print("%d thread instances" % sum_dict['sum_tis'])
         print()
 
         #### report #####
         self.report.step("group_t",
-                         line=sum_lines,
+                         line=sum_dict['sum_lines'],
                          component=len(components),
                          host=len(hosts),
                          target=len(targets),
                          thread=len(threads),
-                         request=len(threadgroup_by_request),
-                         threadins=sum_tis,
-                         innerjoin=sum_joins,
-                         innerjoined=sum_joined,
-                         interfacejoin=sum_ijoins,
-                         interfacejoined=sum_ijoined,
-                         leftinterface=sum_ljoin,
-                         rightinterface=sum_rjoin)
+                         request=len(threadgroup_by_request)+len(threadgroups_without_request),
+                         threadins=sum_dict['sum_tis'],
+                         innerjoin=sum_dict['sum_joins'],
+                         innerjoined=sum_dict['sum_joined'],
+                         interfacejoin=sum_dict['sum_ijoins'],
+                         interfacejoined=sum_dict['sum_ijoined'],
+                         leftinterface=sum_dict['sum_ljoin'],
+                         rightinterface=sum_dict['sum_rjoin'])
 
         #### errors #####
-        if sum_tis != len(threadinss):
+        if sum_dict['sum_tis'] != len(threadinss):
             print("! WARN !")
             print("%d thread instances, but previously built %d"
-                    % (sum_tis,
+                    % (sum_dict['sum_tis'],
                        len(threadinss)))
             print()
 
@@ -370,7 +360,12 @@ class StateEngine(object):
             print()
             raise StateError("(ParserEngine) thread group has multiple requests!")
 
-        return threadgroup_by_request
+        ret = []
+        for req, tgroup in threadgroup_by_request.iteritems():
+            ret.append((req, tgroup))
+        for tgroup in threadgroups_without_request:
+            ret.append((None, tgroup))
+        return ret
 
     def build_requests(self, threadgroup_by_request):
         requestinss = {}
@@ -389,7 +384,7 @@ class StateEngine(object):
         unjoinspaces_by_edge = defaultdict(set)
 
         print("Build requests...")
-        for request, threads in threadgroup_by_request.iteritems():
+        for request, threads in threadgroup_by_request:
             requestins = RequestInstance(self.mastergraph, request, threads)
 
             if requestins.warns:
@@ -430,6 +425,9 @@ class StateEngine(object):
         threadinss = set()
         requests_vars = defaultdict(set)
         innerjoin_intervals = set()
+        interface_intervals = set()
+        linterfaces = set()
+        rinterfaces = set()
         join_intervals_by_type = defaultdict(set)
 
         thread_intervals = set()
@@ -447,6 +445,9 @@ class StateEngine(object):
                 requests_vars[k].update(vs)
 
             innerjoin_intervals.update(requestins.join_ints)
+            interface_intervals.update(requestins.interface_ints)
+            linterfaces.update(requestins.l_interface_joins)
+            rinterfaces.update(requestins.r_interface_joins)
             for j_ins in requestins.join_ints:
                 join_intervals_by_type[j_ins.join_type].add(j_ins)
             thread_intervals.update(requestins.td_ints)
@@ -474,8 +475,12 @@ class StateEngine(object):
                          thread=len(thread_objs),
                          request=len(requestinss),
                          threadins=len(threadinss),
-                         innerjoin=len(innerjoin_intervals),
-                         innerjoined=len(innerjoin_intervals))
+                         innerjoin=len(innerjoin_intervals)-len(interface_intervals),
+                         innerjoined=len(innerjoin_intervals)-len(interface_intervals),
+                         interfacejoin=len(interface_intervals),
+                         interfacejoined=len(interface_intervals),
+                         leftinterface=len(linterfaces),
+                         rightinterface=len(rinterfaces))
 
         #### errors #####
         if len(requestinss) != len(threadgroup_by_request):
