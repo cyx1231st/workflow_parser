@@ -45,9 +45,6 @@ class Pace(object):
         self.prv_int = None
         self.nxt_int = None
 
-        self.prv_blank_int = None
-        self.nxt_blank_int = None
-
         self.joins_int = None
         self.joined_int = None
 
@@ -303,7 +300,7 @@ class IntervalBase(object):
     def int_type(self):
         return "base"
 
-    def __str__(self):
+    def __repr__(self):
         return "<%s#%s: %s %s |--> %s %s>" % (
                 self.__class__.__name__,
                 self.name,
@@ -322,6 +319,11 @@ class ThreadIntervalBase(IntervalBase):
                                                  entity)
         assert from_pace.thread_obj is to_pace.thread_obj
         self.thread_obj = from_pace.thread_obj
+
+        assert from_pace.nxt_int is None
+        assert to_pace.prv_int is None
+        from_pace.nxt_int = self
+        to_pace.prv_int = self
 
     @property
     def target(self):
@@ -343,14 +345,6 @@ class ThreadIntervalBase(IntervalBase):
     def target_obj(self):
         return self.thread_obj.target_obj
 
-    @property
-    def prv_int(self):
-        return self.from_pace.prv_int
-
-    @property
-    def nxt_int(self):
-        return self.to_pace.nxt_int
-
 
 class BlankInterval(ThreadIntervalBase):
     def __init__(self, from_pace, to_pace):
@@ -358,8 +352,6 @@ class BlankInterval(ThreadIntervalBase):
                                             to_pace,
                                             None)
         assert self.from_threadins is not self.to_threadins
-        self.from_pace.nxt_blank_int = self
-        self.to_pace.prv_blank_int = self
 
     @property
     def from_threadins(self):
@@ -376,20 +368,10 @@ class ThreadInterval(ThreadIntervalBase):
                                              to_pace,
                                              from_pace.to_node)
         assert from_pace.threadins is to_pace.threadins
-        self.from_pace.nxt_int = self
-        self.to_pace.prv_int = self
 
     @property
     def threadins(self):
         return self.from_pace.threadins
-
-    @property
-    def prv_blank_int(self):
-        return self.from_pace.prv_blank_int
-
-    @property
-    def nxt_blank_int(self):
-        return self.to_pace.nxt_blank_int
 
     @property
     def joins_int(self):
@@ -414,6 +396,22 @@ class ThreadInterval(ThreadIntervalBase):
     @property
     def color(self):
         return self.component.color
+
+    @property
+    def prv_int(self):
+        prv_int = self.from_pace.prv_int
+        if isinstance(prv_int, ThreadInterval):
+            return prv_int
+        else:
+            return None
+
+    @property
+    def nxt_int(self):
+        nxt_int = self.to_pace.nxt_int
+        if isinstance(nxt_int, ThreadInterval):
+            return nxt_int
+        else:
+            return None
 
     @property
     def prv_main(self):
@@ -629,11 +627,15 @@ class InnerjoinIntervalBase(JoinIntervalBase):
 
     @property
     def joined_int(self):
-        return self.from_pace.prv_int
+        joined_int = self.from_pace.prv_int
+        assert isinstance(joined_int, ThreadInterval)
+        return joined_int
 
     @property
     def joins_int(self):
-        return self.to_pace.nxt_int
+        joins_int = self.to_pace.nxt_int
+        assert isinstance(joins_int, ThreadInterval)
+        return joins_int
 
     @property
     def requestins(self):
@@ -1025,6 +1027,11 @@ class ThreadInstance(object):
             return False
 
 
+class RequestInterval(IntervalBase):
+    def __init__(self, from_pace, to_pace):
+        super(RequestInterval, self).__init__(from_pace, to_pace, None)
+
+
 class RequestInstance(object):
     _index_dict = defaultdict(lambda: 0)
 
@@ -1201,8 +1208,8 @@ class RequestInstance(object):
                     else:
                         if to_pace is not None:
                             int_extended.append(
-                                    ThreadInterval(int_.to_pace,
-                                                   to_pace))
+                                    RequestInterval(int_.to_pace,
+                                                    to_pace))
                             to_pace = int_.from_pace
                         else:
                             assert False
@@ -1213,8 +1220,8 @@ class RequestInstance(object):
             else:
                 if to_pace is not None:
                     int_extended.append(
-                            ThreadInterval(self.start_interval.from_pace,
-                                           to_pace))
+                            RequestInterval(self.start_interval.from_pace,
+                                            to_pace))
                 for tint in reversed(int_extended):
                     if self.intervals_extended:
                         assert self.intervals_extended[-1].to_pace is tint.from_pace
