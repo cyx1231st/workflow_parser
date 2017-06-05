@@ -4,12 +4,18 @@ from collections import defaultdict
 from collections import Iterable
 from collections import OrderedDict
 
-from workflow_parser.state_graph import InnerJoin
-from workflow_parser.state_graph import InterfaceJoin
-from workflow_parser.state_graph import RequestInterface
-from workflow_parser.state_machine import empty_join
-from workflow_parser.state_machine import Pace
-from workflow_parser.state_machine import JoinIntervalBase
+from ...graph import InnerJoin
+from ...graph import InterfaceJoin
+from ...graph import MasterGraph
+from ...graph import RequestInterface
+from ...utils import Report
+from ..entities.join import InnerjoinIntervalBase
+from ..entities.join import InterfacejoinInterval
+from ..entities.join import InterfaceInterval
+from ..entities.threadins import empty_join
+from ..entities.threadins import JoinIntervalBase
+from ..entities.threadins import Pace
+from ..entities.threadins import ThreadInstance
 
 
 class SchemaEngine(object):
@@ -257,3 +263,66 @@ class SchemaEngine(object):
         else:
             assert not unjoinedpaces_by_edge
             assert not unjoinspaces_by_edge
+
+
+def join_paces(threadinss, mastergraph, report):
+    assert isinstance(mastergraph, MasterGraph)
+    assert isinstance(report, Report)
+
+    join_attempt_cnt = 0
+
+    print("Join paces...")
+    target_objs = {}
+
+    innerjoin_engine = SchemaEngine(InnerjoinIntervalBase)
+    interfacejoin_engine = SchemaEngine(InterfacejoinInterval)
+
+    for threadins in threadinss:
+        assert isinstance(threadins, ThreadInstance)
+        target_objs[threadins.target] = threadins.target_obj
+
+        innerjoin_engine.register_fromitems(
+                threadins.joins_paces,
+                lambda p: p.edge.joins_objs)
+        innerjoin_engine.register_toitems(
+                threadins.joined_paces,
+                lambda p: p.edge.joined_objs)
+
+        interfacejoin_engine.register_fromitems(
+                threadins.rightinterface_paces,
+                lambda p: p.edge.right_interface)
+        interfacejoin_engine.register_toitems(
+                threadins.leftinterface_paces,
+                lambda p: p.edge.left_interface)
+
+    inner_relations = innerjoin_engine.proceed(target_objs)
+    request_interfaces = [item for item in inner_relations
+                          if isinstance(item, InterfaceInterval)]
+
+    interfacejoin_engine.register_fromitems(
+            request_interfaces,
+            lambda i: i.join_obj.joins_interfaces)
+    interfacejoin_engine.register_toitems(
+            request_interfaces,
+            lambda i: i.join_obj.joined_interfaces)
+
+    interfacej_relations = interfacejoin_engine.proceed(target_objs)
+    left_interfacejs = [item for item in interfacej_relations if
+            item.is_left]
+    print("-------------")
+
+    # #### summary ####
+    innerjoin_engine.report(mastergraph)
+    interfacejoin_engine.report(mastergraph)
+    print()
+
+    #### report #####
+    report.step("join_ps",
+                innerjoin=len(inner_relations)-len(request_interfaces),
+                innerjoined=len(inner_relations)-len(request_interfaces),
+                interfacejoin=len(request_interfaces),
+                interfacejoined=len(request_interfaces),
+                leftinterface=len(left_interfacejs),
+                rightinterface=len(interfacej_relations)-len(left_interfacejs))
+
+    return inner_relations, request_interfaces, interfacej_relations

@@ -1,7 +1,7 @@
 import numbers
 
-from workflow_parser.log_parser import LogLine
-from workflow_parser.log_parser import LogFile
+from .log_entities import LogFile
+from .log_entities import LogLine
 
 
 class Thread(object):

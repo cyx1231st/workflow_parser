@@ -5,11 +5,11 @@ import os
 from os import path
 import sys
 
-from workflow_parser.log_parser import LogError
-from workflow_parser.log_parser import LogFile
-from workflow_parser.service_registry import ServiceRegistry
-from workflow_parser.state_runtime import Target
-from workflow_parser.utils import Report
+from ..service_registry import ServiceRegistry
+from ..utils import Report
+from .exc import LogError
+from .log_entities import LogFile
+from .target import Target
 
 
 class LogEngine(object):
@@ -21,7 +21,7 @@ class LogEngine(object):
         self.plugin = plugin
         self.report = report
 
-    def loadfiles(self, log_folder):
+    def _loadfiles(self, log_folder):
         assert isinstance(log_folder, str)
         logfiles = []
 
@@ -46,7 +46,7 @@ class LogEngine(object):
 
         return logfiles
 
-    def readfiles(self, logfiles_in):
+    def _readfiles(self, logfiles_in):
         logfiles_by_errortype = defaultdict(list)
         logfiles_by_warntype = defaultdict(list)
 
@@ -136,7 +136,7 @@ class LogEngine(object):
 
         return logfiles
 
-    def preparethreads(self, logfiles_in):
+    def _preparethreads(self, logfiles_in):
         hosts = set()
         target_objs = []
         targetobjs_by_component = defaultdict(list)
@@ -205,3 +205,9 @@ class LogEngine(object):
         self.plugin.do_report()
 
         return target_objs
+
+    def proceed(self, logfolder):
+        logfiles = self._loadfiles(logfolder)
+        logfiles = self._readfiles(logfiles)
+        targetobjs = self._preparethreads(logfiles)
+        return targetobjs

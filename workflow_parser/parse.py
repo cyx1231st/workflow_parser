@@ -15,15 +15,15 @@
 from __future__ import print_function
 
 import argparse
-import traceback
 
 # from workflow_parser.draw_engine import DrawEngine
-from workflow_parser.log_engine import LogEngine
-from workflow_parser.state_engine import StateEngine
+from .datasource.log_engine import LogEngine
+from .workflow.engine import StateEngine
+
 # from workflow_parser.statistics_engine import do_statistics
 # from workflow_parser.relation_engine import relation_parse
 # from workflow_parser.statistics import Report
-from workflow_parser.utils import Report as ReportInternal
+from .utils import Report as ReportInternal
 
 
 def main1(driver):
@@ -55,16 +55,11 @@ def main1(driver):
     try:
         # build logs
         log_engine = LogEngine(driver.services, driver, report_i)
-        logfiles = log_engine.loadfiles(args.folder)
-        logfiles = log_engine.readfiles(logfiles)
-        targetobjs = log_engine.preparethreads(logfiles)
+        targetobjs = log_engine.proceed(args.folder)
 
         # build states
         state_engine = StateEngine(master, report_i)
-        threadinss = state_engine.build_thread_instances(targetobjs)
-        relations_list = state_engine.join_paces(threadinss)
-        threadgroup_by_request = state_engine.group_threads(threadinss)
-        requestinss = state_engine.build_requests(threadgroup_by_request)
+        requestinss = state_engine.proceed(targetobjs)
     except Exception:
         print("\n%r\n" % report_i)
         raise

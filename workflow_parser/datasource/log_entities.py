@@ -5,14 +5,10 @@ from abc import abstractmethod
 from functools import total_ordering
 from os import path
 
-from workflow_parser import reserved_vars as rv
-from workflow_parser.exception import WFException
-from workflow_parser.service_registry import ServiceRegistry
-from workflow_parser.utils import Heap
-
-
-class LogError(WFException):
-    pass
+from .. import reserved_vars as rv
+from ..service_registry import ServiceRegistry
+from ..utils import Heap
+from .exc import LogError
 
 
 class DriverPlugin(object):
