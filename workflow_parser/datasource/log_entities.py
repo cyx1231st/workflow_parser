@@ -135,18 +135,12 @@ class LogLine(object):
         self.logfile = logfile
         self.line = line.strip()
         self._vars = {}
-
-        self.correct = True
-        self.ignored = False
+        self._assigned = None
 
         self.prv_logline = None
         self.nxt_logline = None
-
         self.prv_thread_logline = None
         self.nxt_thread_logline = None
-
-        #for debug
-        self.pace = None
 
         # init
         for k, v in vs.iteritems():
@@ -159,14 +153,6 @@ class LogLine(object):
             raise LogError("(LogLine) require 'seconds' when parse line: %s" % line)
         if self.keyword is None:
             raise LogError("(LogLine) require 'keyword' when parse line: %s" % line)
-
-    @property
-    def seconds(self):
-        seconds = self.__dict__.get(rv.SECONDS)
-        if seconds is None:
-            return None
-        else:
-            return seconds + self.logfile.offset
 
     # total ordering
     __eq__ = lambda self, other: self.seconds == other.seconds
@@ -236,37 +222,35 @@ class LogLine(object):
 
     def __str_marks__(self):
         mark_str = ""
-        if not self.correct:
-            mark_str += ", ERROR"
-        if self.ignored:
-            mark_str += ", IGNORED"
+        if not self._assigned:
+            mark_str += ", ~ASSIGN"
         return mark_str
 
     def __str__(self):
-        ret = "<LL>%.3f %s [%s %s %s] %s %s: <%s>%s" % (
+        ret = "<LL>%.3f %s %s [%s %s %s] %s: <%s>%s" % (
               self.seconds,
               self.time,
+              self.thread,
               self.component,
               self.host,
               self.target,
               self.request,
-              self.thread,
               self.keyword,
               self.__str_marks__())
         return ret
 
     def __str_target__(self):
-        ret = "<LL>%.3f %s | %s %s: <%s>%s" % (
+        ret = "<LL>%.3f %s %s %s: <%s>%s" % (
               self.seconds,
               self.time,
-              self.request,
               self.thread,
+              self.request,
               self.keyword,
               self.__str_marks__())
         return ret
 
     def __str_thread__(self):
-        ret = "<LL>%.3f %s | %s: <%s>%s" % (
+        ret = "<LL>%.3f %s %s: <%s>%s" % (
               self.seconds,
               self.time,
               self.request,
@@ -308,8 +292,6 @@ class LogFile(object):
         self.total_lines = 0
         self.loglines = []
 
-        self.offset = 0
-
         self.errors = {}
         self.warns = {}
 
@@ -330,13 +312,12 @@ class LogFile(object):
         if self.target:
             target_str += "#%s" % self.target
 
-        return "<LogFile%s: fname=%s, comp=%s, host=%s, off=%d, %d from %d"\
+        return "<LogFile%s: fname=%s, comp=%s, host=%s, %d from %d"\
                "lines, %d threads, %d requests>" % (
                target_str,
                self.filename,
                self.component,
                self.host,
-               self.offset,
                len(self.loglines),
                self.total_lines,
                len(self.threads),
@@ -412,7 +393,6 @@ class LogFile(object):
                         % line.strip(), e)
             yield lg
 
-
     def _buffer_lines(self, lines):
         buffer_lines = Heap(key=lambda a: a.seconds)
 
@@ -482,9 +462,10 @@ class LogFile(object):
                 line.prv_logline = prv_line
             prv_line = line
 
-            if not ret:
-                line.correct = False
-            else:
+            if ret:
                 if thread is None:
                     raise LogError("Require 'thread' when parse line: %r" % self)
                 yield line
+            else:
+                # dangling logline
+                pass

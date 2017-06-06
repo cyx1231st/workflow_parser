@@ -6,10 +6,13 @@ from os import path
 import sys
 
 from ..service_registry import ServiceRegistry
+from ..target import Target
+from ..target import Thread
+from ..target import Line
 from ..utils import Report
 from .exc import LogError
 from .log_entities import LogFile
-from .target import Target
+from .log_entities import LogLine
 
 
 class LogEngine(object):
@@ -140,37 +143,80 @@ class LogEngine(object):
         hosts = set()
         target_objs = []
         targetobjs_by_component = defaultdict(list)
-        requests_filtered = set()
+        requests_detected = set()
 
         print("Prepare threads...")
         for logfile in logfiles_in:
-            target_obj = Target(logfile)
+            # build Target object
+            target_obj = Target(logfile.target,
+                                logfile.component,
+                                logfile.host,
+                                logfile)
 
-            if target_obj.loglines:
+            index_thread = 0
+            for logline in logfile.yield_logs():
+                assert isinstance(logline, LogLine)
+                assert logline.logfile is logfile
+                assert isinstance(logline.thread, str)
+
+                if logline.request is not None:
+                    requests_detected.add(logline.request)
+
+                # get Thread object
+                thread = logline.thread
+                thread_obj = target_obj.thread_objs.get(thread)
+                if thread_obj is None:
+                    # build Thread object
+                    thread_obj = Thread(index_thread, target_obj, thread)
+                    target_obj.thread_objs[thread] = thread_obj
+                    target_obj.threadobjs_list.append(thread_obj)
+                    index_thread += 1
+                target = logline.target
+                assert target is thread_obj.target
+
+                # build Line object
+                prv_thread_line = thread_obj.line_objs[-1]\
+                        if thread_obj.line_objs else None
+                prv_target_line = target_obj.line_objs[-1]\
+                        if target_obj.line_objs else None
+                line_obj = Line(logline.time,
+                                logline.seconds,
+                                logline.keyword,
+                                logline.request,
+                                thread_obj,
+                                logline._vars,
+                                logline,
+                                prv_thread_line,
+                                prv_target_line)
+
+                # append to target_obj
+                thread_obj.line_objs.append(line_obj)
+                target_obj.line_objs.append(line_obj)
+
+            if target_obj.line_objs:
                 target_objs.append(target_obj)
-                requests_filtered.update(target_obj.requests)
                 targetobjs_by_component[target_obj.component].append(target_obj)
                 hosts.add(target_obj.host)
         print("----------------")
 
         #### summary ####
-        total_loglines_correct = sum(len(to.loglines) for to in target_objs)
-        total_requests_correct = len(requests_filtered)
-        total_threads_correct = sum(len(to.thread_objs) for to in target_objs)
-        print("%d loglines, %d requests, %d threads" % (
-            total_loglines_correct,
-            total_requests_correct,
-            total_threads_correct))
+        total_lines = sum(len(to.line_objs) for to in target_objs)
+        total_requests = len(requests_detected)
+        total_threads = sum(len(to.thread_objs) for to in target_objs)
+        print("%d lines, %d requests, %d threads" % (
+            total_lines,
+            total_requests,
+            total_threads))
 
-        sum_loglines_correct = sum(len(th.loglines)
+        total_thread_lines = sum(len(th.line_objs)
                 for to in target_objs
                 for th in to.thread_objs.itervalues())
-        assert sum_loglines_correct == total_loglines_correct
+        assert total_thread_lines == total_lines
 
         for comp, target_objs_ in targetobjs_by_component.iteritems():
             hosts_ = set()
             component_threads = sum(len(to.thread_objs) for to in target_objs_)
-            component_loglines = sum(len(to.loglines) for to in target_objs_)
+            component_loglines = sum(len(to.line_objs) for to in target_objs_)
 
             min_target_threads, max_target_threads = sys.maxint, 0
             min_target_loglines, max_target_loglines = sys.maxint, 0
@@ -178,8 +224,10 @@ class LogEngine(object):
                 hosts_.add(target_obj.host)
                 min_target_threads = min(min_target_threads, len(target_obj.thread_objs))
                 max_target_threads = max(max_target_threads, len(target_obj.thread_objs))
-                min_target_loglines = min(min_target_loglines, len(target_obj.loglines))
-                max_target_loglines = max(max_target_loglines, len(target_obj.loglines))
+                min_target_loglines = min(min_target_loglines,
+                        len(target_obj.line_objs))
+                max_target_loglines = max(max_target_loglines,
+                        len(target_obj.line_objs))
 
             print("  %s: %d hosts, %d targets, %d threads, %d loglines"
                     % (comp, len(hosts_), len(target_objs_),
@@ -194,12 +242,12 @@ class LogEngine(object):
         print()
 
         #### report #####
-        self.report.step("prepare", line=total_loglines_correct,
+        self.report.step("prepare", line=total_lines,
                                     component=len(targetobjs_by_component),
                                     host=len(hosts),
                                     target=len(target_objs),
-                                    thread=total_threads_correct,
-                                    request=total_requests_correct)
+                                    thread=total_threads,
+                                    request=total_requests)
 
         #### errors #####
         self.plugin.do_report()

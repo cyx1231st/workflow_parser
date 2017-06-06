@@ -127,7 +127,7 @@ class Report(object):
         self.rightinterfaces.append(rightinterface)
 
     def __repr__(self):
-        head = " "*7 +" line/pace,component,     host,   target,"\
+        head = " "*7 +"      line,component,     host,   target,"\
                "   thread,  request,  thd_ins,"\
                " innjoins,innjoined,"\
                " infjoins,infjoined,"\

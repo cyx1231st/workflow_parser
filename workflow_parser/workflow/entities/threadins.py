@@ -5,9 +5,8 @@ from collections import defaultdict
 from functools import total_ordering
 
 from ... import reserved_vars as rv
-# TODO: change to Line
-from ...datasource.log_entities import LogLine
-from ...datasource.target import Thread
+from ...target import Line
+from ...target import Thread
 from ...graph import Edge
 from ...graph import JoinBase
 from ...graph import MasterGraph
@@ -18,14 +17,14 @@ from ...graph import Token
 @total_ordering
 class Pace(object):
     """ Pace is relative to transition. """
-    def __init__(self, logline, from_node, edge, threadins):
-        assert isinstance(logline, LogLine)
-        assert logline.pace is None
+    def __init__(self, line_obj, from_node, edge, threadins):
+        assert isinstance(line_obj, Line)
+        assert line_obj._assigned is None
         assert isinstance(from_node, Node)
         assert isinstance(edge, Edge)
         assert isinstance(threadins, ThreadInstance)
 
-        self.logline = logline
+        self.line_obj = line_obj
         self.from_node = from_node
         self.edge = edge
         self.threadins = threadins
@@ -37,9 +36,7 @@ class Pace(object):
         self.joins_crossrequest_int = None
         self.joined_crossrequest_int = None
 
-        assert not logline.pace
-        logline.pace = self
-
+        line_obj._assigned = self
         assert self.target == self.target_obj.target
         assert self.thread == self.thread_obj.thread
 
@@ -119,7 +116,7 @@ class Pace(object):
         assert isinstance(item, str)
 
         if item in rv.ALL_VARS:
-            ret = getattr(self.logline, item)
+            ret = getattr(self.line_obj, item)
             if ret is None and item == rv.REQUEST:
                 ret = getattr(self.threadins, "request")
             return ret
@@ -131,8 +128,8 @@ class Pace(object):
 
         if item in rv.ALL_VARS:
             return getattr(self, item)
-        elif item in self.logline.get_keys():
-            return self.logline[item]
+        elif item in self.line_obj:
+            return self.line_obj[item]
         elif item in self.threadins.thread_vars:
             return self.threadins.thread_vars[item]
         elif item in self.threadins.thread_vars_dup:
@@ -173,7 +170,7 @@ class Pace(object):
                 self.edge.name,
                 self.to_node.name,
                 self.keyword,
-                len(self.logline.get_keys()),
+                len(self.line_obj.keys),
                 self.target,
                 self.thread,
                 self.request,
@@ -188,13 +185,13 @@ class Pace(object):
                 self.edge.name,
                 self.to_node.name,
                 self.keyword,
-                len(self.logline.get_keys()),
+                len(self.line_obj.keys),
                 mark_str)
 
 
     def __repr__(self):
         ret_str = str(self)
-        ret_str += "\n  >>%s" % self.logline.line
+        ret_str += "\n  >>%s" % self.line_obj.line
         return ret_str
 
 
@@ -471,10 +468,10 @@ class ThreadInterval(ThreadIntervalBase):
 
 
 class ThreadInstance(object):
-    def __init__(self, thread_obj, token, logline):
+    def __init__(self, thread_obj, token, line_obj):
         assert isinstance(thread_obj, Thread)
         assert isinstance(token, Token)
-        assert isinstance(logline, LogLine)
+        assert isinstance(line_obj, Line)
 
         self.thread_obj = thread_obj
         self.token = token
@@ -503,7 +500,7 @@ class ThreadInstance(object):
         self.requestins = None
 
         # init
-        self._apply_token(logline)
+        self._apply_token(line_obj)
         assert self.paces
 
     @property
@@ -536,7 +533,7 @@ class ThreadInstance(object):
 
     @property
     def is_request_start(self):
-       return self.paces[0].from_node.is_request_start
+        return self.paces[0].from_node.is_request_start
 
     @property
     def is_request_end(self):
@@ -615,14 +612,14 @@ class ThreadInstance(object):
         return ret_str
 
     @classmethod
-    def create(cls, master_graph, logline, thread_obj):
+    def create(cls, master_graph, line_obj, thread_obj):
         assert isinstance(master_graph, MasterGraph)
-        assert isinstance(logline, LogLine)
+        assert isinstance(line_obj, Line)
         assert isinstance(thread_obj, Thread)
 
-        token = Token.new(master_graph, logline.keyword, thread_obj.component)
+        token = Token.new(master_graph, line_obj.keyword, thread_obj.component)
         if token:
-            threadins = ThreadInstance(thread_obj, token, logline)
+            threadins = ThreadInstance(thread_obj, token, line_obj)
             if thread_obj.threadinss:
                 BlankInterval(thread_obj.threadinss[-1].end_pace,
                               threadins.start_pace)
@@ -634,16 +631,16 @@ class ThreadInstance(object):
         print("(ThreadInstance) report: %s" % reason)
         print("-------- Thread --------")
         print("%r" % self)
-        report_loglines(self.loglines, self.s_index, self.f_index)
+        # report_loglines(self.loglines, self.s_index, self.f_index)
         print("-------- end -----------")
 
-    def _apply_token(self, logline):
-        assert isinstance(logline, LogLine)
-        assert logline.keyword == self.token.keyword
+    def _apply_token(self, line_obj):
+        assert isinstance(line_obj, Line)
+        assert line_obj.keyword == self.token.keyword
 
         from_node = self.token.from_node
         edge = self.token.edge
-        pace = Pace(logline, from_node, edge, self)
+        pace = Pace(line_obj, from_node, edge, self)
         for mark in edge.marks:
             self.paces_by_mark[mark].append(pace)
         if edge.joins_objs:
@@ -654,14 +651,15 @@ class ThreadInstance(object):
             self.leftinterface_paces.add(pace)
         if edge.right_interface:
             self.rightinterface_paces.add(pace)
-        for key in logline.get_keys(True):
+        for key in line_obj.keys:
             if key in ("keyword", "time", "seconds"):
                 continue
 
-            new_val = logline[key]
+            new_val = line_obj[key]
             if key in ("component", "target", "host", "thread"):
                 val = getattr(self, key)
-                if val != logline[key]:
+                if val != line_obj[key]:
+                    import pdb; pdb.set_trace()
                     self.report("Thread var %s=%s, conflicts %s"
                             % (key, val, new_val))
                     raise StateError("(ThreadInstance) parse error: variable mismatch")
@@ -699,11 +697,11 @@ class ThreadInstance(object):
 
         self.paces.append(pace)
 
-    def step(self, logline):
-        assert isinstance(logline, LogLine)
+    def step(self, line_obj):
+        assert isinstance(line_obj, Line)
 
-        if self.token.step(logline.keyword):
-            self._apply_token(logline)
+        if self.token.step(line_obj.keyword):
+            self._apply_token(line_obj)
             return True
         else:
             return False

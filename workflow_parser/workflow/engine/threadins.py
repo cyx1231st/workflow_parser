@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 
-from ...datasource.target import Target
+from ...target import Target
 from ...graph import MasterGraph
 from ...utils import Report
 from ..entities.threadins import ThreadInstance
@@ -12,7 +12,7 @@ def build_thread_instances(targetobjs, mastergraph, report):
     assert isinstance(mastergraph, MasterGraph)
     assert isinstance(report, Report)
 
-    valid_loglines = 0
+    valid_lineobjs = 0
     thread_objs = []
 
     print("Build thread instances...")
@@ -20,17 +20,17 @@ def build_thread_instances(targetobjs, mastergraph, report):
         assert isinstance(target_obj, Target)
         for thread_obj in target_obj.thread_objs.itervalues():
             threadins = None
-            cnt_valid_loglines = 0
-            for logline in thread_obj.loglines:
+            cnt_valid_lineobjs = 0
+            for line_obj in thread_obj.line_objs:
                 if threadins is not None:
-                    if threadins.step(logline):
+                    if threadins.step(line_obj):
                         # success!
                         pass
                     else:
                         threadins = None
                 if threadins is None:
                     threadins = ThreadInstance.create(mastergraph,
-                                                      logline,
+                                                      line_obj,
                                                       thread_obj)
                     if threadins is not None:
                         thread_obj.threadinss.append(threadins)
@@ -42,20 +42,21 @@ def build_thread_instances(targetobjs, mastergraph, report):
                         # raise StateError("(ParserEngine) parse error: cannot decide graph")
                         import pdb; pdb.set_trace()
                 if threadins is not None:
-                    cnt_valid_loglines += 1
+                    cnt_valid_lineobjs += 1
+                    assert line_obj._assigned is not None
                 else:
-                    thread_obj.ignored_loglines.append(logline)
-                    logline.ignored = True
+                    thread_obj.dangling_lineobjs.append(line_obj)
+                    assert line_obj._assigned is None
 
-            assert len(thread_obj.ignored_loglines) + cnt_valid_loglines\
-                    == len(thread_obj.loglines)
+            assert len(thread_obj.dangling_lineobjs) + cnt_valid_lineobjs\
+                    == len(thread_obj.line_objs)
 
             thread_objs.append(thread_obj)
-            valid_loglines += cnt_valid_loglines
+            valid_lineobjs += cnt_valid_lineobjs
     print("-------------------------")
 
     #### collect ####
-    ignored_loglines_by_component = defaultdict(lambda: [])
+    ignored_lineobjs_by_component = defaultdict(lambda: [])
     components = set()
     hosts = set()
     targets = set()
@@ -70,9 +71,9 @@ def build_thread_instances(targetobjs, mastergraph, report):
     cnt_rightinterface_paces = 0
 
     for thread_obj in thread_objs:
-        if thread_obj.ignored_loglines:
-            ignored_loglines_by_component[thread_obj.component]\
-                    .extend(thread_obj.ignored_loglines)
+        if thread_obj.dangling_lineobjs:
+            ignored_lineobjs_by_component[thread_obj.component]\
+                    .extend(thread_obj.dangling_lineobjs)
         if thread_obj.threadinss:
             components.add(thread_obj.component)
             hosts.add(thread_obj.host)
@@ -94,7 +95,7 @@ def build_thread_instances(targetobjs, mastergraph, report):
             cnt_rightinterface_paces += len(threadins.rightinterface_paces)
 
     #### summary ####
-    print("%d valid loglines" % valid_loglines)
+    print("%d valid line_objs" % valid_lineobjs)
     print("%d thread instances" % len(threadinss))
     if complete_threadinss_by_graph:
         for gname, tis in complete_threadinss_by_graph.iteritems():
@@ -105,7 +106,7 @@ def build_thread_instances(targetobjs, mastergraph, report):
 
     #### report #####
     report.step("build_t",
-                line=valid_loglines,
+                line=valid_lineobjs,
                 component=len(components),
                 host=len(hosts),
                 target=len(targets),
@@ -118,15 +119,16 @@ def build_thread_instances(targetobjs, mastergraph, report):
                 rightinterface=cnt_rightinterface_paces)
 
     #### errors #####
-    if ignored_loglines_by_component:
+    if ignored_lineobjs_by_component:
         def _report_ignored(tup):
             # (logline, loglines, index, thread, component, target)
             print("  example:")
-            report_loglines(tup[1], tup[2], blanks=4, printend=True)
+            raise NotImplementedError()
+            # report_loglines(tup[1], tup[2], blanks=4, printend=True)
         print("! WARN !")
-        for comp, loglines in ignored_loglines_by_component.iteritems():
-            print("%s: %d ignored loglines" % (comp, len(loglines)))
-            _report_ignored(loglines[0])
+        for comp, line_objs in ignored_lineobjs_by_component.iteritems():
+            print("%s: %d ignored line_objs" % (comp, len(line_objs)))
+            _report_ignored(line_objs[0])
         print()
 
     edges = mastergraph.edges - mastergraph.seen_edges
