@@ -68,7 +68,7 @@ def group_threads(threadinss, report):
                 targets.add(tis.target_obj)
                 threads.add(tis.thread_obj)
                 sum_dict['sum_tis'] += 1
-                sum_dict['sum_lines'] += len(tis.paces)
+                sum_dict['sum_lines'] += len(tis.intervals)+1
                 sum_dict['sum_joins'] += len(tis.joins_ints)
                 sum_dict['sum_joined'] += len(tis.joined_ints)
                 sum_dict['sum_ijoins'] += len(tis.interfacejoins_ints)

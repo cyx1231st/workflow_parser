@@ -768,6 +768,10 @@ class Token(object):
     def node(self):
         return self.edge.node
 
+    @property
+    def is_complete(self):
+        return self.node.is_thread_end
+
     @classmethod
     def new(cls, master_graph, keyword, component):
         assert isinstance(master_graph, MasterGraph)

@@ -3,9 +3,104 @@ from __future__ import print_function
 from collections import defaultdict
 
 from ...target import Target
+from ...target import Thread
+from ...target import Line
 from ...graph import MasterGraph
+from ...graph import Token
 from ...utils import Report
+from ..entities.threadins import BlankInterval
+from ..entities.threadins import Pace
 from ..entities.threadins import ThreadInstance
+from ..entities.threadins import ThreadInterval
+
+
+def _apply_token(token, threadins, line_obj):
+    assert isinstance(token, Token)
+    assert isinstance(threadins, ThreadInstance)
+    assert isinstance(line_obj, Line)
+    assert line_obj.keyword == token.keyword
+
+    edge = token.edge
+    pace = Pace(line_obj, token.from_node, edge, threadins)
+    if edge.joins_objs:
+        threadins.joins_paces.add(pace)
+    if edge.joined_objs:
+        threadins.joined_paces.add(pace)
+    if edge.left_interface:
+        threadins.leftinterface_paces.add(pace)
+    if edge.right_interface:
+        threadins.rightinterface_paces.add(pace)
+
+    for key in line_obj.keys:
+        if key in ("keyword", "time", "seconds"):
+            continue
+
+        new_val = line_obj[key]
+        if key in ("component", "target", "host", "thread"):
+            val = getattr(threadins, key)
+            if val != line_obj[key]:
+                raise StateError("(ThreadInstance) parse error: "
+                        "variable %s mismatch: %s is not %s!"
+                        % (key, val, new_val))
+            else:
+                pass
+        elif key == "request":
+            if new_val is None:
+                pass
+            elif threadins.request is None:
+                threadins.request = new_val
+            elif threadins.request != new_val:
+                raise StateError("(ThreadInstance) parse error: "
+                        "request mismatch: %s is not %s!"
+                        % (val, new_val))
+            else:
+                pass
+        else:
+            if key in threadins.thread_vars_dup:
+                threadins.thread_vars_dup[key].add(new_val)
+            else:
+                val = threadins.thread_vars.get(key)
+                if val is None:
+                    threadins.thread_vars[key] = new_val
+                elif val != new_val:
+                    threadins.thread_vars_dup[key].add(val)
+                    threadins.thread_vars_dup[key].add(new_val)
+                    threadins.thread_vars.pop(key)
+                else:
+                    pass
+
+    if threadins.intervals:
+        prv_pace = threadins.intervals[-1].to_pace
+        interval = ThreadInterval(prv_pace, pace)
+        threadins.intervals.append(interval)
+    elif threadins._start_pace:
+        interval = ThreadInterval(threadins._start_pace, pace)
+        threadins.intervals.append(interval)
+    else:
+        threadins._start_pace = pace
+        thread_obj = threadins.thread_obj
+        if thread_obj.threadinss:
+            BlankInterval(thread_obj.threadinss[-1].end_interval.to_pace, pace)
+
+    for mark in token.from_node.marks:
+        threadins.intervals_by_mark[mark].append(interval)
+
+
+def _try_create_threadins(mastergraph, line_obj, thread_obj):
+    assert isinstance(mastergraph, MasterGraph)
+    assert isinstance(line_obj, Line)
+    assert isinstance(thread_obj, Thread)
+
+    token = Token.new(mastergraph, line_obj.keyword, thread_obj.component)
+    if token:
+        threadins = ThreadInstance(thread_obj, token.thread_graph)
+        _apply_token(token, threadins, line_obj)
+        thread_obj.threadinss.append(threadins)
+    else:
+        threadins = None
+        # error: failed to create new graph
+        import pdb; pdb.set_trace()
+    return token, threadins
 
 
 def build_thread_instances(targetobjs, mastergraph, report):
@@ -19,40 +114,37 @@ def build_thread_instances(targetobjs, mastergraph, report):
     for target_obj in targetobjs:
         assert isinstance(target_obj, Target)
         for thread_obj in target_obj.thread_objs.itervalues():
-            threadins = None
-            cnt_valid_lineobjs = 0
+            assert isinstance(thread_obj, Thread)
+            token = None
+            ongoing_threadins = None
+            thread_valid_lineobjs = 0
             for line_obj in thread_obj.line_objs:
-                if threadins is not None:
-                    if threadins.step(line_obj):
-                        # success!
-                        pass
+                assert isinstance(line_obj, Line)
+                if token is not None:
+                    if token.step(line_obj.keyword):
+                        _apply_token(token, ongoing_threadins, line_obj)
                     else:
-                        threadins = None
-                if threadins is None:
-                    threadins = ThreadInstance.create(mastergraph,
-                                                      line_obj,
-                                                      thread_obj)
-                    if threadins is not None:
-                        thread_obj.threadinss.append(threadins)
-                    else:
-                        # error
-                        # print("(ParserEngine) parse error: cannot decide graph")
-                        # report_loglines(loglines, c_index)
-                        # print "-------- end -----------"
-                        # raise StateError("(ParserEngine) parse error: cannot decide graph")
-                        import pdb; pdb.set_trace()
-                if threadins is not None:
-                    cnt_valid_lineobjs += 1
+                        if not token.is_complete:
+                            # error: incomplete token
+                            import pdb; pdb.set_trace()
+                        token, ongoing_threadins = _try_create_threadins(
+                                mastergraph, line_obj, thread_obj)
+                else:
+                    token, ongoing_threadins = _try_create_threadins(
+                            mastergraph, line_obj, thread_obj)
+
+                if token is not None:
+                    thread_valid_lineobjs += 1
                     assert line_obj._assigned is not None
                 else:
                     thread_obj.dangling_lineobjs.append(line_obj)
                     assert line_obj._assigned is None
 
-            assert len(thread_obj.dangling_lineobjs) + cnt_valid_lineobjs\
+            assert len(thread_obj.dangling_lineobjs) + thread_valid_lineobjs\
                     == len(thread_obj.line_objs)
 
             thread_objs.append(thread_obj)
-            valid_lineobjs += cnt_valid_lineobjs
+            valid_lineobjs += thread_valid_lineobjs
     print("-------------------------")
 
     #### collect ####

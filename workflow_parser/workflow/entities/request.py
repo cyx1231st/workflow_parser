@@ -33,7 +33,7 @@ class RequestInstance(object):
         self.end_threadins = None
         self.last_threadins = None
 
-        self.paces_by_mark = defaultdict(list)
+        self.intervals_by_mark = defaultdict(list)
         self.len_paces = 0
 
         # interval
@@ -108,9 +108,9 @@ class RequestInstance(object):
                     or self.last_threadins.end_seconds < threadins.end_seconds:
                 self.last_threadins = threadins
 
-            # paces_by_mark
-            for mark, paces in threadins.paces_by_mark.iteritems():
-                self.paces_by_mark[mark].extend(paces)
+            # intervals_by_mark
+            for mark, intervals in threadins.intervals_by_mark.iteritems():
+                self.intervals_by_mark[mark].extend(intervals)
 
             # request vars
             self.request_vars["thread"].add(threadins.target+":"+threadins.thread)
@@ -121,7 +121,7 @@ class RequestInstance(object):
                 self.request_vars[key].add(val)
             for key, vals in threadins.thread_vars_dup.iteritems():
                 self.request_vars[key].update(vals)
-            self.len_paces += threadins.len_paces
+            self.len_paces += len(threadins.intervals)+1
 
             for joins_pace in threadins.joins_paces:
                 relation = joins_pace.joins_int
@@ -159,7 +159,7 @@ class RequestInstance(object):
 
         _process(self.start_threadins)
 
-        self.threadinss.sort(key=lambda ti: ti.start_pace.seconds)
+        self.threadinss.sort(key=lambda ti: ti.start_seconds)
 
         # error: incomplete threads
         if self.e_incomplete_threadinss:
@@ -233,7 +233,7 @@ class RequestInstance(object):
 
     @property
     def request_type(self):
-        return self.start_threadins.start_pace.from_node.request_name
+        return self.start_threadins.start_interval.from_node.request_name
 
     @property
     def components(self):

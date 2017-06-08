@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from abc import ABCMeta
 from collections import defaultdict
 from functools import total_ordering
@@ -9,9 +7,8 @@ from ...target import Line
 from ...target import Thread
 from ...graph import Edge
 from ...graph import JoinBase
-from ...graph import MasterGraph
 from ...graph import Node
-from ...graph import Token
+from ...graph import ThreadGraph
 
 
 @total_ordering
@@ -23,6 +20,7 @@ class Pace(object):
         assert isinstance(from_node, Node)
         assert isinstance(edge, Edge)
         assert isinstance(threadins, ThreadInstance)
+        assert line_obj.thread_obj is threadins.thread_obj
 
         self.line_obj = line_obj
         self.from_node = from_node
@@ -291,8 +289,6 @@ class ThreadIntervalBase(IntervalBase):
                                                  to_pace,
                                                  entity)
         assert from_pace.thread_obj is to_pace.thread_obj
-        self.thread_obj = from_pace.thread_obj
-
         assert from_pace.nxt_int is None
         assert to_pace.prv_int is None
         from_pace.nxt_int = self
@@ -315,8 +311,26 @@ class ThreadIntervalBase(IntervalBase):
         return self.thread_obj.thread
 
     @property
+    def thread_obj(self):
+        return self.from_pace.thread_obj
+
+    @property
     def target_obj(self):
         return self.thread_obj.target_obj
+
+    @property
+    def prv_int(self):
+        prv_int = self.from_pace.prv_int
+        if prv_int:
+            assert isinstance(prv_int, ThreadIntervalBase)
+        return prv_int
+
+    @property
+    def nxt_int(self):
+        nxt_int = self.to_pace.nxt_int
+        if nxt_int:
+            assert isinstance(nxt_int, ThreadIntervalBase)
+        return nxt_int
 
 
 class BlankInterval(ThreadIntervalBase):
@@ -367,76 +381,46 @@ class ThreadInterval(ThreadIntervalBase):
         return self.threadins.requestins
 
     @property
-    def color(self):
-        return self.component.color
-
-    @property
-    def prv_int(self):
-        prv_int = self.from_pace.prv_int
-        if isinstance(prv_int, ThreadInterval):
-            return prv_int
-        else:
-            return None
-
-    @property
-    def nxt_int(self):
-        nxt_int = self.to_pace.nxt_int
-        if isinstance(nxt_int, ThreadInterval):
-            return nxt_int
-        else:
-            return None
-
-    @property
     def prv_main(self):
         assert self.is_main
 
-        if self.prv_int and not self.prv_int.is_lock:
-            if self.joined_int:
-                e = StateError("Both prv_int and joined_int are accetable")
-                e.where = self.node.name
-                raise e
-            return self.prv_int
-        elif self.prv_int:
-            if self.joined_int:
-                ret = self.joined_int
+        if isinstance(self.prv_int, ThreadInterval):
+            if self.prv_int.is_lock:
+                if self.joined_int:
+                    ret = self.joined_int
+                else:
+                    ret = self.prv_int
             else:
+                if self.joined_int:
+                    e = StateError("Both prv_int and joined_int are accetable")
+                    e.where = self.node.name
+                    raise e
                 ret = self.prv_int
         else:
             ret = self.joined_int
-        if not ret or ret is empty_join:
-            if self.is_request_start:
-                return None
-            else:
-                e = StateError("The thread path backward is empty")
-                e.where = self.node.name
-                raise e
-        return ret
+
+        if not ret and self.is_request_start:
+            return None
+        elif not ret or ret is empty_join:
+            e = StateError("The thread path backward is empty")
+            e.where = self.node.name
+            raise e
+        else:
+            return ret
 
     @property
     def nxt_main(self):
         assert self.is_main
-        if self.nxt_int and self.nxt_int.is_main:
-            # self.joins_int cannot be main
+
+        if isinstance(self.nxt_int, ThreadInterval) and\
+                self.nxt_int.is_main:
             assert not self.joins_int or not self.joins_int.is_main
             return self.nxt_int
-        elif self.nxt_int:
-            if self.joins_int and self.joins_int.is_main:
-                return self.joins_int
-            elif self.joins_int:
-                # self.nxt_int nor self.joins_int is main
-                assert False
-            else:
-                assert self.is_request_end
-                return None
-        else:
-            if self.joins_int and self.joins_int.is_main:
-                return self.joins_int
-            elif self.joins_int:
-                assert self.is_request_end
-                return None
-            else:
-                assert self.is_request_end
-                return None
+        elif self.joins_int and self.joins_int.is_main:
+            return self.joins_int
+
+        assert self.is_request_end
+        return None
 
     # inheritance
     @property
@@ -456,6 +440,10 @@ class ThreadInterval(ThreadIntervalBase):
         return self.to_node.is_thread_end
 
     @property
+    def request_state(self):
+        return self.to_node.request_state
+
+    @property
     def path_type(self):
         if self.is_lock:
             return "lock"
@@ -468,27 +456,27 @@ class ThreadInterval(ThreadIntervalBase):
 
 
 class ThreadInstance(object):
-    def __init__(self, thread_obj, token, line_obj):
+    def __init__(self, thread_obj, threadgraph):
         assert isinstance(thread_obj, Thread)
-        assert isinstance(token, Token)
-        assert isinstance(line_obj, Line)
+        assert isinstance(threadgraph, ThreadGraph)
 
         self.thread_obj = thread_obj
-        self.token = token
+        self.threadgraph = threadgraph
 
         self.thread_vars = {}
         self.thread_vars_dup = defaultdict(set)
 
-        self.paces = []
-        self.paces_by_mark = defaultdict(list)
-
+        self._start_pace = None
         self.intervals = []
+        self.intervals_by_mark = defaultdict(list)
 
+        # join requirements from edges
         self.joined_paces = set()
         self.joins_paces = set()
         self.leftinterface_paces = set()
         self.rightinterface_paces = set()
 
+        # join results from schema engine
         self.joined_ints = set()
         self.joins_ints = set()
         self.interfacejoined_ints = set()
@@ -498,10 +486,6 @@ class ThreadInstance(object):
 
         self.request = None
         self.requestins = None
-
-        # init
-        self._apply_token(line_obj)
-        assert self.paces
 
     @property
     def thread(self):
@@ -520,48 +504,40 @@ class ThreadInstance(object):
         return self.thread_obj.host
 
     @property
-    def threadgraph(self):
-        return self.token.thread_graph
-
-    @property
     def target_obj(self):
         return self.thread_obj.target_obj
 
     @property
+    def start_interval(self):
+        return self.intervals[0]
+
+    @property
+    def end_interval(self):
+        return self.intervals[-1]
+
+    @property
     def request_state(self):
-        return self.end_pace.request_state
+        return self.end_interval.request_state
 
     @property
     def is_request_start(self):
-        return self.paces[0].from_node.is_request_start
+        return self.start_interval.is_request_start
 
     @property
     def is_request_end(self):
-        return self.paces[-1].to_node.is_request_end
+        return self.end_interval.is_request_end
 
     @property
     def is_complete(self):
-        return self.paces[-1].to_node.is_thread_end
-
-    @property
-    def start_pace(self):
-        return self.paces[0]
-
-    @property
-    def end_pace(self):
-        return self.paces[-1]
-
-    @property
-    def len_paces(self):
-        return len(self.paces)
+        return self.end_interval.is_thread_end
 
     @property
     def start_seconds(self):
-        return self.paces[0].seconds
+        return self.start_interval.from_seconds
 
     @property
     def end_seconds(self):
-        return self.paces[-1].seconds
+        return self.end_interval.to_seconds
 
     @property
     def lapse(self):
@@ -569,11 +545,29 @@ class ThreadInstance(object):
 
     @property
     def start_time(self):
-        return self.paces[0].time
+        return self.start_interval.from_time
 
     @property
     def end_time(self):
-        return self.paces[-1].time
+        return self.end_interval.to_time
+
+    @property
+    def prv_threadins(self):
+        prv_int = self.start_interval.prv_int
+        if prv_int is not None:
+            assert isinstance(prv_int, BlankInterval)
+            return prv_int.from_threadins
+        else:
+            return None
+
+    @property
+    def nxt_threadins(self):
+        nxt_int = self.end_interval.nxt_int
+        if nxt_int is not None:
+            assert isinstance(nxt_int, BlankInterval)
+            return nxt_int.to_threadins
+        else:
+            return None
 
     def __str__(self):
         mark_str = ""
@@ -583,14 +577,15 @@ class ThreadInstance(object):
             mark_str += ", RSTART"
         if self.is_request_end:
             mark_str += ", REND"
-        if self.paces_by_mark:
-            mark_str += ", %dMARKS" % len(self.paces_by_mark)
+        if self.intervals_by_mark:
+            mark_str += ", %dMARKS" % len(self.intervals_by_mark)
 
-        return "<ThIns#%s-%s: log#%d, comp#%s, host#%s, graph#%s, "\
+        return "<ThIns#%s-%s: len#%d, lapse#%f, comp#%s, host#%s, graph#%s, "\
                "req#%s, %d(dup%d) vars, %d(act%d) joined_p, %d(act%d) joins_p%s>" % (
                 self.target,
                 self.thread,
-                self.len_paces,
+                len(self.intervals),
+                self.lapse,
                 self.component,
                 self.host,
                 self.threadgraph.name,
@@ -607,106 +602,24 @@ class ThreadInstance(object):
         ret_str = str(self)
         ret_str += "\n  %s" % self.threadgraph
         ret_str += "\n  Paces:"
-        for pace in self.paces:
+        for pace in self.iter_paces():
             ret_str += "\n  | %s" % pace.__str__thread__()
         return ret_str
 
-    @classmethod
-    def create(cls, master_graph, line_obj, thread_obj):
-        assert isinstance(master_graph, MasterGraph)
-        assert isinstance(line_obj, Line)
-        assert isinstance(thread_obj, Thread)
-
-        token = Token.new(master_graph, line_obj.keyword, thread_obj.component)
-        if token:
-            threadins = ThreadInstance(thread_obj, token, line_obj)
-            if thread_obj.threadinss:
-                BlankInterval(thread_obj.threadinss[-1].end_pace,
-                              threadins.start_pace)
-            return threadins
-        else:
-            return None
-
-    def report(self, reason):
-        print("(ThreadInstance) report: %s" % reason)
-        print("-------- Thread --------")
-        print("%r" % self)
-        # report_loglines(self.loglines, self.s_index, self.f_index)
-        print("-------- end -----------")
-
-    def _apply_token(self, line_obj):
-        assert isinstance(line_obj, Line)
-        assert line_obj.keyword == self.token.keyword
-
-        from_node = self.token.from_node
-        edge = self.token.edge
-        pace = Pace(line_obj, from_node, edge, self)
-        for mark in edge.marks:
-            self.paces_by_mark[mark].append(pace)
-        if edge.joins_objs:
-            self.joins_paces.add(pace)
-        if edge.joined_objs:
-            self.joined_paces.add(pace)
-        if edge.left_interface:
-            self.leftinterface_paces.add(pace)
-        if edge.right_interface:
-            self.rightinterface_paces.add(pace)
-        for key in line_obj.keys:
-            if key in ("keyword", "time", "seconds"):
-                continue
-
-            new_val = line_obj[key]
-            if key in ("component", "target", "host", "thread"):
-                val = getattr(self, key)
-                if val != line_obj[key]:
-                    import pdb; pdb.set_trace()
-                    self.report("Thread var %s=%s, conflicts %s"
-                            % (key, val, new_val))
-                    raise StateError("(ThreadInstance) parse error: variable mismatch")
-                else:
-                    pass
-            elif key == "request":
-                if new_val is None:
-                    pass
-                elif self.request is None:
-                    self.request = new_val
-                elif self.request != new_val:
-                    self.report("Thread request=%s, conflicts %s"
-                            % (self.request, new_val))
-                    raise StateError("(ThreadInstance) thread is not shared!")
-                else:
-                    pass
+    def iter_paces(self, reverse=False):
+        assert isinstance(reverse, bool)
+        if self.intervals:
+            if reverse is False:
+                yield self.intervals[0].from_pace
+                for interval in self.intervals:
+                    yield interval.to_pace
             else:
-                if key in self.thread_vars_dup:
-                    self.thread_vars_dup[key].add(new_val)
-                else:
-                    val = self.thread_vars.get(key)
-                    if val is None:
-                        self.thread_vars[key] = new_val
-                    elif val != new_val:
-                        self.thread_vars_dup[key].add(val)
-                        self.thread_vars_dup[key].add(new_val)
-                        self.thread_vars.pop(key)
-                    else:
-                        pass
-
-        if self.paces:
-            prv_pace = self.paces[-1]
-            interval = ThreadInterval(prv_pace, pace)
-            self.intervals.append(interval)
-
-        self.paces.append(pace)
-
-    def step(self, line_obj):
-        assert isinstance(line_obj, Line)
-
-        if self.token.step(line_obj.keyword):
-            self._apply_token(line_obj)
-            return True
-        else:
-            return False
+                yield self.intervals[-1].to_pace
+                for interval in reversed(self.intervals):
+                    yield interval.from_pace
 
 
+# TODO: move
 class JoinIntervalBase(IntervalBase):
     __metaclass__ = ABCMeta
 

@@ -24,6 +24,7 @@ class LogEngine(object):
         self.plugin = plugin
         self.report = report
 
+    # step1: load related log files
     def _loadfiles(self, log_folder):
         assert isinstance(log_folder, str)
         logfiles = []
@@ -49,6 +50,7 @@ class LogEngine(object):
 
         return logfiles
 
+    # step2: read lines from log files
     def _readfiles(self, logfiles_in):
         logfiles_by_errortype = defaultdict(list)
         logfiles_by_warntype = defaultdict(list)
@@ -62,7 +64,7 @@ class LogEngine(object):
         for logfile in logfiles_in:
             assert isinstance(logfile, LogFile)
 
-            logfile.read()
+            logfile.read(self.plugin)
             # ready line vars: time, seconds, keyword
             # ready target vars: component, host, target
 
@@ -139,6 +141,7 @@ class LogEngine(object):
 
         return logfiles
 
+    # step3: prepare Target, Thread and Line objects
     def _preparethreads(self, logfiles_in):
         hosts = set()
         target_objs = []
@@ -154,7 +157,7 @@ class LogEngine(object):
                                 logfile)
 
             index_thread = 0
-            for logline in logfile.yield_logs():
+            for logline in logfile.yield_logs(self.plugin):
                 assert isinstance(logline, LogLine)
                 assert logline.logfile is logfile
                 assert isinstance(logline.thread, str)

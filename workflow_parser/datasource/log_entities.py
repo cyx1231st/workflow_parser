@@ -270,16 +270,14 @@ class LogLine(object):
 class LogFile(object):
     _repr_lines_lim = 10
 
-    def __init__(self, f_name, f_dir, sr, plugin, vs):
+    def __init__(self, f_name, f_dir, sr, vs):
         assert isinstance(f_name, str)
         assert isinstance(f_dir, str)
         assert isinstance(sr, ServiceRegistry)
-        assert isinstance(plugin, DriverPlugin)
 
         self.filename = f_name
         self.dir_ = f_dir
         self.sr = sr
-        self.plugin = plugin
 
         # required after line parsed
         self.component = None
@@ -367,7 +365,7 @@ class LogFile(object):
         if f_name is None:
             return None
         else:
-            return cls(f_name, f_dir, sr, plugin, vs)
+            return cls(f_name, f_dir, sr, vs)
 
     def _yield_lines(self):
         with open(self.dir_, 'r') as reader:
@@ -376,10 +374,10 @@ class LogFile(object):
                 self.total_lines += 1
                 yield line
 
-    def _build_loglines(self, lines):
+    def _build_loglines(self, lines, plugin):
         for line in lines:
             assert isinstance(line, str)
-            ret, vs = self.plugin.do_filter_logline(line)
+            ret, vs = plugin.do_filter_logline(line)
             if not ret:
                 continue
             try:
@@ -417,9 +415,11 @@ class LogFile(object):
         for line in _flush_line():
             yield line
 
-    def read(self):
+    def read(self, plugin):
+        assert isinstance(plugin, DriverPlugin)
+
         lines = self._yield_lines()
-        lines = self._build_loglines(lines)
+        lines = self._build_loglines(lines, plugin)
         lines = self._buffer_lines(lines)
         self.loglines = list(lines)
 
@@ -437,13 +437,15 @@ class LogFile(object):
             self.errors["Require 'target' after read file"] = self
             return
 
-    def yield_logs(self):
+    def yield_logs(self, plugin):
+        assert isinstance(plugin, DriverPlugin)
+
         prv_line = None
         prv_line_by_thread = {}
         for line in self.loglines:
             assert isinstance(line, LogLine)
 
-            ret = self.plugin.do_preprocess_logline(line)
+            ret = plugin.do_preprocess_logline(line)
 
             thread = line.thread
             if thread is not None:
