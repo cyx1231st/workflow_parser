@@ -1,10 +1,15 @@
 from __future__ import print_function
 
 from collections import defaultdict
+from itertools import chain
 
 from ...utils import Report
 from ..entities.request import RequestInstance
 from ..entities.threadins import ThreadInstance
+from ..entities.join import EmptyJoin
+from ..entities.join import InnerjoinInterval
+from ..entities.join import InterfaceInterval
+from ..entities.join import InterfacejoinInterval
 
 
 # step 3: group threads by request
@@ -24,14 +29,31 @@ def group_threads(threadinss, report):
         if threadins.request:
             ret.add(threadins.request)
 
-        for joins_int in threadins.joins_ints:
-            ret.update(group(joins_int.to_threadins, t_set))
-        for joined_int in threadins.joined_ints:
-            ret.update(group(joined_int.from_threadins, t_set))
-        for ijoins_int in threadins.interfacejoins_ints:
-            ret.update(group(ijoins_int.to_threadins, t_set))
-        for ijoined_int in threadins.interfacejoined_ints:
-            ret.update(group(ijoined_int.from_threadins, t_set))
+        assert {InnerjoinInterval, InterfaceInterval, EmptyJoin} ==\
+               {InnerjoinInterval, InterfaceInterval, EmptyJoin} |\
+               threadins.joinedints_by_type.viewkeys()
+        assert {InnerjoinInterval, InterfaceInterval, EmptyJoin} ==\
+               {InnerjoinInterval, InterfaceInterval, EmptyJoin} |\
+               threadins.joinsints_by_type.viewkeys()
+        assert {InterfacejoinInterval, EmptyJoin} == \
+               {InterfacejoinInterval, EmptyJoin} |\
+               threadins.joinedinterfaceints_by_type.viewkeys()
+        assert {InterfacejoinInterval, EmptyJoin} == \
+               {InterfacejoinInterval, EmptyJoin} |\
+               threadins.joinsinterfaceints_by_type.viewkeys()
+
+        for joins_int in chain(
+                threadins.joinsints_by_type[InnerjoinInterval],
+                threadins.joinsints_by_type[InterfaceInterval]):
+            to_threadins = joins_int.to_threadins
+            assert to_threadins is not threadins
+            ret.update(group(to_threadins, t_set))
+        for joined_int in chain(
+                threadins.joinedints_by_type[InnerjoinInterval],
+                threadins.joinedints_by_type[InterfaceInterval]):
+            from_threadins = joined_int.from_threadins
+            assert from_threadins is not threadins
+            ret.update(group(from_threadins, t_set))
 
         return ret
     ##########################
@@ -69,12 +91,18 @@ def group_threads(threadinss, report):
                 threads.add(tis.thread_obj)
                 sum_dict['sum_tis'] += 1
                 sum_dict['sum_lines'] += len(tis.intervals)+1
-                sum_dict['sum_joins'] += len(tis.joins_ints)
-                sum_dict['sum_joined'] += len(tis.joined_ints)
-                sum_dict['sum_ijoins'] += len(tis.interfacejoins_ints)
-                sum_dict['sum_ijoined'] += len(tis.interfacejoined_ints)
-                sum_dict['sum_ljoin'] += len(tis.leftinterface_ints)
-                sum_dict['sum_rjoin'] += len(tis.rightinterface_ints)
+                sum_dict['sum_joins'] +=\
+                        len(tis.joinsints_by_type[InnerjoinInterval])
+                sum_dict['sum_joined'] +=\
+                        len(tis.joinedints_by_type[InnerjoinInterval])
+                sum_dict['sum_ijoins'] +=\
+                        len(tis.joinsints_by_type[InterfaceInterval])
+                sum_dict['sum_ijoined'] +=\
+                        len(tis.joinedints_by_type[InterfaceInterval])
+                sum_dict['sum_ljoin'] +=\
+                        len(tis.joinedinterfaceints_by_type[InterfacejoinInterval])
+                sum_dict['sum_rjoin'] +=\
+                        len(tis.joinsinterfaceints_by_type[InterfacejoinInterval])
 
     collect_group(threadgroup_by_request.itervalues())
     collect_group(threadgroups_without_request)
@@ -126,8 +154,10 @@ def group_threads(threadinss, report):
             # draw_engine.draw_debug_groups(reqs, i_group)
             join_ints = set()
             for ti in i_group:
-                join_ints.update(ti.joins_ints)
-                join_ints.update(ti.joined_ints)
+                join_ints.update(ti.joinsints_by_type[InnerjoinInterval])
+                join_ints.update(ti.joinsints_by_type[InterfaceInterval])
+                join_ints.update(ti.joinedints_by_type[InnerjoinInterval])
+                join_ints.update(ti.joinedints_by_type[InterfaceInterval])
             join_ints_by_obj = defaultdict(list)
             for join_int in join_ints:
                 join_ints_by_obj[join_int.join_obj].append(join_int)
@@ -231,14 +261,17 @@ def build_requests(threadgroup_by_request, mastergraph, report):
         for k, vs in requestins.request_vars.iteritems():
             requests_vars[k].update(vs)
 
-        innerjoin_intervals.update(requestins.join_ints)
-        interface_intervals.update(requestins.interface_ints)
-        linterfaces.update(requestins.l_interface_joins)
-        rinterfaces.update(requestins.r_interface_joins)
-        for j_ins in requestins.join_ints:
+        innerjoin_intervals.update(requestins.joinints_by_type[InnerjoinInterval])
+        interface_intervals.update(requestins.joinints_by_type[InterfaceInterval])
+        linterfaces.update(requestins.joinedinterfaceints_by_type[InterfacejoinInterval])
+        rinterfaces.update(requestins.joinsinterfaceints_by_type[InterfacejoinInterval])
+        for j_ins in chain(requestins.joinints_by_type[InnerjoinInterval],
+                           requestins.joinints_by_type[InterfaceInterval],
+                           requestins.joinedinterfaceints_by_type[InterfacejoinInterval],
+                           requestins.joinsinterfaceints_by_type[InterfacejoinInterval]):
             join_intervals_by_type[j_ins.join_type].add(j_ins)
-        thread_intervals.update(requestins.td_ints)
-        extended_intervals.update(requestins.intervals_extended)
+        thread_intervals.update(requestins.thread_ints)
+        extended_intervals.update(requestins.extended_ints)
 
     #### summary ####
     print("%d valid request instances with %d thread instances"
@@ -262,8 +295,8 @@ def build_requests(threadgroup_by_request, mastergraph, report):
                 thread=len(thread_objs),
                 request=len(requestinss),
                 threadins=len(threadinss),
-                innerjoin=len(innerjoin_intervals)-len(interface_intervals),
-                innerjoined=len(innerjoin_intervals)-len(interface_intervals),
+                innerjoin=len(innerjoin_intervals),
+                innerjoined=len(innerjoin_intervals),
                 interfacejoin=len(interface_intervals),
                 interfacejoined=len(interface_intervals),
                 leftinterface=len(linterfaces),

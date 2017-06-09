@@ -1,12 +1,132 @@
 from abc import ABCMeta
 
+from ...graph import JoinBase
 from ...graph import InnerJoin
 from ...graph import InterfaceJoin
 from ...graph import RequestInterface
 from .threadins import IntervalBase
-from .threadins import JoinIntervalBase
 from .threadins import Pace
 from .threadins import ThreadInterval
+
+
+class JoinIntervalBase(IntervalBase):
+    __metaclass__ = ABCMeta
+
+    joinobj_type = JoinBase
+    entity_joins_int = "Error not assigned"
+    entity_joined_int = "Error not assigned"
+
+    def __init__(self, join_obj, from_entity, to_entity):
+        if isinstance(from_entity, Pace):
+            from_pace = from_entity
+        else:
+            from_pace = from_entity.from_pace
+        if isinstance(to_entity, Pace):
+            to_pace = to_entity
+        else:
+            to_pace = to_entity.to_pace
+        super(JoinIntervalBase, self).__init__(from_pace, to_pace, join_obj)
+
+        assert isinstance(join_obj, self.joinobj_type)
+        if not self.is_remote:
+            assert self.from_targetobj is self.to_targetobj
+        assert self.from_threadobj is not self.to_threadobj
+
+        assert getattr(from_entity, self.entity_joins_int) is None
+        assert getattr(to_entity, self.entity_joined_int) is None
+        setattr(from_entity, self.entity_joins_int, self)
+        setattr(to_entity, self.entity_joined_int, self)
+
+    @property
+    def join_obj(self):
+        return self.entity
+
+    @property
+    def is_remote(self):
+        return self.join_obj.is_remote
+
+    @property
+    def from_threadins(self):
+        return self.from_pace.threadins
+
+    @property
+    def to_threadins(self):
+        return self.to_pace.threadins
+
+    @property
+    def from_host(self):
+        return self.from_pace.host
+
+    @property
+    def to_host(self):
+        return self.to_pace.host
+
+    @property
+    def from_component(self):
+        return self.from_pace.component
+
+    @property
+    def to_component(self):
+        return self.to_pace.component
+
+    @property
+    def from_target(self):
+        return self.from_pace.target
+
+    @property
+    def to_target(self):
+        return self.to_pace.target
+
+    @property
+    def from_threadobj(self):
+        return self.from_pace.thread_obj
+
+    @property
+    def to_threadobj(self):
+        return self.to_pace.thread_obj
+
+    @property
+    def from_targetobj(self):
+        return self.from_pace.target_obj
+
+    @property
+    def to_targetobj(self):
+        return self.to_pace.target_obj
+
+    @property
+    def join_type(self):
+        if self.is_remote and self.from_host != self.to_host:
+            return "remote"
+        elif self.is_remote:
+            return "local_remote"
+        else:
+            return "local"
+
+    def __str__marks__(self):
+        return ""
+
+    def __repr__(self):
+        return "<%s#%s %f -> %f, %s -> %s%s>" % (
+                self.__class__.__name__,
+                self.name,
+                self.from_seconds, self.to_seconds,
+                self.from_host, self.to_host,
+                self.__str__marks__())
+
+
+class EmptyJoin(JoinIntervalBase):
+    def __init__(self, from_pace=None, to_pace=None):
+        self.name = "EMPTY"
+        self.from_pace = from_pace
+        self.to_pace = to_pace
+
+    def __repr__(self):
+        info = ""
+        if self.from_pace:
+            info += "%s ->|" % self.from_pace.keyword
+        if self.to_pace:
+            info += "|-> %s" % self.to_pace.keyword
+        return "<EMPTYJOIN: %s>" % info
 
 
 class InnerjoinIntervalBase(JoinIntervalBase):
@@ -16,6 +136,9 @@ class InnerjoinIntervalBase(JoinIntervalBase):
 
     def __init__(self, join_obj, from_pace, to_pace):
         super(InnerjoinIntervalBase, self).__init__(join_obj, from_pace, to_pace)
+
+        self.from_threadins.joinsints_by_type[self.__class__].add(self)
+        self.to_threadins.joinedints_by_type[self.__class__].add(self)
 
     @property
     def joined_int(self):
@@ -36,21 +159,6 @@ class InnerjoinIntervalBase(JoinIntervalBase):
         assert from_ is to_
         return from_
 
-    @property
-    def prv_main(self):
-        assert self.is_main
-
-        if not self.joined_int:
-            e = StateError("ERROR joined_int is empty")
-            e.where = self.join_obj.name
-        return self.joined_int
-
-    @property
-    def nxt_main(self):
-        assert self.is_main
-        assert self.joins_int and self.joins_int.is_main
-        return self.joins_int
-
     @classmethod
     def create(cls, join_obj, from_item, to_item):
         if isinstance(join_obj, RequestInterface):
@@ -63,9 +171,6 @@ class InnerjoinIntervalBase(JoinIntervalBase):
 class InnerjoinInterval(InnerjoinIntervalBase):
     def __init__(self, join_obj, from_pace, to_pace):
         super(InnerjoinInterval, self).__init__(join_obj, from_pace, to_pace)
-
-        self.from_threadins.joins_ints.add(self)
-        self.to_threadins.joined_ints.add(self)
 
     # @property
     # def color(self):
@@ -96,9 +201,6 @@ class InterfaceInterval(InnerjoinIntervalBase):
         super(InterfaceInterval, self).__init__(join_obj, from_pace, to_pace)
         self.joins_crossrequest_int = None
         self.joined_crossrequest_int = None
-
-        self.from_threadins.interfacejoins_ints.add(self)
-        self.to_threadins.interfacejoined_ints.add(self)
 
     def __str__marks__(self):
         str_marks = super(InterfaceInterval, self).__str__marks__()
@@ -138,10 +240,10 @@ class InterfacejoinInterval(JoinIntervalBase):
 
         if join_obj.is_left:
             assert self.from_pace is self.interface_int.from_pace
-            self.to_threadins.leftinterface_ints.add(self)
+            self.to_threadins.joinedinterfaceints_by_type[self.__class__].add(self)
         else:
             assert self.to_pace is self.interface_int.to_pace
-            self.from_threadins.rightinterface_ints.add(self)
+            self.from_threadins.joinsinterfaceints_by_type[self.__class__].add(self)
 
     @property
     def is_left(self):

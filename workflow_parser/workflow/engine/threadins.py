@@ -14,7 +14,7 @@ from ..entities.threadins import ThreadInstance
 from ..entities.threadins import ThreadInterval
 
 
-def _apply_token(token, threadins, line_obj):
+def _apply_token(token, threadins, line_obj, join_info):
     assert isinstance(token, Token)
     assert isinstance(threadins, ThreadInstance)
     assert isinstance(line_obj, Line)
@@ -23,13 +23,13 @@ def _apply_token(token, threadins, line_obj):
     edge = token.edge
     pace = Pace(line_obj, token.from_node, edge, threadins)
     if edge.joins_objs:
-        threadins.joins_paces.add(pace)
+        join_info["innerjoin"]["joins"].append((pace, edge.joins_objs))
     if edge.joined_objs:
-        threadins.joined_paces.add(pace)
-    if edge.left_interface:
-        threadins.leftinterface_paces.add(pace)
-    if edge.right_interface:
-        threadins.rightinterface_paces.add(pace)
+        join_info["innerjoin"]["joined"].append((pace, edge.joined_objs))
+    if edge.joined_interface:
+        join_info["crossjoin"]["joined"].append((pace, edge.joined_interface))
+    if edge.joins_interface:
+        join_info["crossjoin"]["joins"].append((pace, edge.joins_interface))
 
     for key in line_obj.keys:
         if key in ("keyword", "time", "seconds"):
@@ -86,7 +86,7 @@ def _apply_token(token, threadins, line_obj):
         threadins.intervals_by_mark[mark].append(interval)
 
 
-def _try_create_threadins(mastergraph, line_obj, thread_obj):
+def _try_create_threadins(mastergraph, line_obj, thread_obj, join_info):
     assert isinstance(mastergraph, MasterGraph)
     assert isinstance(line_obj, Line)
     assert isinstance(thread_obj, Thread)
@@ -94,7 +94,7 @@ def _try_create_threadins(mastergraph, line_obj, thread_obj):
     token = Token.new(mastergraph, line_obj.keyword, thread_obj.component)
     if token:
         threadins = ThreadInstance(thread_obj, token.thread_graph)
-        _apply_token(token, threadins, line_obj)
+        _apply_token(token, threadins, line_obj, join_info)
         thread_obj.threadinss.append(threadins)
     else:
         threadins = None
@@ -103,15 +103,16 @@ def _try_create_threadins(mastergraph, line_obj, thread_obj):
     return token, threadins
 
 
-def build_thread_instances(targetobjs, mastergraph, report):
+def build_thread_instances(target_objs, mastergraph, report):
     assert isinstance(mastergraph, MasterGraph)
     assert isinstance(report, Report)
 
     valid_lineobjs = 0
     thread_objs = []
+    join_info = defaultdict(lambda: defaultdict(list))
 
     print("Build thread instances...")
-    for target_obj in targetobjs:
+    for target_obj in target_objs.itervalues():
         assert isinstance(target_obj, Target)
         for thread_obj in target_obj.thread_objs.itervalues():
             assert isinstance(thread_obj, Thread)
@@ -122,16 +123,17 @@ def build_thread_instances(targetobjs, mastergraph, report):
                 assert isinstance(line_obj, Line)
                 if token is not None:
                     if token.step(line_obj.keyword):
-                        _apply_token(token, ongoing_threadins, line_obj)
+                        _apply_token(token, ongoing_threadins, line_obj,
+                                     join_info)
                     else:
                         if not token.is_complete:
                             # error: incomplete token
                             import pdb; pdb.set_trace()
                         token, ongoing_threadins = _try_create_threadins(
-                                mastergraph, line_obj, thread_obj)
+                                mastergraph, line_obj, thread_obj, join_info)
                 else:
                     token, ongoing_threadins = _try_create_threadins(
-                            mastergraph, line_obj, thread_obj)
+                            mastergraph, line_obj, thread_obj, join_info)
 
                 if token is not None:
                     thread_valid_lineobjs += 1
@@ -157,10 +159,10 @@ def build_thread_instances(targetobjs, mastergraph, report):
     complete_threadinss_by_graph = defaultdict(list)
     start_threadinss = []
     duplicated_vars = set()
-    cnt_innerjoins_paces = 0
-    cnt_innerjoined_paces = 0
-    cnt_leftinterface_paces = 0
-    cnt_rightinterface_paces = 0
+    cnt_innerjoins_paces = len(join_info["innerjoin"]["joins"])
+    cnt_innerjoined_paces = len(join_info["innerjoin"]["joined"])
+    cnt_joinedinterface_paces = len(join_info["crossjoin"]["joined"])
+    cnt_joinsinterface_paces = len(join_info["crossjoin"]["joins"])
 
     for thread_obj in thread_objs:
         if thread_obj.dangling_lineobjs:
@@ -181,10 +183,6 @@ def build_thread_instances(targetobjs, mastergraph, report):
                 start_threadinss.append(threadins)
             threadinss.append(threadins)
             duplicated_vars.update(threadins.thread_vars_dup.keys())
-            cnt_innerjoins_paces += len(threadins.joins_paces)
-            cnt_innerjoined_paces += len(threadins.joined_paces)
-            cnt_leftinterface_paces += len(threadins.leftinterface_paces)
-            cnt_rightinterface_paces += len(threadins.rightinterface_paces)
 
     #### summary ####
     print("%d valid line_objs" % valid_lineobjs)
@@ -207,8 +205,8 @@ def build_thread_instances(targetobjs, mastergraph, report):
                 threadins=len(threadinss),
                 innerjoin=cnt_innerjoins_paces,
                 innerjoined=cnt_innerjoined_paces,
-                leftinterface=cnt_leftinterface_paces,
-                rightinterface=cnt_rightinterface_paces)
+                leftinterface=cnt_joinedinterface_paces,
+                rightinterface=cnt_joinsinterface_paces)
 
     #### errors #####
     if ignored_lineobjs_by_component:
@@ -243,4 +241,4 @@ def build_thread_instances(targetobjs, mastergraph, report):
             print("  %s: %d t_instances" % (gname, len(tis)))
         print()
 
-    return threadinss
+    return threadinss, join_info

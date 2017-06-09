@@ -12,11 +12,12 @@ class StateEngine(object):
         self.mastergraph = mastergraph
         self.report = report
 
-    def proceed(self, targetobjs):
-        threadinss = build_thread_instances(targetobjs,
-                                            self.mastergraph,
-                                            self.report)
-        relations_list = join_paces(threadinss,
+    def proceed(self, target_objs):
+        threadinss, join_info = build_thread_instances(target_objs,
+                                                       self.mastergraph,
+                                                       self.report)
+        relations_list = join_paces(join_info,
+                                    target_objs,
                                     self.mastergraph,
                                     self.report)
         threadgroup_by_request = group_threads(threadinss,

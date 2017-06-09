@@ -2,11 +2,11 @@ from collections import defaultdict
 
 from ...graph import MasterGraph
 from ..engine.exc import StateError
+from .join import EmptyJoin
 from .join import InnerjoinInterval
 from .join import InnerjoinIntervalBase
 from .join import InterfaceInterval
 from .join import InterfacejoinInterval
-from .threadins import empty_join
 from .threadins import IntervalBase
 from .threadins import ThreadInstance
 from .threadins import ThreadInterval
@@ -27,22 +27,22 @@ class RequestInstance(object):
         self.request = request
         self.mastergraph = mastergraph
         self.request_vars = defaultdict(set)
-
-        self.threadinss = []
-        self.start_threadins = None
-        self.end_threadins = None
-        self.last_threadins = None
-
-        self.intervals_by_mark = defaultdict(list)
         self.len_paces = 0
 
+        self.threadinss = []
+
         # interval
-        self.join_ints = set()
-        self.interface_ints = set()
-        self.l_interface_joins = set()
-        self.r_interface_joins = set()
-        self.td_ints = set()
-        self.intervals_extended = []
+        self.start_interval = None
+        self.end_interval = None
+        self.last_interval = None
+        self.thread_ints = set()
+        self.intervals_by_mark = defaultdict(list)
+
+        self.joinints_by_type = defaultdict(set)
+        self.joinedinterfaceints_by_type = defaultdict(set)
+        self.joinsinterfaceints_by_type = defaultdict(set)
+
+        self.extended_ints = []
 
         # error report
         self.errors = {}
@@ -63,20 +63,20 @@ class RequestInstance(object):
             threadins.requestins = self
             threadins.request = request
             if threadins.is_request_start:
-                if self.start_threadins is not None:
+                if self.start_interval is not None:
                     self.e_extra_s_threadinss.add(threadins)
                 else:
-                    self.start_threadins = threadins
+                    self.start_interval = threadins.start_interval
 
         # error: multiple start threads
         if self.e_extra_s_threadinss:
-            self.e_extra_s_threadinss.add(self.start_threadins)
+            self.e_extra_s_threadinss.add(self.start_interval.threadins)
             error_str = "\n".join("%r" % ti for ti in self.e_extra_s_threadinss)
-            self.errors["Has multiple start threads"] = error_str
+            self.errors["Has multiple start intervals"] = error_str
 
         # error: no start thread
-        if self.start_threadins is None:
-            self.errors["Contains no start thread"] = ""
+        if self.start_interval is None:
+            self.errors["Contains no start interval"] = ""
             return
 
         seen_tis = set()
@@ -88,25 +88,25 @@ class RequestInstance(object):
 
             # threadinss
             self.threadinss.append(threadins)
-            self.td_ints.update(threadins.intervals)
+            self.thread_ints.update(threadins.intervals)
 
             # incomplete_threadinss
             if not threadins.is_complete:
                 self.e_incomplete_threadinss.add(threadins)
 
-            # end_threadins
+            # end_interval
             r_state = threadins.request_state
             if r_state:
                 assert threadins.is_request_end is True
-                if self.end_threadins:
+                if self.end_interval:
                     self.e_extra_e_threadinss.add(threadins)
                 else:
-                    self.end_threadins = threadins
+                    self.end_interval = threadins.end_interval
 
             # last_theadins
-            if self.last_threadins is None \
-                    or self.last_threadins.end_seconds < threadins.end_seconds:
-                self.last_threadins = threadins
+            if self.last_interval is None \
+                    or self.last_interval.to_seconds < threadins.end_seconds:
+                self.last_interval = threadins.end_interval
 
             # intervals_by_mark
             for mark, intervals in threadins.intervals_by_mark.iteritems():
@@ -123,41 +123,33 @@ class RequestInstance(object):
                 self.request_vars[key].update(vals)
             self.len_paces += len(threadins.intervals)+1
 
-            for joins_pace in threadins.joins_paces:
-                relation = joins_pace.joins_int
-                if relation is empty_join:
-                    # cnt_unjoined_paces_by_edgename
-                    self.e_unjoins_paces_by_edge[joins_pace.edge].add(joins_pace)
-                else:
-                    assert isinstance(relation, InnerjoinIntervalBase)
-                    assert joins_pace.joins_pace.joined_pace is joins_pace
-                    if isinstance(relation, InnerjoinInterval):
-                        pass
-                    else:
-                        assert isinstance(relation, InterfaceInterval)
-                        self.interface_ints.add(relation)
-                        reqjoins = relation.joins_crossrequest_int
-                        if reqjoins is empty_join:
-                            self.e_unjoins_paces_by_edge[relation.join_obj].add(relation)
-                    self.join_ints.add(relation)
-                    _process(joins_pace.joins_pace.threadins)
-            for ljoin_pace in threadins.leftinterface_paces:
-                relation = ljoin_pace.joined_crossrequest_int
-                if relation is empty_join:
-                    self.e_unjoins_paces_by_edge[ljoin_pace.edge].add(ljoin_pace)
-                else:
-                    assert isinstance(relation, InterfacejoinInterval)
-                    self.l_interface_joins.add(relation)
-            for rjoin_pace in threadins.rightinterface_paces:
-                relation = rjoin_pace.joins_crossrequest_int
-                if relation is empty_join:
-                    self.e_unjoins_paces_by_edge[rjoin_pace.edge].add(rjoin_pace)
-                else:
-                    assert isinstance(relation, InterfacejoinInterval)
-                    self.r_interface_joins.add(relation)
+            for joins_int in threadins.joinsints_by_type[EmptyJoin]:
+                self.joinints_by_type[EmptyJoin].add(joins_int)
+                unjoins_pace = joins_int.from_pace
+                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
+            for joins_int in threadins.joinsints_by_type[InnerjoinInterval]:
+                self.joinints_by_type[InnerjoinInterval].add(joins_int)
+                _process(joins_int.to_threadins)
+            for joins_int in threadins.joinsints_by_type[InterfaceInterval]:
+                reqjoins = joins_int.joins_crossrequest_int
+                if isinstance(reqjoins, EmptyJoin):
+                    self.e_unjoins_paces_by_edge[joins_int.join_obj].add(joins_int)
+                self.joinints_by_type[InterfaceInterval].add(joins_int)
+                _process(joins_int.to_threadins)
 
+            for joins_int in threadins.joinsinterfaceints_by_type[InterfacejoinInterval]:
+                self.joinsinterfaceints_by_type[InterfacejoinInterval].add(joins_int)
+            for joins_int in threadins.joinsinterfaceints_by_type[EmptyJoin]:
+                self.joinsinterfaceints_by_type[EmptyJoin].add(joins_int)
+                unjoins_pace = joins_int.from_pace
+                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
 
-        _process(self.start_threadins)
+            for joined_int in threadins.joinedinterfaceints_by_type[InterfacejoinInterval]:
+                self.joinedinterfaceints_by_type[InterfacejoinInterval].add(joined_int)
+            for joined_int in threadins.joinedinterfaceints_by_type[EmptyJoin]:
+                self.joinedinterfaceints_by_type[EmptyJoin].add(joined_int)
+
+        _process(self.start_interval.threadins)
 
         self.threadinss.sort(key=lambda ti: ti.start_seconds)
 
@@ -168,53 +160,44 @@ class RequestInstance(object):
 
         # error: multiple end threads
         if self.e_extra_e_threadinss:
-            self.e_extra_e_threadinss.add(self.end_threadins)
+            self.e_extra_e_threadinss.add(self.end_interval.threadins)
             err_str = "\n".join("%r" % ti for ti in self.e_extra_e_threadinss)
-            self.errors["Has multiple end threads"] = err_str
+            self.errors["Has multiple end intervals"] = err_str
 
-        _main_tis = set()
         # error: no end thread
-        if not self.end_threadins:
-            self.errors["Contains no end thread"] = ""
+        if not self.end_interval:
+            self.errors["Contains no end interval"] = ""
         else:
             int_extended = []
-            int_ = self.end_interval
-            assert isinstance(int_, ThreadInterval)
-            to_pace = None
             try:
-                while int_:
-                    int_.is_main = True
+                last_int = None
+                for int_ in self.iter_mainpath(reverse=True):
                     if isinstance(int_, ThreadInterval):
-                        ti = int_.threadins
-                        if ti not in _main_tis:
-                            _main_tis.add(ti)
-                        if to_pace is None:
-                            to_pace = int_.to_pace
+                        if last_int is None:
+                            last_int = int_
                     else:
-                        if to_pace is not None:
+                        assert isinstance(int_, InnerjoinIntervalBase)
+                        if last_int is not None:
                             int_extended.append(
                                     RequestInterval(int_.to_pace,
-                                                    to_pace))
-                            to_pace = int_.from_pace
+                                                    last_int.to_pace))
+                            last_int = None
                         else:
                             assert False
                         int_extended.append(int_)
-                    int_ = int_.prv_main
+                int_extended.append(
+                        RequestInterval(self.start_interval.from_pace,
+                                        last_int.to_pace))
             except StateError as e:
                 self.errors["Main route parse error"] = (int_, e)
             else:
-                if to_pace is not None:
-                    int_extended.append(
-                            RequestInterval(self.start_interval.from_pace,
-                                            to_pace))
                 for tint in reversed(int_extended):
-                    if self.intervals_extended:
-                        assert self.intervals_extended[-1].to_pace is tint.from_pace
+                    if self.extended_ints:
+                        assert self.extended_ints[-1].to_pace is tint.from_pace
                     else:
                         assert tint.from_pace is self.start_interval.from_pace
-                    self.intervals_extended.append(tint)
-                assert self.intervals_extended[-1].to_pace\
-                        is self.end_interval.to_pace
+                    self.extended_ints.append(tint)
+                assert self.extended_ints[-1].to_pace is self.end_interval.to_pace
 
         # error: stray thread instances
         self.e_stray_threadinss = tis - seen_tis
@@ -233,7 +216,7 @@ class RequestInstance(object):
 
     @property
     def request_type(self):
-        return self.start_threadins.start_interval.from_node.request_name
+        return self.start_interval.from_node.request_name
 
     @property
     def components(self):
@@ -264,40 +247,40 @@ class RequestInstance(object):
         return ret
 
     @property
-    def start_interval(self):
-        return self.start_threadins.intervals[0]
-
-    @property
-    def end_interval(self):
-        return self.end_threadins.intervals[-1]
-
-    @property
     def request_state(self):
-        return self.end_threadins.request_state
+        if not self.end_interval:
+            return "NO END INTERVAL"
+        return self.end_interval.request_state
 
     @property
     def start_seconds(self):
-        return self.start_threadins.start_seconds
+        if not self.start_interval:
+            return -1
+        return self.start_interval.from_seconds
 
     @property
     def end_seconds(self):
-        return self.end_threadins.end_seconds
+        if not self.end_interval:
+            return -1
+        return self.end_interval.to_seconds
 
     @property
     def last_seconds(self):
-        return self.last_threadins.end_seconds
+        if not self.last_interval:
+            return -1
+        return self.last_interval.to_seconds
 
     @property
     def start_time(self):
-        return self.start_threadins.start_time
+        return self.start_interval.from_time
 
     @property
     def end_time(self):
-        return self.end_threadins.end_time
+        return self.end_interval.to_time
 
     @property
     def last_time(self):
-        return self.last_threadins.end_time
+        return self.last_interval.to_time
 
     @property
     def lapse(self):
@@ -328,10 +311,61 @@ class RequestInstance(object):
                                           len(self.hosts),
                                           len(self.threadinss))
 
-    def trace(self):
-        print("%r" % self)
-        int_ = self.end_interval
-        print("  %s" % int_.to_pace)
-        while(int_):
-            print("  %s" % int_.from_pace)
-            int_ = int_.prv_main
+    def iter_mainpath(self, reverse=False):
+        assert isinstance(reverse, bool)
+        if reverse:
+            interval = self.end_interval
+            while interval:
+                interval.is_main = True
+                yield interval
+
+                next_i = None
+                if isinstance(interval, ThreadInterval):
+                    if isinstance(interval.prv_int, ThreadInterval):
+                        if interval.prv_int.is_lock:
+                            if interval.joined_int:
+                                next_i = interval.joined_int
+                            else:
+                                next_i = interval.prv_int
+                        else:
+                            if interval.joined_int:
+                                e = StateError("Both prv_int and joined_int are accetable")
+                                e.where = interval.node.name
+                                raise e
+                            next_i = interval.prv_int
+                    else:
+                        next_i = interval.joined_int
+                else:
+                    assert isinstance(interval, InnerjoinIntervalBase)
+                    next_i = interval.joined_int
+
+                if (next_i is None and not interval.is_request_start) or\
+                        isinstance(next_i, EmptyJoin):
+                    e = StateError("The path backward is empty")
+                    e.where = interval.entity.name
+                    raise e
+                interval = next_i
+        else:
+            interval = self.start_interval
+            while interval:
+                assert interval.is_main
+                yield interval
+
+                next_i = None
+                if isinstance(interval, ThreadInterval):
+                    if isinstance(interval.nxt_int, ThreadInterval) and\
+                            interval.nxt_int.is_main:
+                        assert not interval.joins_int or not interval.joins_int.is_main
+                        next_i = interval.nxt_int
+                    elif interval.joins_int and interval.joins_int.is_main:
+                        next_i = interval.joins_int
+                    else:
+                        next_i = None
+                else:
+                    assert isinstance(interval, InnerjoinIntervalBase)
+                    assert interval.joins_int and interval.joins_int.is_main
+                    next_i = interval.joins_int
+
+                if next_i is None:
+                    assert interval.is_request_end
+                interval = next_i

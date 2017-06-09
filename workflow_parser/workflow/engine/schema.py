@@ -9,13 +9,56 @@ from ...graph import InterfaceJoin
 from ...graph import MasterGraph
 from ...graph import RequestInterface
 from ...utils import Report
+from ..entities.join import EmptyJoin
 from ..entities.join import InnerjoinIntervalBase
 from ..entities.join import InterfacejoinInterval
 from ..entities.join import InterfaceInterval
-from ..entities.threadins import empty_join
-from ..entities.threadins import JoinIntervalBase
+from ..entities.join import JoinIntervalBase
 from ..entities.threadins import Pace
 from ..entities.threadins import ThreadInstance
+
+
+def _assert_emptyjoin(pace, cls, is_joins, is_forced):
+    assert isinstance(pace, Pace) or isinstance(pace, InterfaceInterval)
+    assert issubclass(cls, JoinIntervalBase)
+
+    empty_join = None
+    if is_joins:
+        if is_forceed:
+            assert getattr(pace, cls.entity_joins_int) is None
+            empty_join = EmptyJoin(pace, None)
+            setattr(pace, cls.entity_joins_int, empty_join)
+        else:
+            assert not isinstance(getattr(pace, cls.entity_joins_int),
+                                  EmptyJoin)
+            if getattr(pace, cls.entity_joins_int) is None:
+                empty_join = EmptyJoin(pace, None)
+                setattr(pace, cls.entity_joins_int, empty_join)
+    else:
+        if is_forced:
+            assert getattr(pace, cls.entity_joined_int) is None
+            empty_join = EmptyJoin(None, pace)
+            setattr(pace, cls.entity_joined_int, empty_join)
+        else:
+            assert not isinstance(getattr(pace, cls.entity_joined_int),
+                                  EmptyJoin)
+            if getattr(pace, cls.entity_joined_int) is None:
+                empty_join = EmptyJoin(None, pace)
+                setattr(pace, cls.entity_joined_int, empty_join)
+
+    if empty_join is not None:
+        threadins = pace.threadins
+        if cls is InnerjoinIntervalBase:
+            if is_joins:
+                threadins.joinsints_by_type[EmptyJoin].append(empty_join)
+            else:
+                threadins.joinedints_by_type[EmptyJoin].append(empty_join)
+        else:
+            assert cls is InterfacejoinInterval
+            if is_joins:
+                threadins.joinsints_by_type[EmptyJoin].append(empty_join)
+            else:
+                threadins.joinedinterfaceints_by_type[EmptyJoin].append(empty_join)
 
 
 class SchemaEngine(object):
@@ -44,11 +87,10 @@ class SchemaEngine(object):
             assert isinstance(join_objs, Iterable)
             return join_objs
 
-    def register_fromitems(self, from_items, f_get_objs):
-        for from_item in from_items:
-            joins_objs = f_get_objs(from_item)
-            joins_objs = self._convert_joinobj_to_list(joins_objs)
-            for join_obj in joins_objs:
+    def register_fromitems(self, from_items):
+        for from_item, join_objs in from_items:
+            join_objs = self._convert_joinobj_to_list(join_objs)
+            for join_obj in join_objs:
                 assert isinstance(join_obj, self.joininterval_type.joinobj_type)
 
             if isinstance(from_item, Pace):
@@ -56,11 +98,10 @@ class SchemaEngine(object):
             else:
                 from_pace = from_item.from_pace
                 assert isinstance(from_pace, Pace)
-            self.joins_items.append((from_pace, joins_objs, from_item))
+            self.joins_items.append((from_pace, join_objs, from_item))
 
-    def register_toitems(self, to_items, f_get_objs):
-        for to_item in to_items:
-            join_objs = f_get_objs(to_item)
+    def register_toitems(self, to_items):
+        for to_item, join_objs in to_items:
             join_objs = self._convert_joinobj_to_list(join_objs)
             for obj in join_objs:
                 assert isinstance(obj, self.joininterval_type.joinobj_type)
@@ -168,10 +209,10 @@ class SchemaEngine(object):
                 # for k, v in to_schemas.iteritems():
                 #     print("  %s: %s" % (k, v))
                 # import pdb; pdb.set_trace()
-                self.joininterval_type.assert_emptyjoin(joins_item, True, True)
+                _assert_emptyjoin(joins_item, self.joininterval_type, True, True)
 
         for pace, item in self.joined_items:
-            self.joininterval_type.assert_emptyjoin(item, False, False)
+            _assert_emptyjoin(item, self.joininterval_type, False, False)
 
         self.join_attempt_cnt = join_attempt_cnt
         self.relations = relations
@@ -187,7 +228,7 @@ class SchemaEngine(object):
         relation_by_jo = defaultdict(list)
         for pace, _, item in self.joins_items:
             joins_int = getattr(item, self.joininterval_type.entity_joins_int)
-            if joins_int is empty_join:
+            if isinstance(joins_int, EmptyJoin):
                 if isinstance(item, Pace):
                     unjoinspaces_by_edge[item.edge].append(item)
                 else:
@@ -199,7 +240,7 @@ class SchemaEngine(object):
                 assert False
         for pace, item in self.joined_items:
             joined_int = getattr(item, self.joininterval_type.entity_joined_int)
-            if joined_int is empty_join:
+            if isinstance(joined_int, EmptyJoin):
                 if isinstance(item, Pace):
                     unjoinedpaces_by_edge[item.edge].append(item)
                 else:
@@ -265,46 +306,34 @@ class SchemaEngine(object):
             assert not unjoinspaces_by_edge
 
 
-def join_paces(threadinss, mastergraph, report):
+def join_paces(join_info, target_objs, mastergraph, report):
     assert isinstance(mastergraph, MasterGraph)
     assert isinstance(report, Report)
 
     join_attempt_cnt = 0
 
     print("Join paces...")
-    target_objs = {}
 
     innerjoin_engine = SchemaEngine(InnerjoinIntervalBase)
     interfacejoin_engine = SchemaEngine(InterfacejoinInterval)
 
-    for threadins in threadinss:
-        assert isinstance(threadins, ThreadInstance)
-        target_objs[threadins.target] = threadins.target_obj
-
-        innerjoin_engine.register_fromitems(
-                threadins.joins_paces,
-                lambda p: p.edge.joins_objs)
-        innerjoin_engine.register_toitems(
-                threadins.joined_paces,
-                lambda p: p.edge.joined_objs)
-
-        interfacejoin_engine.register_fromitems(
-                threadins.rightinterface_paces,
-                lambda p: p.edge.right_interface)
-        interfacejoin_engine.register_toitems(
-                threadins.leftinterface_paces,
-                lambda p: p.edge.left_interface)
+    innerjoin_engine.register_fromitems(join_info["innerjoin"]["joins"])
+    innerjoin_engine.register_toitems(join_info["innerjoin"]["joined"])
+    interfacejoin_engine.register_fromitems(
+            join_info["crossjoin"]["joins"])
+    interfacejoin_engine.register_toitems(
+            join_info["crossjoin"]["joined"])
 
     inner_relations = innerjoin_engine.proceed(target_objs)
     request_interfaces = [item for item in inner_relations
                           if isinstance(item, InterfaceInterval)]
 
     interfacejoin_engine.register_fromitems(
-            request_interfaces,
-            lambda i: i.join_obj.joins_interfaces)
+            (interface, interface.join_obj.joins_interfaces)
+            for interface in request_interfaces)
     interfacejoin_engine.register_toitems(
-            request_interfaces,
-            lambda i: i.join_obj.joined_interfaces)
+            (interface, interface.join_obj.joined_interfaces)
+            for interface in request_interfaces)
 
     interfacej_relations = interfacejoin_engine.proceed(target_objs)
     left_interfacejs = [item for item in interfacej_relations if

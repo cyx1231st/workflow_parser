@@ -144,7 +144,7 @@ class LogEngine(object):
     # step3: prepare Target, Thread and Line objects
     def _preparethreads(self, logfiles_in):
         hosts = set()
-        target_objs = []
+        target_objs = {}
         targetobjs_by_component = defaultdict(list)
         requests_detected = set()
 
@@ -197,22 +197,25 @@ class LogEngine(object):
                 target_obj.line_objs.append(line_obj)
 
             if target_obj.line_objs:
-                target_objs.append(target_obj)
+                assert target_obj.target not in target_objs
+                target_objs[target_obj.target] = target_obj
                 targetobjs_by_component[target_obj.component].append(target_obj)
                 hosts.add(target_obj.host)
         print("----------------")
 
         #### summary ####
-        total_lines = sum(len(to.line_objs) for to in target_objs)
+        total_lines = sum(len(to.line_objs) for to in
+                target_objs.itervalues())
         total_requests = len(requests_detected)
-        total_threads = sum(len(to.thread_objs) for to in target_objs)
+        total_threads = sum(len(to.thread_objs) for to in
+                target_objs.itervalues())
         print("%d lines, %d requests, %d threads" % (
             total_lines,
             total_requests,
             total_threads))
 
         total_thread_lines = sum(len(th.line_objs)
-                for to in target_objs
+                for to in target_objs.itervalues()
                 for th in to.thread_objs.itervalues())
         assert total_thread_lines == total_lines
 

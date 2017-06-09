@@ -6,7 +6,6 @@ from ... import reserved_vars as rv
 from ...target import Line
 from ...target import Thread
 from ...graph import Edge
-from ...graph import JoinBase
 from ...graph import Node
 from ...graph import ThreadGraph
 
@@ -76,7 +75,7 @@ class Pace(object):
 
     @property
     def joins_pace(self):
-        if self.joins_int and self.joins_int is not empty_join:
+        if self.joins_int:
             # assert isinstance(self.joins_int, InnerjoinIntervalBase)
             return self.joins_int.to_pace
         else:
@@ -84,7 +83,7 @@ class Pace(object):
 
     @property
     def joined_pace(self):
-        if self.joined_int and self.joined_int is not empty_join:
+        if self.joined_int:
             # assert isinstance(self.joined_int, InnerjoinIntervalBase)
             return self.joined_int.from_pace
         else:
@@ -139,15 +138,21 @@ class Pace(object):
     def _mark_str(self):
         mark_str = ""
         if self.edge.joins_objs:
-            mark_str += ", join(%d):" % len(self.edge.joins_objs)
+            mark_str += ", join:"
             if self.joins_int:
-                mark_str += self.joins_int.name
+                mark_str += "[%s->%.3f,%s]" %\
+                        (self.joins_int.name,
+                         self.joins_pace.seconds,
+                         self.joins_pace.edge.name)
             else:
                 mark_str += "?"
         if self.edge.joined_objs:
-            mark_str += ", joined(%d):" % len(self.edge.joined_objs)
+            mark_str += ", joined:"
             if self.joined_int:
-                mark_str += self.joined_int.name
+                mark_str += "[%s<-%.3f,%s]" %\
+                        (self.joined_int.name,
+                         self.joined_pace.seconds,
+                         self.joined_pace.edge.name)
             else:
                 mark_str += "?"
         if self.is_thread_start:
@@ -185,7 +190,6 @@ class Pace(object):
                 self.keyword,
                 len(self.line_obj.keys),
                 mark_str)
-
 
     def __repr__(self):
         ret_str = str(self)
@@ -380,48 +384,6 @@ class ThreadInterval(ThreadIntervalBase):
     def requestins(self):
         return self.threadins.requestins
 
-    @property
-    def prv_main(self):
-        assert self.is_main
-
-        if isinstance(self.prv_int, ThreadInterval):
-            if self.prv_int.is_lock:
-                if self.joined_int:
-                    ret = self.joined_int
-                else:
-                    ret = self.prv_int
-            else:
-                if self.joined_int:
-                    e = StateError("Both prv_int and joined_int are accetable")
-                    e.where = self.node.name
-                    raise e
-                ret = self.prv_int
-        else:
-            ret = self.joined_int
-
-        if not ret and self.is_request_start:
-            return None
-        elif not ret or ret is empty_join:
-            e = StateError("The thread path backward is empty")
-            e.where = self.node.name
-            raise e
-        else:
-            return ret
-
-    @property
-    def nxt_main(self):
-        assert self.is_main
-
-        if isinstance(self.nxt_int, ThreadInterval) and\
-                self.nxt_int.is_main:
-            assert not self.joins_int or not self.joins_int.is_main
-            return self.nxt_int
-        elif self.joins_int and self.joins_int.is_main:
-            return self.joins_int
-
-        assert self.is_request_end
-        return None
-
     # inheritance
     @property
     def is_request_start(self):
@@ -470,19 +432,10 @@ class ThreadInstance(object):
         self.intervals = []
         self.intervals_by_mark = defaultdict(list)
 
-        # join requirements from edges
-        self.joined_paces = set()
-        self.joins_paces = set()
-        self.leftinterface_paces = set()
-        self.rightinterface_paces = set()
-
-        # join results from schema engine
-        self.joined_ints = set()
-        self.joins_ints = set()
-        self.interfacejoined_ints = set()
-        self.interfacejoins_ints = set()
-        self.leftinterface_ints = set()
-        self.rightinterface_ints = set()
+        self.joinedints_by_type = defaultdict(set)
+        self.joinsints_by_type = defaultdict(set)
+        self.joinedinterfaceints_by_type = defaultdict(set)
+        self.joinsinterfaceints_by_type = defaultdict(set)
 
         self.request = None
         self.requestins = None
@@ -581,7 +534,7 @@ class ThreadInstance(object):
             mark_str += ", %dMARKS" % len(self.intervals_by_mark)
 
         return "<ThIns#%s-%s: len#%d, lapse#%f, comp#%s, host#%s, graph#%s, "\
-               "req#%s, %d(dup%d) vars, %d(act%d) joined_p, %d(act%d) joins_p%s>" % (
+               "req#%s, %d(dup%d) vars, %d %dinnerj, %d %dcrossj%s>" % (
                 self.target,
                 self.thread,
                 len(self.intervals),
@@ -592,21 +545,21 @@ class ThreadInstance(object):
                 self.request,
                 len(self.thread_vars),
                 len(self.thread_vars_dup),
-                len(self.joined_paces),
-                len(self.joined_ints),
-                len(self.joins_paces),
-                len(self.joins_ints),
+                sum(len(ints) for ints in self.joinsints_by_type.itervalues()),
+                sum(len(ints) for ints in self.joinedints_by_type.itervalues()),
+                sum(len(ints) for ints in self.joinsinterfaceints_by_type.itervalues()),
+                sum(len(ints) for ints in self.joinedinterfaceints_by_type.itervalues()),
                 mark_str)
 
     def __repr__(self):
         ret_str = str(self)
         ret_str += "\n  %s" % self.threadgraph
         ret_str += "\n  Paces:"
-        for pace in self.iter_paces():
+        for pace in self._iter_paces():
             ret_str += "\n  | %s" % pace.__str__thread__()
         return ret_str
 
-    def iter_paces(self, reverse=False):
+    def _iter_paces(self, reverse=False):
         assert isinstance(reverse, bool)
         if self.intervals:
             if reverse is False:
@@ -617,139 +570,3 @@ class ThreadInstance(object):
                 yield self.intervals[-1].to_pace
                 for interval in reversed(self.intervals):
                     yield interval.from_pace
-
-
-# TODO: move
-class JoinIntervalBase(IntervalBase):
-    __metaclass__ = ABCMeta
-
-    joinobj_type = JoinBase
-    entity_joins_int = "Error not assigned"
-    entity_joined_int = "Error not assigned"
-
-    def __init__(self, join_obj, from_entity, to_entity):
-        if isinstance(from_entity, Pace):
-            from_pace = from_entity
-        else:
-            from_pace = from_entity.from_pace
-        if isinstance(to_entity, Pace):
-            to_pace = to_entity
-        else:
-            to_pace = to_entity.to_pace
-        super(JoinIntervalBase, self).__init__(from_pace, to_pace, join_obj)
-
-        assert isinstance(join_obj, self.joinobj_type)
-        if not self.is_remote:
-            assert self.from_targetobj is self.to_targetobj
-        assert self.from_threadobj is not self.to_threadobj
-
-        assert getattr(from_entity, self.entity_joins_int) is None
-        assert getattr(to_entity, self.entity_joined_int) is None
-        setattr(from_entity, self.entity_joins_int, self)
-        setattr(to_entity, self.entity_joined_int, self)
-
-    @property
-    def join_obj(self):
-        return self.entity
-
-    @property
-    def is_remote(self):
-        return self.join_obj.is_remote
-
-    @property
-    def from_threadins(self):
-        return self.from_pace.threadins
-
-    @property
-    def to_threadins(self):
-        return self.to_pace.threadins
-
-    @property
-    def from_host(self):
-        return self.from_pace.host
-
-    @property
-    def to_host(self):
-        return self.to_pace.host
-
-    @property
-    def from_component(self):
-        return self.from_pace.component
-
-    @property
-    def to_component(self):
-        return self.to_pace.component
-
-    @property
-    def from_target(self):
-        return self.from_pace.target
-
-    @property
-    def to_target(self):
-        return self.to_pace.target
-
-    @property
-    def from_threadobj(self):
-        return self.from_pace.thread_obj
-
-    @property
-    def to_threadobj(self):
-        return self.to_pace.thread_obj
-
-    @property
-    def from_targetobj(self):
-        return self.from_pace.target_obj
-
-    @property
-    def to_targetobj(self):
-        return self.to_pace.target_obj
-
-    @property
-    def join_type(self):
-        if self.is_remote and self.from_host != self.to_host:
-            return "remote"
-        elif self.is_remote:
-            return "local_remote"
-        else:
-            return "local"
-
-    @classmethod
-    def assert_emptyjoin(cls, pace, is_joins, is_forced):
-        if is_joins:
-            if is_forceed:
-                assert getattr(pace, cls.entity_joins_int) is None
-                setattr(pace, cls.entity_joins_int, empty_join)
-            else:
-                assert getattr(pace, cls.entity_joins_int) is not empty_join
-                if getattr(pace, cls.entity_joins_int) is None:
-                    setattr(pace, cls.entity_joins_int, empty_join)
-        else:
-            if is_forced:
-                assert getattr(pace, cls.entity_joined_int) is None
-                setattr(pace, cls.entity_joined_int, empty_join)
-            else:
-                assert getattr(pace, cls.entity_joined_int) is not empty_join
-                if getattr(pace, cls.entity_joined_int) is None:
-                    setattr(pace, cls.entity_joined_int, empty_join)
-
-    def __str__marks__(self):
-        return ""
-
-    def __repr__(self):
-        return "<%s#%s %f -> %f, %s -> %s%s>" % (
-                self.__class__.__name__,
-                self.name,
-                self.from_seconds, self.to_seconds,
-                self.from_host, self.to_host,
-                self.__str__marks__())
-
-
-class EmptyJoin(JoinIntervalBase):
-    def __init__(self):
-        self.name = "EMPTY"
-
-    def __repr__(self):
-        return "<EMPTYJOIN>"
-
-
-empty_join = EmptyJoin()

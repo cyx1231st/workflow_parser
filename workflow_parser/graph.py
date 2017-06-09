@@ -313,14 +313,14 @@ class InterfaceJoin(JoinBase):
             super(InterfaceJoin, self).__init__("l"+interface.name,
                                                 interface, edge,
                                                 schemas, is_remote)
-            assert edge.left_interface is None
-            edge.left_interface = self
+            assert edge.joined_interface is None
+            edge.joined_interface = self
         else:
             super(InterfaceJoin, self).__init__("r"+interface.name,
                                                 edge, interface,
                                                 schemas, is_remote)
-            assert edge.right_interface is None
-            edge.right_interface = self
+            assert edge.joins_interface is None
+            edge.joins_interface = self
 
     @property
     def upper_edge(self):
@@ -355,8 +355,8 @@ class Edge(object):
         self.joins_objs = OrderedSet()
         self.joined_objs = OrderedSet()
         # cross request
-        self.left_interface = None
-        self.right_interface = None
+        self.joined_interface = None
+        self.joins_interface = None
 
     @property
     def component(self):
@@ -385,14 +385,14 @@ class Edge(object):
             else:
                 join_str += ", %s<-%s" % (jo.name, jo.from_edge.name)
 
-        if self.right_interface:
-            assert isinstance(self.right_interface, InterfaceJoin)
-            join_str += ", %s=>%s" % (self.right_interface.name,
-                                      self.right_interface.upper_edge.name)
-        if self.left_interface:
-            assert isinstance(self.left_interface, InterfaceJoin)
-            join_str += ", %s<=%s" % (self.left_interface.name,
-                                      self.left_interface.upper_edge.name)
+        if self.joins_interface:
+            assert isinstance(self.joins_interface, InterfaceJoin)
+            join_str += ", %s=>%s" % (self.joins_interface.name,
+                                      self.joins_interface.upper_edge.name)
+        if self.joined_interface:
+            assert isinstance(self.joined_interface, InterfaceJoin)
+            join_str += ", %s<=%s" % (self.joined_interface.name,
+                                      self.joined_interface.upper_edge.name)
         return join_str
 
     def __str__(self):
@@ -423,10 +423,10 @@ class Edge(object):
             ret_str += "\n  joined:"
             for join_obj in self.joined_objs:
                 ret_str += "\n    %s" % join_obj
-        if self.left_interface:
-            ret_str += "\n  left interface: %s" % self.left_interface
-        if self.right_interface:
-            ret_str += "\n  right interface: %s" % self.right_interface
+        if self.joined_interface:
+            ret_str += "\n  joined interface: %s" % self.joined_interface
+        if self.joins_interface:
+            ret_str += "\n  joins interface: %s" % self.joins_interface
 
         return ret_str
 
