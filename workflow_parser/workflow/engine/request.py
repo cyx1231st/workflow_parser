@@ -4,12 +4,16 @@ from collections import defaultdict
 from itertools import chain
 
 from ...utils import Report
-from ..entities.request import RequestInstance
-from ..entities.threadins import ThreadInstance
 from ..entities.join import EmptyJoin
 from ..entities.join import InnerjoinInterval
+from ..entities.join import InnerjoinIntervalBase
 from ..entities.join import InterfaceInterval
 from ..entities.join import InterfacejoinInterval
+from ..entities.request import RequestInstance
+from ..entities.request import RequestInterval
+from ..entities.threadins import ThreadInstance
+from ..entities.threadins import ThreadInterval
+from .exc import StateError
 
 
 # step 3: group threads by request
@@ -184,15 +188,207 @@ def group_threads(threadinss, report):
     return ret
 
 
+class RequestBuilder(object):
+    def __init__(self, mastergraph, request, threadinss):
+        self.threadinss = threadinss
+        self.requestins = RequestInstance(mastergraph, request, self)
+        self.is_built = False
+        # error report
+        self.errors = {}
+        self.warns = {}
+        # collects
+        self.e_incomplete_threadinss = set()
+        self.e_extra_s_threadinss = set()
+        self.e_extra_e_threadinss = set()
+        self.e_stray_threadinss = set()
+        self.e_unjoins_paces_by_edge = defaultdict(set)
+
+    def __nonzero__(self):
+        if self.errors or not self.is_built:
+            return False
+        else:
+            return True
+
+    def build(self):
+        assert not self.is_built
+        requestins = self.requestins
+
+        # init
+        tis = set()
+        for threadins in self.threadinss:
+            assert isinstance(threadins, ThreadInstance)
+            tis.add(threadins)
+            threadins.requestins = requestins
+            threadins.request = requestins.request
+            if threadins.is_request_start:
+                if requestins.start_interval is not None:
+                    self.e_extra_s_threadinss.add(threadins)
+                else:
+                    requestins.start_interval = threadins.start_interval
+
+        # error: multiple start threads
+        if self.e_extra_s_threadinss:
+            self.e_extra_s_threadinss.add(requestins.start_interval.threadins)
+            error_str = "\n".join("%r" % ti for ti in self.e_extra_s_threadinss)
+            self.errors["Has multiple start intervals"] = error_str
+
+        # error: no start thread
+        if requestins.start_interval is None:
+            self.errors["Contains no start interval"] = ""
+            return None
+
+        seen_tis = set()
+        def _process(threadins):
+            assert isinstance(threadins, ThreadInstance)
+            if threadins in seen_tis:
+                return
+            seen_tis.add(threadins)
+
+            # threadinss
+            requestins.threadinss.append(threadins)
+            requestins.thread_ints.update(threadins.intervals)
+
+            # incomplete_threadinss
+            if not threadins.is_complete:
+                self.e_incomplete_threadinss.add(threadins)
+
+            # end_interval
+            r_state = threadins.request_state
+            if r_state:
+                assert threadins.is_request_end is True
+                if requestins.end_interval:
+                    self.e_extra_e_threadinss.add(threadins)
+                else:
+                    requestins.end_interval = threadins.end_interval
+
+            # last_theadins
+            if requestins.last_interval is None \
+                    or requestins.last_interval.to_seconds < threadins.end_seconds:
+                requestins.last_interval = threadins.end_interval
+
+            # intervals_by_mark
+            for mark, intervals in threadins.intervals_by_mark.iteritems():
+                requestins.intervals_by_mark[mark].extend(intervals)
+
+            # request vars
+            requestins.request_vars["thread"].add(threadins.target+":"+threadins.thread)
+            requestins.request_vars["host"].add(threadins.host)
+            requestins.request_vars["component"].add(threadins.component)
+            requestins.request_vars["target"].add(threadins.target)
+            for key, val in threadins.thread_vars.iteritems():
+                requestins.request_vars[key].add(val)
+            for key, vals in threadins.thread_vars_dup.iteritems():
+                requestins.request_vars[key].update(vals)
+            requestins.len_paces += len(threadins.intervals)+1
+
+            for joins_int in threadins.joinsints_by_type[EmptyJoin]:
+                requestins.joinints_by_type[EmptyJoin].add(joins_int)
+                unjoins_pace = joins_int.from_pace
+                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
+            for joins_int in threadins.joinsints_by_type[InnerjoinInterval]:
+                requestins.joinints_by_type[InnerjoinInterval].add(joins_int)
+                _process(joins_int.to_threadins)
+            for joins_int in threadins.joinsints_by_type[InterfaceInterval]:
+                reqjoins = joins_int.joins_crossrequest_int
+                if isinstance(reqjoins, EmptyJoin):
+                    self.e_unjoins_paces_by_edge[joins_int.join_obj].add(joins_int)
+                requestins.joinints_by_type[InterfaceInterval].add(joins_int)
+                _process(joins_int.to_threadins)
+
+            for joins_int in threadins.joinsinterfaceints_by_type[InterfacejoinInterval]:
+                requestins.joinsinterfaceints_by_type[InterfacejoinInterval].add(joins_int)
+            for joins_int in threadins.joinsinterfaceints_by_type[EmptyJoin]:
+                requestins.joinsinterfaceints_by_type[EmptyJoin].add(joins_int)
+                unjoins_pace = joins_int.from_pace
+                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
+
+            for joined_int in threadins.joinedinterfaceints_by_type[InterfacejoinInterval]:
+                requestins.joinedinterfaceints_by_type[InterfacejoinInterval].add(joined_int)
+            for joined_int in threadins.joinedinterfaceints_by_type[EmptyJoin]:
+                requestins.joinedinterfaceints_by_type[EmptyJoin].add(joined_int)
+
+        _process(requestins.start_interval.threadins)
+
+        requestins.threadinss.sort(key=lambda ti: ti.start_seconds)
+
+        # error: incomplete threads
+        if self.e_incomplete_threadinss:
+            err_str = "\n".join("%r" % ti for it in self.e_incomplete_threadinss)
+            self.errors["Has incomplete threads"] = err_str
+
+        # error: multiple end threads
+        if self.e_extra_e_threadinss:
+            self.e_extra_e_threadinss.add(requestins.end_interval.threadins)
+            err_str = "\n".join("%r" % ti for ti in self.e_extra_e_threadinss)
+            self.errors["Has multiple end intervals"] = err_str
+
+        # error: no end thread
+        if not requestins.end_interval:
+            self.errors["Contains no end interval"] = ""
+        else:
+            int_extended = []
+            try:
+                last_int = None
+                for int_ in requestins.iter_mainpath(reverse=True):
+                    if isinstance(int_, ThreadInterval):
+                        if last_int is None:
+                            last_int = int_
+                    else:
+                        assert isinstance(int_, InnerjoinIntervalBase)
+                        if last_int is not None:
+                            int_extended.append(
+                                    RequestInterval(int_.to_pace,
+                                                    last_int.to_pace))
+                            last_int = None
+                        else:
+                            assert False
+                        int_extended.append(int_)
+                int_extended.append(
+                        RequestInterval(requestins.start_interval.from_pace,
+                                        last_int.to_pace))
+            except StateError as e:
+                self.errors["Main route parse error"] = (int_, e)
+            else:
+                for tint in reversed(int_extended):
+                    if requestins.extended_ints:
+                        assert requestins.extended_ints[-1].to_pace is tint.from_pace
+                    else:
+                        assert tint.from_pace is requestins.start_interval.from_pace
+                    requestins.extended_ints.append(tint)
+                assert requestins.extended_ints[-1].to_pace is requestins.end_interval.to_pace
+
+        # error: stray thread instances
+        self.e_stray_threadinss = tis - seen_tis
+        if self.e_stray_threadinss:
+            err_str = "\n".join("%r" % ti for ti in self.e_stray_threadinss)
+            self.warns["Has stray threads"] = err_str
+
+        # error: unjoins paces
+        if self.e_unjoins_paces_by_edge:
+            self.warns["Has unjoins paces"] = "%d joins edges" % len(self.e_unjoins_paces_by_edge)
+
+        if not self.errors and requestins.request is None:
+            RequestInstance._index_dict[requestins.request_type] += 1
+            requestins.request = "%s%d" % (requestins.request_type,
+                    RequestInstance._index_dict[requestins.request_type])
+            for threadins in requestins.threadinss:
+                assert threadins.request is None
+                threadins.request = requestins.request
+
+        self.is_built = True
+        if not self.errors:
+            return requestins
+
+
 def build_requests(threadgroup_by_request, mastergraph, report):
     requestinss = {}
     # error report
-    error_requestinss = []
-    requests_by_errortype = defaultdict(list)
+    error_builders = []
+    builders_by_error = defaultdict(list)
     main_route_error = defaultdict(lambda: defaultdict(lambda: 0))
     # warn report
-    warn_requestinss = []
-    requests_by_warntype = defaultdict(list)
+    warn_builders= []
+    builders_by_warn = defaultdict(list)
     # others
     incomplete_threadinss = set()
     extra_start_threadinss = set()
@@ -202,34 +398,35 @@ def build_requests(threadgroup_by_request, mastergraph, report):
 
     print("Build requests...")
     for request, threads in threadgroup_by_request:
-        requestins = RequestInstance(mastergraph, request, threads)
+        r_builder = RequestBuilder(mastergraph, request, threads)
+        requestins = r_builder.build()
 
-        if requestins.warns:
-            warn_requestinss.append(requestins)
-            for warn in requestins.warns.keys():
-                requests_by_warntype[warn].append(requestins)
-
-        if requestins.errors:
-            error_requestinss.append(requestins)
-            for error in requestins.errors.keys():
-                requests_by_errortype[error].append(requestins)
-                if error == "Main route parse error":
-                    e = requestins.errors[error][1]
-                    main_route_error[e.message][e.where] += 1
-        else:
+        if requestins:
+            if r_builder.warns:
+                warn_builders.append(r_builder)
+                for warn in r_builder.warns.keys():
+                    builders_by_warn[warn].append(r_builder)
             assert requestins.request not in requestinss
             requestinss[requestins.request] = requestins
+        else:
+            assert r_builder.errors
+            error_builders.append(r_builder)
+            for error in r_builder.errors.keys():
+                builders_by_error[error].append(r_builder)
+                if error == "Main route parse error":
+                    e = r_builder.errors[error][1]
+                    main_route_error[e.message][e.where] += 1
 
-        if requestins.e_incomplete_threadinss:
-            incomplete_threadinss.update(requestins.e_incomplete_threadinss)
-        if requestins.e_extra_s_threadinss:
-            extra_start_threadinss.update(requestins.e_extra_s_threadinss)
-        if requestins.e_extra_e_threadinss:
-            extra_end_threadinss.update(requestins.e_extra_e_threadinss)
-        if requestins.e_stray_threadinss:
-            stray_threadinss.update(requestins.e_stray_threadinss)
-        if requestins.e_unjoins_paces_by_edge:
-            for edge, paces in requestins.e_unjoins_paces_by_edge.iteritems():
+        if r_builder.e_incomplete_threadinss:
+            incomplete_threadinss.update(r_builder.e_incomplete_threadinss)
+        if r_builder.e_extra_s_threadinss:
+            extra_start_threadinss.update(r_builder.e_extra_s_threadinss)
+        if r_builder.e_extra_e_threadinss:
+            extra_end_threadinss.update(r_builder.e_extra_e_threadinss)
+        if r_builder.e_stray_threadinss:
+            stray_threadinss.update(r_builder.e_stray_threadinss)
+        if r_builder.e_unjoins_paces_by_edge:
+            for edge, paces in r_builder.e_unjoins_paces_by_edge.iteritems():
                 unjoinspaces_by_edge[edge].update(paces)
     print("-----------------")
 
@@ -272,6 +469,12 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             join_intervals_by_type[j_ins.join_type].add(j_ins)
         thread_intervals.update(requestins.thread_ints)
         extended_intervals.update(requestins.extended_ints)
+
+    for interval in interface_intervals:
+        joins_i = interval.joins_crossrequest_int
+        joined_i = interval.joined_crossrequest_int
+        if joins_i and joined_i:
+            assert joins_i.to_requestins is joined_i.from_requestins
 
     #### summary ####
     print("%d valid request instances with %d thread instances"
@@ -316,11 +519,11 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             print("%s: %d unjoins paces" % (edge.name, len(paces)))
         print()
 
-    if error_requestinss:
+    if error_builders:
         print("!! ERROR !!")
-        print("%d error request instances" % len(error_requestinss))
-        for err, requestinss_ in requests_by_errortype.iteritems():
-            print("  %s: %d requests" % (err, len(requestinss_)))
+        print("%d error request instances" % len(error_builders))
+        for err, builders in builders_by_error.iteritems():
+            print("  %s: %d requests" % (err, len(builders)))
         print()
 
     if main_route_error:
@@ -332,12 +535,12 @@ def build_requests(threadgroup_by_request, mastergraph, report):
                 print("    %s: %d" % (where, cnt))
         print()
 
-    if warn_requestinss:
+    if warn_builders:
         print("! WARN !")
         print("%d warn request instances:" %
-                len(warn_requestinss))
-        for warn, requestinss_ in requests_by_warntype.iteritems():
-            print("  %s: %d requests" % (warn, len(requestinss_)))
+                len(warn_builders))
+        for warn, builders in builders_by_warn.iteritems():
+            print("  %s: %d requests" % (warn, len(builders)))
         print()
 
     if incomplete_threadinss:

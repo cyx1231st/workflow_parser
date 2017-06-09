@@ -256,6 +256,14 @@ class InterfacejoinInterval(JoinIntervalBase):
         else:
             return self.interface_int.joins_crossrequest_int
 
+    @property
+    def from_requestins(self):
+        return self.from_threadins.requestins
+
+    @property
+    def to_requestins(self):
+        return self.to_threadins.requestins
+
     @classmethod
     def create(cls, join_obj, from_item, to_item):
         return cls(join_obj, from_item, to_item)
