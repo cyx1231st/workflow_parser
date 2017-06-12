@@ -279,8 +279,15 @@ class RequestBuilder(object):
                 requestins.request_vars[key].add(val)
             for key, vals in threadins.thread_vars_dup.iteritems():
                 requestins.request_vars[key].update(vals)
+
+            # len_paces
             requestins.len_paces += len(threadins.intervals)+1
 
+            # thread/target
+            requestins.thread_objs.add(threadins.thread_obj)
+            requestins.target_objs.add(threadins.target_obj)
+
+            # join_intervals
             for joins_int in threadins.joinsints_by_type[EmptyJoin]:
                 requestins.joinints_by_type[EmptyJoin].add(joins_int)
                 unjoins_pace = joins_int.from_pace
@@ -442,7 +449,7 @@ def build_requests(threadgroup_by_request, mastergraph, report):
     interface_intervals = set()
     linterfaces = set()
     rinterfaces = set()
-    join_intervals_by_type = defaultdict(set)
+    joinints_by_remotetype = defaultdict(set)
 
     thread_intervals = set()
     extended_intervals = set()
@@ -466,7 +473,7 @@ def build_requests(threadgroup_by_request, mastergraph, report):
                            requestins.joinints_by_type[InterfaceInterval],
                            requestins.joinedinterfaceints_by_type[InterfacejoinInterval],
                            requestins.joinsinterfaceints_by_type[InterfacejoinInterval]):
-            join_intervals_by_type[j_ins.join_type].add(j_ins)
+            joinints_by_remotetype[j_ins.remote_type].add(j_ins)
         thread_intervals.update(requestins.thread_ints)
         extended_intervals.update(requestins.extended_ints)
 
@@ -481,7 +488,7 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             % (len(requestinss),
                len(threadinss)))
     print("%d relations:" % len(innerjoin_intervals))
-    for j_type, j_inss in join_intervals_by_type.iteritems():
+    for j_type, j_inss in joinints_by_remotetype.iteritems():
         print("  %d %s relations" % (len(j_inss), j_type))
 
     print("%d vars:" % len(requests_vars))

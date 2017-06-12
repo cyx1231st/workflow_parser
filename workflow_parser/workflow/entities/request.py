@@ -1,9 +1,13 @@
 from collections import defaultdict
+from itertools import chain
 
 from ...graph import MasterGraph
 from ..engine.exc import StateError
 from .join import EmptyJoin
+from .join import InterfacejoinInterval
+from .join import InnerjoinInterval
 from .join import InnerjoinIntervalBase
+from .join import RequestInterface
 from .threadins import IntervalBase
 from .threadins import ThreadInterval
 
@@ -23,6 +27,8 @@ class RequestInstance(object):
         self.mastergraph = mastergraph
         self.request_vars = defaultdict(set)
         self.len_paces = 0
+        self.thread_objs = set()
+        self.target_objs = set()
 
         self.threadinss = []
 
@@ -42,6 +48,11 @@ class RequestInstance(object):
         self._builder = builder
 
     @property
+    def join_ints(self):
+        return chain(self.joinints_by_type[InnerjoinInterval],
+                     self.joinints_by_type[RequestInterface])
+
+    @property
     def request_type(self):
         return self.start_interval.from_node.request_name
 
@@ -57,20 +68,6 @@ class RequestInstance(object):
         ret = set()
         for ti in self.threadinss:
             ret.add(ti.host)
-        return ret
-
-    @property
-    def target_objs(self):
-        ret = set()
-        for ti in self.threadinss:
-            ret.add(ti.target_obj)
-        return ret
-
-    @property
-    def thread_objs(self):
-        ret = set()
-        for ti in self.threadinss:
-            ret.add(ti.thread_obj)
         return ret
 
     @property

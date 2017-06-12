@@ -28,7 +28,7 @@ class JoinIntervalBase(IntervalBase):
         super(JoinIntervalBase, self).__init__(from_pace, to_pace, join_obj)
 
         assert isinstance(join_obj, self.joinobj_type)
-        if not self.is_remote:
+        if not self.join_obj.is_remote:
             assert self.from_targetobj is self.to_targetobj
         assert self.from_threadobj is not self.to_threadobj
 
@@ -40,10 +40,6 @@ class JoinIntervalBase(IntervalBase):
     @property
     def join_obj(self):
         return self.entity
-
-    @property
-    def is_remote(self):
-        return self.join_obj.is_remote
 
     @property
     def from_threadins(self):
@@ -94,10 +90,10 @@ class JoinIntervalBase(IntervalBase):
         return self.to_pace.target_obj
 
     @property
-    def join_type(self):
-        if self.is_remote and self.from_host != self.to_host:
+    def remote_type(self):
+        if self.join_obj.is_remote and self.from_host != self.to_host:
             return "remote"
-        elif self.is_remote:
+        elif self.join_obj.is_remote:
             return "local_remote"
         else:
             return "local"
@@ -174,7 +170,7 @@ class InnerjoinInterval(InnerjoinIntervalBase):
 
     # @property
     # def color(self):
-    #     if self.is_remote:
+    #     if self.is_objremote:
     #         return "#fa8200"
     #     else:
     #         return "#fade00"

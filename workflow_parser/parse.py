@@ -19,6 +19,7 @@ import argparse
 # from workflow_parser.draw_engine import DrawEngine
 from .datasource.log_engine import LogEngine
 from .workflow.engine import StateEngine
+from .clockmaster import adjust_clock
 
 # from workflow_parser.statistics_engine import do_statistics
 # from workflow_parser.relation_engine import relation_parse
@@ -67,7 +68,7 @@ def main1(driver):
     print()
 
     # # correct clocks
-    # relation_parse(requestinss)
+    adjust_clock(requestinss)
 
     # # statistics
     # if args.draw:

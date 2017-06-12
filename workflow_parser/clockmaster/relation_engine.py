@@ -1,10 +1,5 @@
-from __future__ import print_function
-
-from collections import defaultdict
 from collections import OrderedDict
-
-from workflow_parser.state_machine import JoinInterval
-from workflow_parser.state_machine import RequestInstance
+from numbers import Rational
 
 
 class HostConstraint(object):
@@ -223,6 +218,7 @@ class CausalEngine(object):
         self.determined_hostcs = set()
 
         self.relationcons = set()
+        self._relationcon_by_from_to = {}
 
         self.distance = float("inf")
 
@@ -230,47 +226,40 @@ class CausalEngine(object):
         self.violated_relationcons = set()
         self.relax_counter = 0
 
-        def _create_hostc(hostname):
-            hostc = self.hosts.get(hostname)
-            if hostc is None:
-                hostc = HostConstraint(hostname)
-                self.hosts[hostname] = hostc
-                self.unknown_hostcs.append(hostc)
-            return hostc
+    def _create_hostc(self, hostname):
+        hostc = self.hosts.get(hostname)
+        if hostc is None:
+            hostc = HostConstraint(hostname)
+            self.hosts[hostname] = hostc
+            self.unknown_hostcs.append(hostc)
+        return hostc
 
-        _relationcon_by_from_to = {}
-        def _create_relationcon(from_hostc, to_hostc):
-            assert isinstance(from_hostc, HostConstraint)
-            assert isinstance(to_hostc, HostConstraint)
+    def register(self, from_host, to_host, from_seconds, to_seconds):
+        assert isinstance(from_host, str)
+        assert isinstance(to_host, str)
+        assert isinstance(from_seconds, Rational)
+        assert isinstance(to_seconds, Rational)
 
-            from_host = from_hostc.hostname
-            to_host = to_hostc.hostname
-            relationcon = _relationcon_by_from_to.get(
-                    (from_host, to_host))
-            if not relationcon:
-                relationcon = RelationConstraint(from_hostc, to_hostc)
-                self.relationcons.add(relationcon)
-                _relationcon_by_from_to[(from_host, to_host)] = relationcon
-                assert (to_host, from_host) not in _relationcon_by_from_to
-                _relationcon_by_from_to[(to_host, from_host)] = relationcon
-                from_hostc.relationcons.append(relationcon)
-                to_hostc.relationcons.append(relationcon)
-            return relationcon
+        from_hostc = self._create_hostc(relation.from_host)
+        to_hostc = self._create_hostc(relation.to_host)
 
-        for relation in relations:
-            assert isinstance(relation, JoinInterval)
-            assert relation.is_remote is True
-            assert relation.from_host != relation.to_host
+        r_key = (from_host, to_host)
+        relationcon = _relationcon_by_from_to.get(r_key)
+        if not relationcon:
+            relationcon = RelationConstraint(from_hostc, to_hostc)
+            self.relationcons.add(relationcon)
 
-            if relation.is_violated:
-                self.violated_joinrelations.add(relation)
+            _relationcon_by_from_to[r_key] = relationcon
+            r_rkey = (to_host, from_host)
+            assert r_rkey not in _relationcon_by_from_to
+            _relationcon_by_from_to[r_rkey] = relationcon
 
-            from_hostc = _create_hostc(relation.from_host)
-            to_hostc = _create_hostc(relation.to_host)
-            relationcon = _create_relationcon(from_hostc, to_hostc)
-            relationcon.setoffset(from_hostc, to_hostc,
-                                  relation.from_seconds, relation.to_seconds)
+            from_hostc.relationcons.append(relationcon)
+            to_hostc.relationcons.append(relationcon)
+        relationcon.setoffset(from_hostc, to_hostc,
+                              from_seconds, to_seconds)
 
+    def relax(self):
         self.unknown_hostcs.sort(key=lambda hc: -len(hc.relationcons))
         h_odict = OrderedDict()
         for hc in self.unknown_hostcs:
@@ -284,7 +273,6 @@ class CausalEngine(object):
         if self.distance == float("inf"):
             self.distance = 0.0
 
-    def relax(self):
         if not self.unknown_hostcs:
             return False
         while True:
@@ -321,56 +309,3 @@ class CausalEngine(object):
                         self.relax_counter += 1
                 changed_hostcs = next_changed_hostcs
         return True
-
-
-def relation_parse(requestinss):
-    remote_relations = set()
-    targetobjs_by_host = defaultdict(set)
-    for requestins in requestinss.itervalues():
-        assert isinstance(requestins, RequestInstance)
-        for j_ins in requestins.join_ints:
-            if j_ins.join_type == "remote":
-                remote_relations.add(j_ins)
-        for target_obj in requestins.target_objs:
-            targetobjs_by_host[target_obj.host].add(target_obj)
-
-    if not remote_relations:
-        print("No relations detected, skip relation engine.\n")
-        return
-
-    print("Preparing constraints...")
-    causal_engine = CausalEngine(remote_relations)
-    print("------------------------")
-
-    #### summary ####
-    print("total %d host constraints" % len(causal_engine.hosts))
-    print("total %d relation constraints" % len(causal_engine.relationcons))
-    print("distance %f" % causal_engine.distance)
-    print("%d violated joinrelations" %
-            len(causal_engine.violated_joinrelations))
-    print("%d violated relation constraints:" %
-            len(causal_engine.violated_relationcons))
-    for relationcon in causal_engine.violated_relationcons:
-        print("  %s" % relationcon)
-    print()
-    #################
-
-    print("Correcting...")
-    if causal_engine.relax():
-        print("-------------")
-
-        #### summary ####
-        print("%d relax attempts" % causal_engine.relax_counter)
-        hosts = causal_engine.hosts.values()
-        hosts.sort(key=lambda hostc: hostc.hostname)
-        for hostc in hosts:
-            if hostc.low != 0:
-                print("adjust %r" % hostc)
-                for target in targetobjs_by_host[hostc.hostname]:
-                    target.offset = hostc.low
-        for relation in remote_relations:
-            assert not relation.is_violated
-        #################
-    else:
-        print("No need to correct clocks")
-    print()
