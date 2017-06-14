@@ -16,21 +16,26 @@ class JoinIntervalBase(IntervalBase):
     entity_joins_int = "Error not assigned"
     entity_joined_int = "Error not assigned"
 
-    def __init__(self, join_obj, from_entity, to_entity):
-        if isinstance(from_entity, Pace):
+    def __init__(self, join_obj, from_entity, to_entity,
+            from_pace=None, to_pace=None):
+        if from_pace is None:
+            assert isinstance(from_entity, Pace)
             from_pace = from_entity
         else:
-            from_pace = from_entity.from_pace
-        if isinstance(to_entity, Pace):
+            assert not isinstance(from_entity, Pace)
+        if to_pace is None:
+            assert isinstance(to_entity, Pace)
             to_pace = to_entity
         else:
-            to_pace = to_entity.to_pace
+            assert not isinstance(to_entity, Pace)
         super(JoinIntervalBase, self).__init__(from_pace, to_pace, join_obj)
 
         assert isinstance(join_obj, self.joinobj_type)
         if not self.join_obj.is_remote:
-            assert self.from_targetobj is self.to_targetobj
-        assert self.from_threadobj is not self.to_threadobj
+            if self.__class__ is not NestedrequestInterval:
+                assert self.from_targetobj is self.to_targetobj
+        if self.__class__ is not NestedrequestInterval:
+            assert self.from_threadobj is not self.to_threadobj
 
         assert getattr(from_entity, self.entity_joins_int) is None
         assert getattr(to_entity, self.entity_joined_int) is None
@@ -48,6 +53,14 @@ class JoinIntervalBase(IntervalBase):
     @property
     def to_threadins(self):
         return self.to_pace.threadins
+
+    @property
+    def from_thread(self):
+        return self.from_threadins.thread
+
+    @property
+    def to_thread(self):
+        return self.to_threadins.thread
 
     @property
     def from_host(self):
@@ -104,7 +117,7 @@ class JoinIntervalBase(IntervalBase):
     def __repr__(self):
         return "<%s#%s %f -> %f, %s -> %s%s>" % (
                 self.__class__.__name__,
-                self.name,
+                self.path_name,
                 self.from_seconds, self.to_seconds,
                 self.from_host, self.to_host,
                 self.__str__marks__())
@@ -112,9 +125,23 @@ class JoinIntervalBase(IntervalBase):
 
 class EmptyJoin(JoinIntervalBase):
     def __init__(self, from_pace=None, to_pace=None):
-        self.name = "EMPTY"
+        if from_pace:
+            assert to_pace is None
+            self._pace = from_pace
+        else:
+            assert to_pace
+            self._pace = to_pace
+        self.path_name = "EMPTY"
         self.from_pace = from_pace
         self.to_pace = to_pace
+
+    @property
+    def requestins(self):
+        return self._pace.threadins.requestins
+
+    @property
+    def request(self):
+        return self.requestins.request
 
     def __repr__(self):
         info = ""
@@ -155,6 +182,10 @@ class InnerjoinIntervalBase(JoinIntervalBase):
         assert from_ is to_
         return from_
 
+    @property
+    def request(self):
+        return self.requestins.request
+
     @classmethod
     def create(cls, join_obj, from_item, to_item):
         if isinstance(join_obj, RequestInterface):
@@ -185,10 +216,6 @@ class InnerjoinInterval(InnerjoinIntervalBase):
     #     else:
     #         return "#fade00"
 
-    # @property
-    # def int_type(self):
-    #     return "join"
-
 
 class InterfaceInterval(InnerjoinIntervalBase):
     joinobj_type = RequestInterface
@@ -197,6 +224,7 @@ class InterfaceInterval(InnerjoinIntervalBase):
         super(InterfaceInterval, self).__init__(join_obj, from_pace, to_pace)
         self.joins_crossrequest_int = None
         self.joined_crossrequest_int = None
+        self.nestedrequest_int = None
 
     def __str__marks__(self):
         str_marks = super(InterfaceInterval, self).__str__marks__()
@@ -210,6 +238,11 @@ class InterfaceInterval(InnerjoinIntervalBase):
                  self.joined_crossrequest_int.from_host)
         return str_marks
 
+    def build_nestedrequestinterval(self):
+        self.nestedrequest_int = NestedrequestInterval(
+                self.joins_crossrequest_int,
+                self.joined_crossrequest_int)
+
 
 class InterfacejoinInterval(JoinIntervalBase):
     joinobj_type = InterfaceJoin
@@ -217,22 +250,27 @@ class InterfacejoinInterval(JoinIntervalBase):
     entity_joined_int = "joined_crossrequest_int"
 
     def __init__(self, join_obj, from_entity, to_entity):
-        super(InterfacejoinInterval, self).__init__(join_obj, from_entity, to_entity)
-
         if join_obj.is_left:
             assert isinstance(from_entity, InterfaceInterval)
             interface_int = from_entity
             name = "%s(%s)%s" % (from_entity.join_obj.name,
                                  join_obj.name,
                                  to_entity.to_node.name)
+            super(InterfacejoinInterval, self).__init__(
+                    join_obj, from_entity, to_entity,
+                    from_pace=from_entity.from_pace)
         else:
             assert isinstance(to_entity, InterfaceInterval)
             interface_int = to_entity
             name = "%s(%s)%s" % (from_entity.from_node.name,
                                  join_obj.name,
                                  to_entity.join_obj.name)
+            super(InterfacejoinInterval, self).__init__(
+                    join_obj, from_entity, to_entity,
+                    to_pace=to_entity.to_pace)
         self.interface_int = interface_int
-        self.name = name
+        self.path_name = name
+        self.join_nr_int = None
 
         if join_obj.is_left:
             assert self.from_pace is self.interface_int.from_pace
@@ -260,6 +298,75 @@ class InterfacejoinInterval(JoinIntervalBase):
     def to_requestins(self):
         return self.to_threadins.requestins
 
+    @property
+    def requestins(self):
+        return self.interface_int.requestins
+
+    @property
+    def request(self):
+        return self.requestins.request
+
+    @property
+    def joined_int(self):
+        if self.is_left:
+            return self.interface_int.joined_int
+        else:
+            return self.join_nr_int
+
+    @property
+    def joins_int(self):
+        if self.is_left:
+            return self.join_nr_int
+        else:
+            return self.interface_int.joins_int
+
     @classmethod
     def create(cls, join_obj, from_item, to_item):
         return cls(join_obj, from_item, to_item)
+
+
+class NestedrequestInterval(JoinIntervalBase):
+    joinobj_type = RequestInterface
+    entity_joins_int = "join_nr_int"
+    entity_joined_int = "join_nr_int"
+
+    def __init__(self, left_cr_int, right_cr_int):
+        assert isinstance(left_cr_int, InterfacejoinInterval)
+        assert left_cr_int.is_left
+        assert isinstance(right_cr_int, InterfacejoinInterval)
+        assert not right_cr_int.is_left
+        assert left_cr_int.to_requestins is right_cr_int.from_requestins
+        assert left_cr_int.interface_int is right_cr_int.interface_int
+
+        super(NestedrequestInterval, self).__init__(
+                left_cr_int.interface_int.join_obj,
+                left_cr_int, right_cr_int,
+                from_pace=left_cr_int.to_pace,
+                to_pace=right_cr_int.from_pace)
+
+        self.left_cr_int = left_cr_int
+        self.right_cr_int = right_cr_int
+
+    @property
+    def interface_int(self):
+        return self.left_cr_int.interface_int
+
+    @property
+    def nested_requestins(self):
+        return self.left_cr_int.to_requestins
+
+    @property
+    def requestins(self):
+        return self.left_cr_int.requestins
+
+    @property
+    def request(self):
+        return self.left_cr_int.request
+
+    @property
+    def joined_int(self):
+        return self.left_cr_int
+
+    @property
+    def joins_int(self):
+        return self.right_cr_int

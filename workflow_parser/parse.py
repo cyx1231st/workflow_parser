@@ -16,15 +16,15 @@ from __future__ import print_function
 
 import argparse
 
-# from workflow_parser.draw_engine import DrawEngine
+from .analyst.draw_engine import DrawEngine
+from .analyst.statistics_engine import do_statistics
 from .datasource.log_engine import LogEngine
 from .workflow.engine import StateEngine
 from .clockmaster import adjust_clock
+from .utils import Report as ParserReport
 
-# from workflow_parser.statistics_engine import do_statistics
 # from workflow_parser.relation_engine import relation_parse
 # from workflow_parser.statistics import Report
-from .utils import Report as ReportInternal
 
 
 def main1(driver):
@@ -39,19 +39,20 @@ def main1(driver):
                         action="store_true",
                         help="Draw figures.")
     parser.add_argument('--drawfolder',
-                        help="Folder to put figures.")
-    parser.add_argument('--csv-print-header', action="store_true",
-                        help="Write a row into the CSV file for the headers.")
-    parser.add_argument('--outfile',
-                        help="The output file of report, "
-                        "valid only when --draw is set.")
+                        help="Folder to put figures.",
+                        default="/home/vagrant/cyxvagrant/tmp/png/")
+    # parser.add_argument('--csv-print-header', action="store_true",
+    #                     help="Write a row into the CSV file for the headers.")
+    # parser.add_argument('--outfile',
+    #                     help="The output file of report, "
+    #                     "valid only when --draw is set.")
     args = parser.parse_args()
 
     # build graph
     master = driver.graph
     master.check()
 
-    report_i = ReportInternal()
+    report_i = ParserReport()
 
     try:
         # build logs
@@ -67,15 +68,15 @@ def main1(driver):
     print("%r" % report_i)
     print()
 
-    # # correct clocks
+    # correct clocks
     adjust_clock(requestinss)
 
-    # # statistics
-    # if args.draw:
-    #     draw_engine = DrawEngine("/home/vagrant/cyxvagrant/tmp/png/")
-    # else:
-    #     draw_engine = None
-    # do_statistics(requestinss, draw_engine)
+    # statistics
+    if args.draw:
+        draw_engine = DrawEngine(args.drawfolder)
+    else:
+        draw_engine = None
+    do_statistics(requestinss, draw_engine)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)

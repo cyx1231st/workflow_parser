@@ -2,12 +2,13 @@ from collections import defaultdict
 from itertools import chain
 
 from ...graph import MasterGraph
-from ..engine.exc import StateError
+from ..exc import StateError
 from .join import EmptyJoin
-from .join import InterfacejoinInterval
 from .join import InnerjoinInterval
-from .join import InnerjoinIntervalBase
-from .join import RequestInterface
+from .join import InterfacejoinInterval
+from .join import InterfaceInterval
+from .join import JoinIntervalBase
+from .join import NestedrequestInterval
 from .threadins import IntervalBase
 from .threadins import ThreadInterval
 
@@ -50,7 +51,8 @@ class RequestInstance(object):
     @property
     def join_ints(self):
         return chain(self.joinints_by_type[InnerjoinInterval],
-                     self.joinints_by_type[RequestInterface])
+                     self.joinints_by_type[InterfacejoinInterval],
+                     self.joinints_by_type[NestedrequestInterval])
 
     @property
     def request_type(self):
@@ -58,17 +60,11 @@ class RequestInstance(object):
 
     @property
     def components(self):
-        ret = set()
-        for ti in self.threadinss:
-            ret.add(ti.component)
-        return ret
+        return set(t.component for t in self.target_objs)
 
     @property
     def hosts(self):
-        ret = set()
-        for ti in self.threadinss:
-            ret.add(ti.host)
-        return ret
+        return set(t.host for t in self.target_objs)
 
     @property
     def request_state(self):
@@ -160,8 +156,12 @@ class RequestInstance(object):
                     else:
                         next_i = interval.joined_int
                 else:
-                    assert isinstance(interval, InnerjoinIntervalBase)
+                    assert isinstance(interval, JoinIntervalBase)
                     next_i = interval.joined_int
+
+                if isinstance(next_i, InterfaceInterval):
+                    next_i.is_main = True
+                    next_i = next_i.joined_crossrequest_int
 
                 if (next_i is None and not interval.is_request_start) or\
                         isinstance(next_i, EmptyJoin):
@@ -186,9 +186,12 @@ class RequestInstance(object):
                     else:
                         next_i = None
                 else:
-                    assert isinstance(interval, InnerjoinIntervalBase)
+                    assert isinstance(interval, JoinIntervalBase)
                     assert interval.joins_int and interval.joins_int.is_main
                     next_i = interval.joins_int
+
+                if isinstance(next_i, InterfaceInterval):
+                    next_i = next_i.joins_crossrequest_int
 
                 if next_i is None:
                     assert interval.is_request_end

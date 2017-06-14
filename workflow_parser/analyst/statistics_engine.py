@@ -1,36 +1,18 @@
 from __future__ import print_function
 
+from collections import defaultdict
 from collections import OrderedDict
+from itertools import chain
 import pandas as pd
 import numpy as np
 
-from workflow_parser.draw_engine import DrawEngine
-from workflow_parser.state_machine import JoinInterval
-from workflow_parser.state_machine import RequestInstance
-from workflow_parser.state_machine import ThreadInterval
+from ..workflow.entities.join import JoinIntervalBase
+from ..workflow.entities.request import RequestInstance
+from ..workflow.entities.threadins import ThreadInterval
+from .draw_engine import DrawEngine
 
 
-def do_statistics(requestinss, d_engine):
-    if d_engine:
-        assert isinstance(d_engine, DrawEngine)
-    if not requestinss:
-        print("No requests available, abort!")
-        return
-
-    targetobjs_by_target = {}
-    join_intervals = set()
-    thread_intervals = set()
-    extended_intervals = set()
-    for requestins in requestinss.itervalues():
-        assert isinstance(requestins, RequestInstance)
-        for ti in requestins.threadinss:
-            targetobjs_by_target[ti.target] = ti.target_obj
-        join_intervals.update(requestins.join_ints)
-        thread_intervals.update(requestins.td_ints)
-        extended_intervals.update(requestins.intervals_extended)
-
-    print("Preparing relations...")
-    ## adjust offset
+def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
     first_req = None
     last_req = None
     for requestins in requestinss.itervalues():
@@ -48,18 +30,151 @@ def do_statistics(requestinss, d_engine):
     start_t = first_req.start_time
     end_s = last_req.last_seconds
     end_t = last_req.last_time
-    print("lapse: %.4f, (%.4f, %.4f), (%s, %s)" % (
+    print("lapse: %.4f, (%.4f -> %.4f), (%s -> %s)" % (
             end_s - start_s,
             start_s,
             end_s,
             start_t,
             end_t))
 
-    for tg in targetobjs_by_target.itervalues():
-        tg.offset -= start_s
-    end_s = end_s - start_s
-    start_s = 0
-    start_end = ((start_s, end_s), (start_t, end_t))
+    if do_reset:
+        for tg in targetobjs_by_target.itervalues():
+            tg.offset -= start_s
+        end_s = end_s - start_s
+        start_s = 0
+        print("zero: %.4f -> %.4f" % (start_s, end_s))
+
+    return {"seconds": {"start": start_s,
+                        "end":   end_s},
+            "time":    {"start": start_t,
+                        "end":   end_t}}
+
+
+def _convert_to_dataframe(objs, index, columns):
+    if index is None:
+        index_vals = None
+    else:
+        objs = [obj for obj in objs]
+        index_vals = (getattr(obj, index) for obj in objs)
+    f_getvals = []
+    cols = []
+    for col in columns:
+        if isinstance(col, str):
+            def _make_getattr(col):
+                return lambda o: getattr(o, col)
+            cols.append(col)
+            f_getvals.append(_make_getattr(col))
+        else:
+            assert len(col) == 2
+            assert isinstance(col[0], str)
+            cols.append(col[0])
+            f_getvals.append(col[1])
+
+    df = pd.DataFrame((tuple(f(o) for f in f_getvals) for o in objs),
+                       index=index_vals,
+                       columns=cols)
+    return df
+
+
+def do_statistics(requestinss, d_engine):
+    if not requestinss:
+        print("No requests available, abort!")
+        return
+
+    print("Preparing relations...")
+    targetobjs_by_target = {t.target: t
+                            for r in requestinss.itervalues()
+                            for t in r.target_objs}
+    requestinss_by_type = defaultdict(list)
+    for r in requestinss.itervalues():
+        requestinss_by_type[r.request_type].append(r)
+
+    ## adjust offset
+    start_end = _reset_starttime(requestinss, targetobjs_by_target)
+
+    ## prepare dataframes
+    join_intervals_df = _convert_to_dataframe(
+            chain(chain.from_iterable(req.join_ints for req in requestinss.itervalues())),
+            None,
+            ("request",
+             ("request_type", lambda i: requestinss[i.request].request_type),
+             ("entity", lambda i: i.entity.name),
+             "lapse",
+             "path_name",
+             "is_main",
+             ("int_type", lambda i: i.__class__.__name__),
+             "from_seconds",
+             "to_seconds",
+             "from_time",
+             "to_time",
+             ("from_node", lambda i: i.from_node.name),
+             ("to_node", lambda i: i.to_node.name),
+             ("from_edge", lambda i: i.from_edge.name),
+             ("to_edge", lambda i: i.to_edge.name),
+             #join_int
+             "remote_type",
+             "from_target",
+             "to_target",
+             "from_host",
+             "to_host",
+             "from_component",
+             "to_component",
+             "from_thread",
+             "to_thread"))
+
+    td_intervals_df = _convert_to_dataframe(
+            chain.from_iterable(req.thread_ints for req in requestinss.itervalues()),
+            None,
+            ("request",
+             ("request_type", lambda i: requestinss[i.request].request_type),
+             ("entity", lambda i: i.entity.name),
+             "lapse",
+             "path_name",
+             "is_main",
+             ("int_type", lambda i: i.__class__.__name__),
+             "from_seconds",
+             "to_seconds",
+             "from_time",
+             "to_time",
+             ("from_node", lambda i: i.from_node.name),
+             ("to_node", lambda i: i.to_node.name),
+             ("from_edge", lambda i: i.from_edge.name),
+             ("to_edge", lambda i: i.to_edge.name),
+             #thread_int
+             "target",
+             "host",
+             "component",
+             "thread"))
+
+    request_df = _convert_to_dataframe(
+            requestinss.itervalues(),
+            "request",
+            ("request_type",
+             "request_state",
+             "lapse",
+             "start_seconds",
+             "end_seconds",
+             "last_seconds",
+             "start_time",
+             "end_time",
+             "last_time",
+             "len_paces",
+             ("len_threads", lambda r: len(r.thread_objs)),
+             ("len_threadinss", lambda r: len(r.threadinss)),
+             ("len_targets", lambda r: len(r.target_objs)),
+             ("len_hosts", lambda r: len(r.hosts))))
+
+    """
+    join_intervals = set()
+    thread_intervals = set()
+    extended_intervals = set()
+    for requestins in requestinss.itervalues():
+        assert isinstance(requestins, RequestInstance)
+        for ti in requestins.threadinss:
+            targetobjs_by_target[ti.target] = ti.target_obj
+        join_intervals.update(requestins.join_ints)
+        thread_intervals.update(requestins.td_ints)
+        extended_intervals.update(requestins.intervals_extended)
 
     ## join intervals
     relations = join_intervals
@@ -198,29 +313,16 @@ def do_statistics(requestinss, d_engine):
         if isinstance(int_, ThreadInterval):
             return str(int_.component)
         else:
-            assert isinstance(int_, JoinInterval)
+            assert isinstance(int_, JoinIntervalBase)
             if int_.is_remote:
                 return "remote_join"
             else:
                 return "local_join"
-    ## extended intervals
-    extendedints_df = pd.DataFrame(((int_.requestins.request,
-                                     _get_type(int_),
-                                     int_.lapse,
-                                     int_.from_seconds,
-                                     int_.to_seconds,
-                                     int_.from_time,
-                                     int_.to_time,
-                                     int_.color)
-                                    for int_ in extended_intervals),
-                                   columns=["request", "type",
-                                            "lapse", "from_sec", "to_sec",
-                                            "from_time", "to_time",
-                                            "color"
-                                           ])
     print("----------------------")
 
     if d_engine:
+        assert isinstance(d_engine, DrawEngine)
+
         # d_engine.draw_threadobj(targetobjs_by_target["osd.1"]
         #         .threadobjs_list[0])
         # d_engine.draw_threadobj(targetobjs_by_target["osd.1"]
@@ -275,3 +377,4 @@ def do_statistics(requestinss, d_engine):
                                  x="path", y="lapse",
                                  nth=20)
         d_engine.draw_stacked_intervals(start_end, requestinss, main_intervals_df, "stacked_main_paths")
+        """

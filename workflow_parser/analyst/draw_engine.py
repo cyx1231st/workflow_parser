@@ -10,13 +10,13 @@ import pandas as pd
 import seaborn as sns
 from sys import maxint
 
-from workflow_parser.state_machine import RequestInstance
-from workflow_parser.state_machine import ThreadInterval
-from workflow_parser.state_machine import JoinInterval
-from workflow_parser.state_runtime import Target
+from ..target import Target
+from ..workflow.entities.join import JoinIntervalBase
+from ..workflow.entities.request import RequestInstance
+from ..workflow.entities.threadins import ThreadInterval
 
 
-def patch_violinplot():
+def _patch_violinplot():
     """Patch seaborn's violinplot in current axis to workaround
     matplotlib's bug ##5423."""
     from matplotlib.collections import PolyCollection
@@ -159,7 +159,7 @@ class DrawEngine(object):
 
         ax = sns.violinplot(data=to_draw, order=ordered_x.index, palette=palette, **kwargs)
         ax.set_xticklabels(ordered_x.index,rotation=90)
-        patch_violinplot()
+        _patch_violinplot()
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(self.out_path + name + "_violinplot.png")
@@ -551,7 +551,7 @@ class DrawEngine(object):
             if isinstance(int_, ThreadInterval):
                 return str(int_.component)
             else:
-                assert isinstance(int_, JoinInterval)
+                assert isinstance(int_, JoinIntervalBase)
                 if int_.is_remote:
                     return "remote_join"
                 else:

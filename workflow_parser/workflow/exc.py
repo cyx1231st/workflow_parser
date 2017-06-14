@@ -1,4 +1,4 @@
-from ...exc import WFException
+from ..exc import WFException
 
 
 class StateError(WFException):

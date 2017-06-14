@@ -6,14 +6,15 @@ from itertools import chain
 from ...utils import Report
 from ..entities.join import EmptyJoin
 from ..entities.join import InnerjoinInterval
-from ..entities.join import InnerjoinIntervalBase
 from ..entities.join import InterfaceInterval
 from ..entities.join import InterfacejoinInterval
+from ..entities.join import JoinIntervalBase
+from ..entities.join import NestedrequestInterval
 from ..entities.request import RequestInstance
 from ..entities.request import RequestInterval
 from ..entities.threadins import ThreadInstance
 from ..entities.threadins import ThreadInterval
-from .exc import StateError
+from ..exc import StateError
 
 
 # step 3: group threads by request
@@ -296,10 +297,21 @@ class RequestBuilder(object):
                 requestins.joinints_by_type[InnerjoinInterval].add(joins_int)
                 _process(joins_int.to_threadins)
             for joins_int in threadins.joinsints_by_type[InterfaceInterval]:
+                assert isinstance(joins_int, InterfaceInterval)
                 reqjoins = joins_int.joins_crossrequest_int
                 if isinstance(reqjoins, EmptyJoin):
                     self.e_unjoins_paces_by_edge[joins_int.join_obj].add(joins_int)
+                joins_int.build_nestedrequestinterval()
                 requestins.joinints_by_type[InterfaceInterval].add(joins_int)
+                assert joins_int.joins_crossrequest_int
+                assert joins_int.nestedrequest_int
+                assert joins_int.joined_crossrequest_int
+                requestins.joinints_by_type[InterfacejoinInterval].add(
+                        joins_int.joins_crossrequest_int)
+                requestins.joinints_by_type[NestedrequestInterval].add(
+                        joins_int.nestedrequest_int)
+                requestins.joinints_by_type[InterfacejoinInterval].add(
+                        joins_int.joined_crossrequest_int)
                 _process(joins_int.to_threadins)
 
             for joins_int in threadins.joinsinterfaceints_by_type[InterfacejoinInterval]:
@@ -341,14 +353,14 @@ class RequestBuilder(object):
                         if last_int is None:
                             last_int = int_
                     else:
-                        assert isinstance(int_, InnerjoinIntervalBase)
+                        assert isinstance(int_, JoinIntervalBase)
                         if last_int is not None:
-                            int_extended.append(
-                                    RequestInterval(int_.to_pace,
-                                                    last_int.to_pace))
+                            int_extended.append(RequestInterval(int_.to_pace,
+                                                                last_int.to_pace))
                             last_int = None
                         else:
-                            assert False
+                            assert isinstance(int_, NestedrequestInterval) or\
+                                   isinstance(int_, InterfacejoinInterval)
                         int_extended.append(int_)
                 int_extended.append(
                         RequestInterval(requestins.start_interval.from_pace,
@@ -476,12 +488,6 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             joinints_by_remotetype[j_ins.remote_type].add(j_ins)
         thread_intervals.update(requestins.thread_ints)
         extended_intervals.update(requestins.extended_ints)
-
-    for interval in interface_intervals:
-        joins_i = interval.joins_crossrequest_int
-        joined_i = interval.joined_crossrequest_int
-        if joins_i and joined_i:
-            assert joins_i.to_requestins is joined_i.from_requestins
 
     #### summary ####
     print("%d valid request instances with %d thread instances"

@@ -204,19 +204,17 @@ class IntervalBase(object):
         assert isinstance(from_pace, Pace)
         assert isinstance(to_pace, Pace)
 
-        if entity:
-            name_str = entity.name
-        else:
-            name_str = "Nah"
-
         self.from_pace = from_pace
         self.to_pace = to_pace
         self.entity = entity
-        self.name = "%s(%s)%s" % (self.from_node.name,
-                                  name_str,
-                                  self.to_node.name)
-
         self.is_main = False
+        if self.entity:
+            name_str = self.entity.name
+        else:
+            name_str = "Nah"
+        self.path_name = "%s(%s)%s" % (self.from_node.name,
+                                       name_str,
+                                       self.to_node.name)
 
     @property
     def from_node(self):
@@ -258,27 +256,10 @@ class IntervalBase(object):
     def is_violated(self):
         return self.from_seconds > self.to_seconds
 
-    @property
-    def path_name(self):
-        return "%s(%s)%s" % (self.from_node.name,
-                             self.entity.name,
-                             self.to_node.name)
-
-    @property
-    def path_type(self):
-        if self.is_main:
-            return "main"
-        else:
-            return "branch"
-
-    @property
-    def int_type(self):
-        return "base"
-
     def __repr__(self):
         return "<%s#%s: %s %s |--> %s %s>" % (
                 self.__class__.__name__,
-                self.name,
+                self.path_name,
                 self.from_seconds,
                 self.from_edge.keyword,
                 self.to_seconds,
@@ -384,6 +365,10 @@ class ThreadInterval(ThreadIntervalBase):
     def requestins(self):
         return self.threadins.requestins
 
+    @property
+    def request(self):
+        return self.requestins.request
+
     # inheritance
     @property
     def is_request_start(self):
@@ -404,17 +389,6 @@ class ThreadInterval(ThreadIntervalBase):
     @property
     def request_state(self):
         return self.to_node.request_state
-
-    @property
-    def path_type(self):
-        if self.is_lock:
-            return "lock"
-        else:
-            return super(ThreadInterval, self).path_type
-
-    @property
-    def int_type(self):
-        return "thread"
 
 
 class ThreadInstance(object):
