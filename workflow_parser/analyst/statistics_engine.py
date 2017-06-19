@@ -1,15 +1,13 @@
 from __future__ import print_function
 
 from collections import defaultdict
-from collections import OrderedDict
 from itertools import chain
 import pandas as pd
-import numpy as np
 
-from ..workflow.entities.join import JoinIntervalBase
 from ..workflow.entities.request import RequestInstance
-from ..workflow.entities.threadins import ThreadInterval
-from .draw_engine import DrawEngine
+from ..workflow.entities.request import RequestInterval
+from .automated_suite import general_purpose_analysis
+from .statistic_helper import get_path_type
 
 
 def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
@@ -65,6 +63,7 @@ def _convert_to_dataframe(objs, index, columns):
             cols.append(col)
             f_getvals.append(_make_getattr(col))
         else:
+            assert isinstance(col, tuple)
             assert len(col) == 2
             assert isinstance(col[0], str)
             cols.append(col[0])
@@ -76,7 +75,7 @@ def _convert_to_dataframe(objs, index, columns):
     return df
 
 
-def do_statistics(requestinss, d_engine):
+def do_statistics(master_graph, requestinss, d_engine, report):
     if not requestinss:
         print("No requests available, abort!")
         return
@@ -87,6 +86,7 @@ def do_statistics(requestinss, d_engine):
                             for t in r.target_objs}
     requestinss_by_type = defaultdict(list)
     for r in requestinss.itervalues():
+        assert isinstance(r, RequestInstance)
         requestinss_by_type[r.request_type].append(r)
 
     ## adjust offset
@@ -146,6 +146,21 @@ def do_statistics(requestinss, d_engine):
              "component",
              "thread"))
 
+    def _get_path_type(interval):
+        return "%s->%s->%s" % (interval.from_edge.name,
+                               get_path_type(interval, True),
+                               interval.to_edge.name)
+    extendedints_df = _convert_to_dataframe(
+            chain.from_iterable(req.extended_ints for req in requestinss.itervalues()),
+            None,
+            ("request",
+             ("request_type", lambda i: i.requestins.request_type),
+             "from_seconds",
+             "to_seconds",
+             "lapse",
+             ("path_type", _get_path_type),
+             ("path", get_path_type)))
+
     request_df = _convert_to_dataframe(
             requestinss.itervalues(),
             "request",
@@ -163,6 +178,16 @@ def do_statistics(requestinss, d_engine):
              ("len_threadinss", lambda r: len(r.threadinss)),
              ("len_targets", lambda r: len(r.target_objs)),
              ("len_hosts", lambda r: len(r.hosts))))
+
+    general_purpose_analysis(master_graph,
+                             requestinss, requestinss_by_type,
+                             targetobjs_by_target, start_end,
+                             join_intervals_df, td_intervals_df,
+                             extendedints_df, request_df,
+                             d_engine, report)
+
+    report.export()
+
 
     """
     join_intervals = set()

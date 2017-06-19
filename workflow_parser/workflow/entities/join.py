@@ -31,9 +31,8 @@ class JoinIntervalBase(IntervalBase):
         super(JoinIntervalBase, self).__init__(from_pace, to_pace, join_obj)
 
         assert isinstance(join_obj, self.joinobj_type)
-        if not self.join_obj.is_remote:
-            if self.__class__ is not NestedrequestInterval:
-                assert self.from_targetobj is self.to_targetobj
+        if not self.is_remote:
+            assert self.from_targetobj is self.to_targetobj
         if self.__class__ is not NestedrequestInterval:
             assert self.from_threadobj is not self.to_threadobj
 
@@ -103,10 +102,14 @@ class JoinIntervalBase(IntervalBase):
         return self.to_pace.target_obj
 
     @property
+    def is_remote(self):
+        return self.join_obj.is_remote
+
+    @property
     def remote_type(self):
-        if self.join_obj.is_remote and self.from_host != self.to_host:
+        if self.is_remote and self.from_host != self.to_host:
             return "remote"
-        elif self.join_obj.is_remote:
+        elif self.is_remote:
             return "local_remote"
         else:
             return "local"
@@ -370,3 +373,7 @@ class NestedrequestInterval(JoinIntervalBase):
     @property
     def joins_int(self):
         return self.right_cr_int
+
+    @property
+    def is_remote(self):
+        return True

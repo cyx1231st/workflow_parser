@@ -16,6 +16,7 @@ from __future__ import print_function
 
 import argparse
 
+from .analyst import Report
 from .analyst.draw_engine import DrawEngine
 from .analyst.statistics_engine import do_statistics
 from .datasource.log_engine import LogEngine
@@ -35,10 +36,10 @@ def main1(driver):
     parser.add_argument('folder',
                         default=".",
                         help="The logs are in that folder.")
-    parser.add_argument('--draw',
+    parser.add_argument('--brief',
                         action="store_true",
-                        help="Draw figures.")
-    parser.add_argument('--drawfolder',
+                        help="Don't export report and draw figures.")
+    parser.add_argument('--outfolder',
                         help="Folder to put figures.",
                         default="/home/vagrant/cyxvagrant/tmp/png/")
     # parser.add_argument('--csv-print-header', action="store_true",
@@ -72,11 +73,13 @@ def main1(driver):
     adjust_clock(requestinss)
 
     # statistics
-    if args.draw:
-        draw_engine = DrawEngine(args.drawfolder)
-    else:
-        draw_engine = None
-    do_statistics(requestinss, draw_engine)
+    folders = args.folder.split("/")
+    report = Report(folders[-1] or folders[-2])
+    draw_engine = None
+    if not args.brief:
+        draw_engine = DrawEngine(args.outfolder)
+        report.set_outfile(args.outfolder+"/report.csv", True)
+    do_statistics(master, requestinss, draw_engine, report)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)

@@ -591,6 +591,7 @@ class MasterGraph(object):
 
         self.request_states = OrderedSet()
         self.marks = OrderedSet()
+        self.request_types = OrderedSet()
 
         # after check
         self.threadgraphs_by_component = defaultdict(OrderedSet)
@@ -689,6 +690,7 @@ class MasterGraph(object):
                 node = ThreadStartNode(node_id, thread_graph)
             else:
                 node = RequestStartNode(node_id, thread_graph, request_name)
+                self.request_types.add(request_name)
 
         assert node_id not in self.nodes_by_id
         self.nodes_by_id[node.id_] = node

@@ -1,6 +1,8 @@
 from __future__ import print_function
 
 from collections import OrderedDict
+from numbers import Integral
+from numbers import Real
 
 
 class Report(object):
@@ -9,8 +11,8 @@ class Report(object):
         self.contents = []
         self.key_len = 0
         self.name = name
-        self.register("Name", name)
         self.content_dict = OrderedDict()
+        self.register("Name", name)
 
     def __getitem__(self, item):
         return self.content_dict[item]
@@ -38,6 +40,9 @@ class Report(object):
         for content in self.contents:
             if content is None:
                 print("")
+            elif content[1] is None:
+                format_str = "{:<" + str(self.key_len + 2) + "}"
+                print(format_str.format(content[0]))
             elif isinstance(content[1], Integral):
                 format_str = "{:<" + str(self.key_len + 2) + "}{:d}"
                 print(format_str.format(content[0]+":", content[1]))
@@ -53,6 +58,7 @@ class Report(object):
         if self.outfile is None:
             self.export_terminal()
         else:
+            self.export_terminal()
             outfile = open(self.outfile, "a+")
             if self.print_header:
                 header_fields = [content[0] for content in self.contents

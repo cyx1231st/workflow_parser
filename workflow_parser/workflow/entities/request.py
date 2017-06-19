@@ -9,13 +9,14 @@ from .join import InterfacejoinInterval
 from .join import InterfaceInterval
 from .join import JoinIntervalBase
 from .join import NestedrequestInterval
-from .threadins import IntervalBase
 from .threadins import ThreadInterval
+from .threadins import ThreadIntervalBase
 
 
-class RequestInterval(IntervalBase):
+class RequestInterval(ThreadInterval):
     def __init__(self, from_pace, to_pace):
-        super(RequestInterval, self).__init__(from_pace, to_pace, None)
+        assert from_pace.threadins is to_pace.threadins
+        super(ThreadIntervalBase, self).__init__(from_pace, to_pace, None)
 
 
 class RequestInstance(object):
