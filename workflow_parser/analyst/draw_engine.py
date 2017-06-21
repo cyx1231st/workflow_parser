@@ -11,9 +11,43 @@ import seaborn as sns
 from sys import maxint
 
 from ..target import Target
+from ..workflow.entities.join import InnerjoinInterval
+from ..workflow.entities.join import InterfaceInterval
+from ..workflow.entities.join import InterfacejoinInterval
 from ..workflow.entities.join import JoinIntervalBase
+from ..workflow.entities.join import NestedrequestInterval
 from ..workflow.entities.request import RequestInstance
+from ..workflow.entities.threadins import BlankInterval
 from ..workflow.entities.threadins import ThreadInterval
+
+
+REMOTE_C = "#fa8200"
+LOCALREMOTE_C = "#fab300"
+LOCAL_C = "#fade00"
+INTERFACE_C = "#a82511"
+NESTED_C = "#ff3719"
+
+
+def _get_color(interval):
+    if isinstance(interval, ThreadInterval):
+        return interval.component.color
+    elif isinstance(interval, BlankInterval):
+        raise RuntimeError()
+    elif isinstance(interval, InnerjoinInterval) or\
+            isinstance(interval, InterfacejoinInterval):
+        r_type = interval.remote_type
+        if r_type == "remote":
+            return REMOTE_C
+        elif r_type == "local_remote":
+            return LOCALREMOTE_C
+        else:
+            return LOCAL_C
+    elif isinstance(interval, InterfaceInterval):
+        return INTERFACE_C
+    elif isinstance(interval, NestedrequestInterval):
+        return NESTED_C
+    else:
+        raise RuntimeError()
 
 
 def _patch_violinplot():
@@ -114,14 +148,13 @@ class DrawEngine(object):
         fig.savefig(self.out_path + name + "_heatmap.png")
         print("ok")
 
-    def draw_violinplot(self, to_draw, name,
-                        x=None, y=None, hue=None,
-                        nth=None, color_column="color",
-                        scale=True):
+    def draw_violinplot(self, to_draw, name, x, y,
+                        hue=None, nth=None, scale=True,
+                        palette=None, color=None):
         print("(DrawEngine) drawing %s..." % name)
 
-        x_groups = to_draw.groupby(x)[y, color_column]
-        ordered_x = x_groups.median().sort_values(y, ascending=False)
+        x_groups = to_draw.groupby(x)[y]
+        ordered_x = x_groups.median().sort_values(ascending=False)
         if nth is not None:
             ordered_x = ordered_x[:nth]
 
@@ -148,16 +181,15 @@ class DrawEngine(object):
 
         fig_wid = len(ordered_x)*0.3
         if hue is not None:
-            palette = to_draw.groupby(hue)[color_column].nth(0)
-            fig_wid *= len(palette)
-        else:
-            palette = x_groups.nth(0)[color_column].reindex_axis(ordered_x.index)
+            fig_wid *= len(to_draw.groupby(hue))
 
         fig = plt.figure(figsize=(fig_wid+3, 5))
         fig.clear()
         fig.suptitle("%s violinplot" % name, fontsize=14)
 
-        ax = sns.violinplot(data=to_draw, order=ordered_x.index, palette=palette, **kwargs)
+        ax = sns.violinplot(data=to_draw, order=ordered_x.index,
+                            palette=palette, color=color,
+                            **kwargs)
         ax.set_xticklabels(ordered_x.index,rotation=90)
         _patch_violinplot()
 
@@ -165,14 +197,13 @@ class DrawEngine(object):
         fig.savefig(self.out_path + name + "_violinplot.png")
         print("ok")
 
-    def draw_boxplot(self, to_draw, name,
-                     x, y, hue=None,
-                     nth=None, color_column="color",
-                     if_swarm=False):
+    def draw_boxplot(self, to_draw, name, x, y,
+                     hue=None, nth=None, if_swarm=False,
+                     palette=None, color=None):
         print("(DrawEngine) drawing %s..." % name)
 
-        x_groups = to_draw.groupby(x)[y, color_column]
-        ordered_x = x_groups.median().sort_values(y, ascending=False)
+        x_groups = to_draw.groupby(x)[y]
+        ordered_x = x_groups.median().sort_values(ascending=False)
         if nth is not None:
             ordered_x = ordered_x[:nth]
 
@@ -188,16 +219,13 @@ class DrawEngine(object):
 
         fig_wid = len(ordered_x)*0.15
         if hue is not None:
-            palette = to_draw.groupby(hue)[color_column].nth(0)
-            fig_wid *= len(palette)
-        else:
-            palette = x_groups.nth(0)[color_column].reindex_axis(ordered_x.index)
+            fig_wid *= len(to_draw.groupby(hue))
 
         fig = plt.figure(figsize=(fig_wid+3, 5))
         fig.clear()
         fig.suptitle("%s boxplot" % name, fontsize=14)
 
-        ax = sns.boxplot(palette=palette, **kwargs)
+        ax = sns.boxplot(color=color, palette=palette, **kwargs)
         ax.set_xticklabels(ordered_x.index,rotation=90)
         if if_swarm:
             sns.swarmplot(**kwargs)
@@ -238,7 +266,7 @@ class DrawEngine(object):
         fig.savefig(self.out_path + name + "_countplot.png")
         print("ok")
 
-    def _prepare_thread_indexes(self, threadinss, plot_main=False):
+    def _prepare_thread_indexes(self, thread_objs, plot_main=False):
         y_indexes_l = [""]
         y_indexes_r = [""]
         y_index = 1
@@ -250,10 +278,11 @@ class DrawEngine(object):
                         lambda: defaultdict(
                             lambda: defaultdict(
                                 dict)))
-        for ti in threadinss:
+        for to in thread_objs:
             # thread_object index
-            host_dict[ti.host][str(ti.component)][ti.target][ti.thread_obj.id_] = 0
+            host_dict[to.host][str(to.component)][to.target][to.id_] = 0
 
+        targets_y = []
         hosts = sorted(host_dict.keys())
         for host in hosts:
             c_dict = host_dict[host]
@@ -269,12 +298,13 @@ class DrawEngine(object):
                         y_indexes_l.append("%s|td%s" % (tg, tdid))
                         y_indexes_r.append("%s|%s" % (host, comp))
                         y_index += 1
+                    targets_y.append(y_index-.5)
 
-        threadins_y = {}
-        for ti in threadinss:
-            threadins_y[ti] = host_dict[ti.host][str(ti.component)]\
-                                       [ti.target][ti.thread_obj.id_]
-        return y_indexes_l, y_indexes_r, threadins_y
+        threadobjs_y = {}
+        for to in thread_objs:
+            threadobjs_y[to] = host_dict[to.host][str(to.component)]\
+                                       [to.target][to.id_]
+        return y_indexes_l, y_indexes_r, threadobjs_y, targets_y
 
     def draw_requestins(self, requestins, name, start_end=None):
         assert isinstance(requestins, RequestInstance)
@@ -282,19 +312,22 @@ class DrawEngine(object):
 
         # prepare requests
         if start_end is not None:
-            (start, last), (start_t, last_t) = start_end
+            start = start_end["seconds"]["start"]
+            last = start_end["seconds"]["end"]
+            start_t = start_end["time"]["start"]
+            last_t = start_end["time"]["end"]
         else:
             start = requestins.start_seconds
             last = requestins.last_seconds
         all_lapse = last - start
         plot_main = requestins.start_interval.is_main
 
-        threadinss = requestins.threadinss
-        y_indexes_l, y_indexes_r, tiy =\
-                self._prepare_thread_indexes(threadinss, plot_main)
+        y_indexes_l, y_indexes_r, tos_y, targets_y =\
+                self._prepare_thread_indexes(requestins.thread_objs, plot_main)
 
         ## settings ##
         figsize = (30, .5*len(y_indexes_l))
+        annot_off_x_lim = 0.005
         annot_off_y = 0.18
         annot_mark_lim = 0.006
         annot_pres_lim = 0.020
@@ -302,7 +335,7 @@ class DrawEngine(object):
         node_markersize = 5
         int_style = "-"
         int_lock_style = ":"
-        main_linewidth = 2
+        main_linewidth = 3
         other_linewidth = 1
         ##############
 
@@ -340,35 +373,51 @@ class DrawEngine(object):
         # ratios for markers
         mark_lim = all_lapse * annot_mark_lim
         pres_lim = all_lapse * annot_pres_lim
+        annot_off_x = all_lapse * annot_off_x_lim
+        for t_y in targets_y:
+            ax.plot([start, last],
+                    [t_y, t_y],
+                    linestyle=":",
+                    color="#d0d0d0",
+                    linewidth=10)
 
-        for ti in threadinss:
-            ti_color = ti.component.color
-            # draw start point
-            if ti.is_request_start:
-                t_marker=node_markersize
-                color = "k"
+        for int_ in requestins.join_ints:
+            from_x = int_.from_seconds - start
+            from_y = tos_y[int_.from_threadobj]
+            to_x = int_.to_seconds - start
+            to_y = tos_y[int_.to_threadobj]
+            ti_color = _get_color(int_)
+            if to_y > from_y:
+                connstyle="arc3,rad=0"
             else:
-                t_marker = "."
-                color = "k"
-            ax.plot(ti.start_seconds-start, tiy[ti],
-                     marker=t_marker,
-                     color=color,
-                     markersize=markersize)
+                connstyle="arc3,rad=0"
+            if int_.is_main:
+                width = main_linewidth
+                assert plot_main
+                ax.plot([from_x, to_x],
+                        [1, 1],
+                        linestyle=int_style,
+                        color=ti_color,
+                        linewidth=width)
+            else:
+                width = other_linewidth
+            ax.annotate("",
+                        (to_x, to_y),
+                        (from_x, from_y),
+                        arrowprops=dict(arrowstyle="->",
+                                        shrinkA=0.5,
+                                        shrinkB=0.5,
+                                        color=ti_color,
+                                        connectionstyle=connstyle,
+                                        lw=width))
 
-            # annotate start edge
-            ax.annotate("%s" % ti.intervals[0].from_edge.name,
-                         (ti.start_seconds-start, tiy[ti]),
-                         (ti.start_seconds-start, tiy[ti]+annot_off_y),
-                         **annot_kw)
-
-            marker=7
+        for ti in requestins.threadinss:
+            ti_color = ti.component.color
+            plot_y = tos_y[ti.thread_obj]
             for int_ in ti.intervals:
                 from_x = int_.from_seconds - start
-                from_y = tiy[int_.threadins]
                 to_x = int_.to_seconds - start
-                to_y = from_y
 
-                # draw interval
                 if int_.is_lock:
                     linestyle = int_lock_style
                 else:
@@ -376,6 +425,7 @@ class DrawEngine(object):
                 if int_.is_main:
                     linewidth = main_linewidth
                     assert plot_main
+                    # draw MAIN interval
                     ax.plot([from_x, to_x],
                             [1, 1],
                             linestyle=linestyle,
@@ -383,12 +433,39 @@ class DrawEngine(object):
                             linewidth=linewidth)
                 else:
                     linewidth = other_linewidth
+                # draw interval
                 ax.plot([from_x, to_x],
-                         [from_y, to_y],
+                         [plot_y, plot_y],
                          linestyle=linestyle,
                          color=ti_color,
                          label=int_.node.name,
                          linewidth=linewidth)
+
+        for ti in requestins.threadinss:
+            ti_color = ti.component.color
+            plot_y = tos_y[ti.thread_obj]
+            # draw start point
+            if ti.is_request_start:
+                t_marker=node_markersize
+                color = "k"
+            else:
+                t_marker = "."
+                color = "k"
+            ax.plot(ti.start_seconds-start, plot_y,
+                     marker=t_marker,
+                     color=color,
+                     markersize=markersize)
+
+            # annotate start edge
+            ax.annotate("%s" % ti.intervals[0].from_edge.name,
+                         (ti.start_seconds-start, plot_y),
+                         (ti.start_seconds-start-annot_off_x, plot_y),
+                         **annot_kw)
+
+            marker=7
+            for int_ in ti.intervals:
+                from_x = int_.from_seconds - start
+                to_x = int_.to_seconds - start
 
                 # mark interval
                 if marker == 6:
@@ -398,13 +475,13 @@ class DrawEngine(object):
 
                 if int_.lapse >= pres_lim:
                     ax.annotate("%s=%.2f" % (int_.entity.name, int_.lapse),
-                                 ((from_x + to_x)/2, to_y),
-                                 ((from_x + to_x)/2, to_y+annot_off),
+                                 ((from_x + to_x)/2, plot_y),
+                                 ((from_x + to_x)/2, plot_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
                     ax.annotate("%s" % int_.entity.name,
-                                 ((from_x + to_x)/2, to_y),
-                                 ((from_x + to_x)/2, to_y+annot_off),
+                                 ((from_x + to_x)/2, plot_y),
+                                 ((from_x + to_x)/2, plot_y+annot_off),
                                  **annot_kw)
 
                 # draw end point
@@ -420,7 +497,7 @@ class DrawEngine(object):
                     t_marker = marker
                     color=ti_color
                     t_markersize=node_markersize
-                ax.plot(int_.to_seconds-start, tiy[ti],
+                ax.plot(int_.to_seconds-start, plot_y,
                          marker=t_marker,
                          color=color,
                          markersize=t_markersize)
@@ -428,44 +505,25 @@ class DrawEngine(object):
                 # draw thread end
                 if int_.is_thread_end:
                     ax.annotate("%s" % int_.to_edge.name,
-                                 (to_x, to_y),
-                                 (to_x, to_y+annot_off_y),
+                                 (to_x, plot_y),
+                                 (to_x+annot_off_x, plot_y),
                                  **annot_kw)
 
                 marker = 6 if marker==7 else 7
 
-        ax = fig.axes[0]
         for int_ in requestins.join_ints:
             from_x = int_.from_seconds - start
-            from_y = tiy[int_.from_threadins]
+            from_y = tos_y[int_.from_threadobj]
             to_x = int_.to_seconds - start
-            to_y = tiy[int_.to_threadins]
-            ti_color = int_.color_jt
-            if to_y > from_y:
-                connstyle="arc3,rad=0"
+            to_y = tos_y[int_.to_threadobj]
+            if isinstance(int_, NestedrequestInterval):
+                anot_x = (from_x+to_x)/2
+                anot_y = (from_y+to_y)/2
             else:
-                connstyle="arc3,rad=0"
-            if int_.is_main:
-                width = main_linewidth
-                assert plot_main
-                ax.plot([from_x, to_x],
-                        [1, 1],
-                        linestyle=int_style,
-                        color=ti_color,
-                        linewidth=linewidth)
-            else:
-                width = other_linewidth
-            ax.annotate("",
-                        (to_x, to_y),
-                        (from_x, from_y),
-                        arrowprops=dict(arrowstyle="->",
-                                        shrinkA=0.5,
-                                        shrinkB=0.5,
-                                        color=ti_color,
-                                        connectionstyle=connstyle,
-                                        lw=width))
+                anot_x = (from_x+to_x)/2
+                anot_y = (from_y+to_y)/2+.5
             ax.annotate("%s=%.2f" % (int_.entity.name, int_.lapse),
-                        ((from_x+to_x)/2, (from_y+to_y)/2+.5),
+                        (anot_x, anot_y),
                         **annot_kw)
 
         ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))

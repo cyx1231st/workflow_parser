@@ -233,10 +233,10 @@ class InterfaceInterval(InnerjoinIntervalBase):
         str_marks = super(InterfaceInterval, self).__str__marks__()
         if self.joins_crossrequest_int is not None:
             str_marks += ", [%s, %s, %s | %s, %s, %s]" %\
-                (self.joins_crossrequest_int.name,
+                (self.joins_crossrequest_int.path_name,
                  self.joins_crossrequest_int.to_seconds,
                  self.joins_crossrequest_int.to_host,
-                 self.joined_crossrequest_int.name,
+                 self.joined_crossrequest_int.path_name,
                  self.joined_crossrequest_int.from_seconds,
                  self.joined_crossrequest_int.from_host)
         return str_marks

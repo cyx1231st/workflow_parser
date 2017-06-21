@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+from functools import total_ordering
 import numpy as np
 from itertools import izip
 
@@ -204,6 +205,7 @@ class Workflow(object):
             if step is None:
                 return
             assert isinstance(step, Step)
+            step.contents.sort(key=lambda c: (c.from_seconds, c.to_seconds))
             lines.append("%s%s" % (pad, step.path))
             len_ints = step.len_ints
             proj = step.projection_seconds
@@ -214,6 +216,7 @@ class Workflow(object):
             attrs.append((len_ints, proj, added, lapse, avg, ratio))
             if len(step.nxt_steps) > 1:
                 pad += "'"
+                step.nxt_steps.sort(key=lambda s: len(s.contents))
             else:
                 pad += " "
             for nxt_s in step.nxt_steps:
@@ -222,6 +225,7 @@ class Workflow(object):
         step = self.start_step
         if len(step.nxt_steps) > 1:
             pad = "'"
+            step.nxt_steps.sort(key=lambda s: len(s.contents))
         else:
             pad = " "
         for nxt_s in step.nxt_steps:

@@ -13,6 +13,11 @@ from ..workflow.entities.join import NestedrequestInterval
 from .draw_engine import DrawEngine
 from .statistic_helper import projection_time
 from .statistic_helper import Workflow
+from .draw_engine import (REMOTE_C,
+                          LOCALREMOTE_C,
+                          LOCAL_C,
+                          INTERFACE_C,
+                          NESTED_C)
 from . import Report
 
 
@@ -41,7 +46,7 @@ def general_purpose_analysis(master_graph,
                              requestinss_by_request, requestinss_by_type,
                              targetobjs_by_target, start_end,
                              join_intervals_df, td_intervals_df,
-                             extendedints_df, request_df,
+                             extendedints_df, request_df, targets_df,
                              d_engine, report):
     assert isinstance(master_graph, MasterGraph)
     assert isinstance(requestinss_by_request, dict)
@@ -52,13 +57,14 @@ def general_purpose_analysis(master_graph,
     assert isinstance(td_intervals_df, pd.DataFrame)
     assert isinstance(extendedints_df, pd.DataFrame)
     assert isinstance(request_df, pd.DataFrame)
+    assert isinstance(targets_df, pd.DataFrame)
     assert isinstance(d_engine, DrawEngine)
     assert isinstance(report, Report)
 
     r_types = master_graph.request_types
     comps = master_graph.components
 
-    #####  report  #####
+    #####  recorded statistics  #####
     targetobjs_by_component = defaultdict(list)
     for t in targetobjs_by_target.itervalues():
         targetobjs_by_component[t.component].append(t)
@@ -180,6 +186,7 @@ def general_purpose_analysis(master_graph,
 
         report.blank()
 
+    #####  printed statistics  #####
     report_i = Report("Intervals")
 
     addedup_total = extendedints_df["lapse"].sum()
@@ -233,9 +240,12 @@ def general_purpose_analysis(master_graph,
 
     #####  visualization  #####
     if d_engine:
+        alljoins_df = join_intervals_df[
+                join_intervals_df["int_type"]!=\
+                        NestedrequestInterval.__name__]
         # 1. host remote relations heatmap
-        crosshost_relations_df = join_intervals_df\
-                .loc[join_intervals_df["remote_type"] != "local"]\
+        crosshost_relations_df = alljoins_df\
+                .loc[alljoins_df["remote_type"] != "local"]\
                 .groupby(["from_host", "to_host"])\
                 .size()\
                 .unstack()\
@@ -243,4 +253,133 @@ def general_purpose_analysis(master_graph,
                 .astype("int")
         crosshost_relations_df.index.name = "from_host"
         crosshost_relations_df.columns.name = "to_host"
-        d_engine.draw_relation_heatmap(crosshost_relations_df, "host_relations")
+        d_engine.draw_relation_heatmap(crosshost_relations_df,
+                "host_remote_relations")
+
+        # 2. component local relations per target heatmap
+        componentlocal_relations_df = alljoins_df\
+                [alljoins_df["remote_type"]=="local"]\
+                .groupby(["from_target", "to_target"])\
+                .size()\
+                .reset_index()\
+                .join(targets_df, on="from_target")\
+                .join(targets_df, on="to_target",
+                      lsuffix="_from", rsuffix="_to")\
+                .groupby(["component_from", "component_to"])\
+                .mean()\
+                .unstack()
+        componentlocal_relations_df.index.name = "from_component"
+        componentlocal_relations_df.columns =\
+                componentlocal_relations_df.columns.droplevel()
+        componentlocal_relations_df.columns.name = "to_component"
+        d_engine.draw_relation_heatmap(componentlocal_relations_df,
+                "component_localrelations_pertarget", "f")
+
+        # 3. component remote relations per target heatmap
+        componentremote_relations_df = alljoins_df\
+                [alljoins_df["remote_type"]!="locol"]\
+                .groupby(["from_target", "to_target"])\
+                .size()\
+                .reset_index()\
+                .join(targets_df, on="from_target")\
+                .join(targets_df, on="to_target",
+                        lsuffix="_from", rsuffix="_to")\
+                .groupby(["component_from", "component_to"])\
+                .mean()\
+                .unstack()
+        componentremote_relations_df.index.name = "from_component"
+        componentremote_relations_df.columns =\
+                componentremote_relations_df.columns.droplevel()
+        componentremote_relations_df.columns.name = "to_component"
+        d_engine.draw_relation_heatmap(componentremote_relations_df,
+                "component_remoterelations_pertarget", "f")
+
+        if len(requestinss_by_request) > 1:
+            # 4. lapse distplot
+            d_engine.draw_distplot(request_df["lapse"],
+                    "request_lapse")
+
+            # 5. paces distplot
+            d_engine.draw_distplot(request_df["len_paces"],
+                    "request_paces")
+
+            # 6. hosts distplot
+            d_engine.draw_distplot(request_df["len_hosts"],
+                    "request_hosts")
+
+            # 7. threadinss distplot
+            d_engine.draw_distplot(request_df["len_threadinss"],
+                    "request_threadinss")
+
+        # 8. longest lapse requestins plot
+        longestlapse_req = request_df\
+                .loc[request_df["lapse"].idxmax()]\
+                ["_entity"]
+        d_engine.draw_requestins(longestlapse_req,
+                "longest_lapse_requestins", start_end)
+
+        # 9. longest paces requestins plot
+        longestpaces_req = request_df\
+                .loc[request_df["len_paces"].idxmax()]\
+                ["_entity"]
+        d_engine.draw_requestins(longestpaces_req,
+                "longest_paces_requestins", start_end)
+
+        palette = {"remote": REMOTE_C,
+                   "local_remote": LOCALREMOTE_C,
+                   "local": LOCAL_C}
+        # 10. join intervals lapse by remote type box/violinplot
+        d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
+                "path_name", "lapse", hue="remote_type", palette=palette)
+        d_engine.draw_violinplot(alljoins_df, "joinintervals_lapse_bytype",
+                "path_name", "lapse", hue="remote_type", palette=palette)
+
+        # 11. top 5 slowest thread intervals by host boxplot
+        ordered_x = td_intervals_df.groupby("path_name")["lapse"].median()
+        ordered_x.sort(ascending=False)
+        ordered_x = ordered_x.keys()
+        lim = min(len(ordered_x), 5)
+        for i in range(lim):
+            to_draw = td_intervals_df[td_intervals_df["path_name"]==ordered_x[i]]
+            d_engine.draw_boxplot(to_draw, "tdint_%s_byhost" % ordered_x[i],
+                                  x="host", y="lapse",
+                                  color=to_draw.iloc[0]["component"].color)
+
+        palette_path = {}
+        for r in td_intervals_df.iterrows():
+            r = r[1]
+            palette_path[r["path_name"]] = r["component"].color
+        for r in join_intervals_df.iterrows():
+            r = r[1]
+            int_type = r["int_type"]
+            if int_type == NestedrequestInterval.__name__:
+                color = NESTED_C
+            elif int_type == InterfaceInterval.__name__:
+                color = INTERFACE_C
+            elif r["remote_type"] == "local":
+                color = LOCAL_C
+            else:
+                color = REMOTE_C
+            palette_path[r["path_name"]] = color
+        # 12. thread intervals lapse by path box/violinplot
+        d_engine.draw_boxplot(td_intervals_df, "tdints_lapse_bypath",
+                "path_name", "lapse", palette=palette_path)
+        d_engine.draw_violinplot(td_intervals_df, "tdints_lapse_bypath",
+                "path_name", "lapse", palette=palette_path)
+
+        # 13. all intervals lapse by path box/violinplot
+        all_intervals_df = pd.concat([td_intervals_df, join_intervals_df],
+                                     ignore_index=True)
+        d_engine.draw_boxplot(all_intervals_df, "allints_lapse_bypath",
+                              "path_name", "lapse", palette=palette_path, nth=20)
+        d_engine.draw_violinplot(all_intervals_df, "allints_lapse_bypath",
+                                 "path_name", "lapse", palette=palette_path, nth=20)
+
+        # 14. main intervals lapse by path box/violinplot
+        main_intervals_df = all_intervals_df[all_intervals_df["is_main"]==True]
+        d_engine.draw_boxplot(main_intervals_df, "mainints_lapse_bypath",
+                              "path_name", "lapse", palette=palette_path)
+        d_engine.draw_violinplot(main_intervals_df, "mainints_lapse_bypath",
+                              "path_name", "lapse", palette=palette_path)
+
+        # 15. stacked intervals plot

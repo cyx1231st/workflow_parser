@@ -141,7 +141,7 @@ class Pace(object):
             mark_str += ", join:"
             if self.joins_int:
                 mark_str += "[%s->%.3f,%s]" %\
-                        (self.joins_int.name,
+                        (self.joins_int.path_name,
                          self.joins_pace.seconds,
                          self.joins_pace.edge.name)
             else:
@@ -150,7 +150,7 @@ class Pace(object):
             mark_str += ", joined:"
             if self.joined_int:
                 mark_str += "[%s<-%.3f,%s]" %\
-                        (self.joined_int.name,
+                        (self.joined_int.path_name,
                          self.joined_pace.seconds,
                          self.joined_pace.edge.name)
             else:
@@ -384,7 +384,8 @@ class ThreadInterval(ThreadIntervalBase):
 
     @property
     def is_thread_end(self):
-        return self.to_node.is_thread_end
+        return self.to_node.is_thread_end and\
+                self is self.threadins.intervals[-1]
 
     @property
     def request_state(self):
@@ -496,7 +497,7 @@ class ThreadInstance(object):
         else:
             return None
 
-    def __str__(self):
+    def __repr__(self):
         mark_str = ""
         if not self.is_complete:
             mark_str += ", INCOMPLETE"
@@ -525,8 +526,8 @@ class ThreadInstance(object):
                 sum(len(ints) for ints in self.joinedinterfaceints_by_type.itervalues()),
                 mark_str)
 
-    def __repr__(self):
-        ret_str = str(self)
+    def __str__(self):
+        ret_str = repr(self)
         ret_str += "\n  %s" % self.threadgraph
         ret_str += "\n  Paces:"
         for pace in self._iter_paces():

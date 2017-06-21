@@ -68,6 +68,8 @@ def _convert_to_dataframe(objs, index, columns):
             assert isinstance(col[0], str)
             cols.append(col[0])
             f_getvals.append(col[1])
+    f_getvals.append(lambda e:e)
+    cols.append("_entity")
 
     df = pd.DataFrame((tuple(f(o) for f in f_getvals) for o in objs),
                        index=index_vals,
@@ -93,6 +95,12 @@ def do_statistics(master_graph, requestinss, d_engine, report):
     start_end = _reset_starttime(requestinss, targetobjs_by_target)
 
     ## prepare dataframes
+    targets_df = _convert_to_dataframe(
+            targetobjs_by_target.itervalues(),
+            "target",
+            ("component",
+             "host"))
+
     join_intervals_df = _convert_to_dataframe(
             chain(chain.from_iterable(req.join_ints for req in requestinss.itervalues())),
             None,
@@ -183,7 +191,7 @@ def do_statistics(master_graph, requestinss, d_engine, report):
                              requestinss, requestinss_by_type,
                              targetobjs_by_target, start_end,
                              join_intervals_df, td_intervals_df,
-                             extendedints_df, request_df,
+                             extendedints_df, request_df, targets_df,
                              d_engine, report)
 
     report.export()

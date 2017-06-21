@@ -302,6 +302,10 @@ class RequestBuilder(object):
                 if isinstance(reqjoins, EmptyJoin):
                     self.e_unjoins_paces_by_edge[joins_int.join_obj].add(joins_int)
                 joins_int.build_nestedrequestinterval()
+                requestins.thread_objs.add(
+                        joins_int.joins_crossrequest_int.to_threadobj)
+                requestins.thread_objs.add(
+                        joins_int.joined_crossrequest_int.from_threadobj)
                 requestins.joinints_by_type[InterfaceInterval].add(joins_int)
                 assert joins_int.joins_crossrequest_int
                 assert joins_int.nestedrequest_int
