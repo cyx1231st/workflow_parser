@@ -256,23 +256,23 @@ class InterfacejoinInterval(JoinIntervalBase):
         if join_obj.is_left:
             assert isinstance(from_entity, InterfaceInterval)
             interface_int = from_entity
-            name = "%s(%s)%s" % (from_entity.join_obj.name,
-                                 join_obj.name,
-                                 to_entity.to_node.name)
+            # name = "%s(%s)%s" % (from_entity.join_obj.name,
+            #                      join_obj.name,
+            #                      to_entity.to_edge.name)
             super(InterfacejoinInterval, self).__init__(
                     join_obj, from_entity, to_entity,
                     from_pace=from_entity.from_pace)
         else:
             assert isinstance(to_entity, InterfaceInterval)
             interface_int = to_entity
-            name = "%s(%s)%s" % (from_entity.from_node.name,
-                                 join_obj.name,
-                                 to_entity.join_obj.name)
+            # name = "%s(%s)%s" % (from_entity.from_edge.name,
+            #                      join_obj.name,
+            #                      to_entity.join_obj.name)
             super(InterfacejoinInterval, self).__init__(
                     join_obj, from_entity, to_entity,
                     to_pace=to_entity.to_pace)
         self.interface_int = interface_int
-        self.path_name = name
+        # self.path_name = name
         self.join_nr_int = None
 
         if join_obj.is_left:
@@ -377,3 +377,7 @@ class NestedrequestInterval(JoinIntervalBase):
     @property
     def is_remote(self):
         return True
+
+    @property
+    def cnt_nested(self):
+        return self.nested_requestins.cnt_nested

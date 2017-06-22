@@ -212,9 +212,9 @@ class IntervalBase(object):
             name_str = self.entity.name
         else:
             name_str = "Nah"
-        self.path_name = "%s(%s)%s" % (self.from_node.name,
+        self.path_name = "%s(%s)%s" % (self.from_edge.name,
                                        name_str,
-                                       self.to_node.name)
+                                       self.to_edge.name)
 
     @property
     def from_node(self):

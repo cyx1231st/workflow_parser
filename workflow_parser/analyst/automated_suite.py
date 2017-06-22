@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 from collections import defaultdict
+from itertools import chain
 from itertools import izip_longest
 import pandas as pd
 import numpy as np
@@ -17,7 +18,8 @@ from .draw_engine import (REMOTE_C,
                           LOCALREMOTE_C,
                           LOCAL_C,
                           INTERFACE_C,
-                          NESTED_C)
+                          NESTED_C,
+                          getcolor_byint)
 from . import Report
 
 
@@ -43,14 +45,14 @@ def f_dist(iterable, lim=None):
 
 
 def general_purpose_analysis(master_graph,
-                             requestinss_by_request, requestinss_by_type,
+                             requestinss_by_request, requestinss_byrtype,
                              targetobjs_by_target, start_end,
                              join_intervals_df, td_intervals_df,
                              extendedints_df, request_df, targets_df,
                              d_engine, report):
     assert isinstance(master_graph, MasterGraph)
     assert isinstance(requestinss_by_request, dict)
-    assert isinstance(requestinss_by_type, dict)
+    assert isinstance(requestinss_byrtype, dict)
     assert isinstance(targetobjs_by_target, dict)
     assert isinstance(start_end, dict)
     assert isinstance(join_intervals_df, pd.DataFrame)
@@ -101,27 +103,27 @@ def general_purpose_analysis(master_graph,
 
     for r_type in r_types:
         report.register("%s reqs" % r_type,
-                len(requestinss_by_type.get(r_type, [])))
+                len(requestinss_byrtype.get(r_type, [])))
 
         report.register("%s targets dist" % r_type,
                 f_dist([len(r.target_objs) for r in
-                        requestinss_by_type.get(r_type, [])]))
+                        requestinss_byrtype.get(r_type, [])]))
 
         report.register("%s hosts dist" % r_type,
                 f_dist([len(r.hosts) for r in
-                        requestinss_by_type.get(r_type, [])]))
+                        requestinss_byrtype.get(r_type, [])]))
 
         report.register("%s threads dist" % r_type,
                 f_dist([len(r.thread_objs) for r in
-                        requestinss_by_type.get(r_type, [])]))
+                        requestinss_byrtype.get(r_type, [])]))
 
         report.register("%s threadinss dist" % r_type,
                 f_dist([len(r.threadinss) for r in
-                        requestinss_by_type.get(r_type, [])]))
+                        requestinss_byrtype.get(r_type, [])]))
 
         report.register("%s paces dist" % r_type,
                 f_dist([r.len_paces for r in
-                        requestinss_by_type.get(r_type, [])]))
+                        requestinss_byrtype.get(r_type, [])]))
         report.blank()
 
     innerjoinints_df = join_intervals_df\
@@ -153,9 +155,9 @@ def general_purpose_analysis(master_graph,
         report.register("%s lapse dist" % r_type,
                 "100.00% " +
                 f_dist([r.lapse for r in
-                        requestinss_by_type.get(r_type, [])], 5))
+                        requestinss_byrtype.get(r_type, [])], 5))
 
-        cumulated = sum(r.lapse for r in requestinss_by_type.get(r_type, []))
+        cumulated = sum(r.lapse for r in requestinss_byrtype.get(r_type, []))
 
         comp_df = extendedints_df[extendedints_df["request_type"] == r_type]
         for comp in comps:
@@ -229,12 +231,14 @@ def general_purpose_analysis(master_graph,
 
     report_i.export()
 
+    workflow_byrtype = {}
     for r_type in r_types:
-        _requestinss = requestinss_by_type.get(r_type, [])
+        _requestinss = requestinss_byrtype.get(r_type, [])
         requestins_iters = [iter(r.extended_ints) for r in _requestinss]
         workflow = Workflow(r_type)
         for intervals in izip_longest(*requestins_iters):
             workflow.build(intervals)
+        workflow_byrtype[r_type] = workflow
         print()
         print("%s" % workflow)
 
@@ -346,21 +350,11 @@ def general_purpose_analysis(master_graph,
                                   color=to_draw.iloc[0]["component"].color)
 
         palette_path = {}
-        for r in td_intervals_df.iterrows():
+        for r in chain(td_intervals_df.iterrows(),
+                       join_intervals_df.iterrows()):
             r = r[1]
-            palette_path[r["path_name"]] = r["component"].color
-        for r in join_intervals_df.iterrows():
-            r = r[1]
-            int_type = r["int_type"]
-            if int_type == NestedrequestInterval.__name__:
-                color = NESTED_C
-            elif int_type == InterfaceInterval.__name__:
-                color = INTERFACE_C
-            elif r["remote_type"] == "local":
-                color = LOCAL_C
-            else:
-                color = REMOTE_C
-            palette_path[r["path_name"]] = color
+            palette_path[r["path_name"]] = getcolor_byint(r["_entity"],
+                    ignore_lr=True)
         # 12. thread intervals lapse by path box/violinplot
         d_engine.draw_boxplot(td_intervals_df, "tdints_lapse_bypath",
                 "path_name", "lapse", palette=palette_path)
@@ -382,4 +376,12 @@ def general_purpose_analysis(master_graph,
         d_engine.draw_violinplot(main_intervals_df, "mainints_lapse_bypath",
                               "path_name", "lapse", palette=palette_path)
 
-        # 15. stacked intervals plot
+        for r_type in requestinss_byrtype.keys():
+            # 15. workflow plot
+            d_engine.draw_workflow(start_end,
+                    workflow_byrtype[r_type],
+                    r_type+"_workflow")
+            # 16. stacked intervals plot
+            d_engine.draw_profiling(start_end,
+                    requestinss_byrtype[r_type],
+                    r_type+"_profiling")

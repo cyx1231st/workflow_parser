@@ -107,6 +107,10 @@ class RequestInstance(object):
     def lapse(self):
         return self.end_seconds - self.start_seconds
 
+    @property
+    def cnt_nested(self):
+        return len(self.joinedinterfaceints_by_type[InterfacejoinInterval])
+
     def __str__(self):
         return "RIns %s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
                "%d hosts, %d targets, %d threads, %d threadinss"\

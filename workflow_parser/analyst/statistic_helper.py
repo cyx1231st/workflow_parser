@@ -60,7 +60,7 @@ class StepContent(object):
     def __init__(self, interval, step, from_content):
         assert isinstance(step, Step)
         assert interval.from_edge is step.from_edge
-        assert get_path_type(interval) == step.path_type
+        assert get_path_type(interval, True) == step.path_type
         assert interval.to_edge is step.to_edge
 
         self.interval = interval
@@ -179,7 +179,7 @@ class Workflow(object):
             step_key = (from_step, interval.to_edge)
             step = steps_by_fromstep_toedge.get(step_key)
             if not step:
-                step = Step(get_path_type(interval),
+                step = Step(get_path_type(interval, True),
                             interval.to_edge,
                             from_step)
                 steps_by_fromstep_toedge[step_key] = step
@@ -216,7 +216,8 @@ class Workflow(object):
             attrs.append((len_ints, proj, added, lapse, avg, ratio))
             if len(step.nxt_steps) > 1:
                 pad += "'"
-                step.nxt_steps.sort(key=lambda s: len(s.contents))
+                step.nxt_steps.sort(key=lambda s: len(s.contents),
+                                    reverse=True)
             else:
                 pad += " "
             for nxt_s in step.nxt_steps:
@@ -225,7 +226,8 @@ class Workflow(object):
         step = self.start_step
         if len(step.nxt_steps) > 1:
             pad = "'"
-            step.nxt_steps.sort(key=lambda s: len(s.contents))
+            step.nxt_steps.sort(key=lambda s: len(s.contents),
+                                reverse=True)
         else:
             pad = " "
         for nxt_s in step.nxt_steps:
