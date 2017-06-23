@@ -10,7 +10,7 @@ from ..workflow.entities.join import NestedrequestInterval
 from ..workflow.entities.request import RequestInterval
 
 
-def get_path_type(interval, mark=False):
+def get_extended_pathtype(interval, mark=False):
     ret = ""
     if isinstance(interval, RequestInterval):
         if mark:
@@ -60,7 +60,7 @@ class StepContent(object):
     def __init__(self, interval, step, from_content):
         assert isinstance(step, Step)
         assert interval.from_edge is step.from_edge
-        assert get_path_type(interval, True) == step.path_type
+        assert get_extended_pathtype(interval, True) == step.path_type
         assert interval.to_edge is step.to_edge
 
         self.interval = interval
@@ -156,8 +156,13 @@ class Workflow(object):
         self.len_steps = 0
         self.len_contents = 0
         self.name = name
+        self.reqs = []
 
         self._content_by_req = {}
+
+    @property
+    def len_reqs(self):
+        return len(self.reqs)
 
     def build(self, intervals):
         steps_by_fromstep_toedge = {}
@@ -179,7 +184,7 @@ class Workflow(object):
             step_key = (from_step, interval.to_edge)
             step = steps_by_fromstep_toedge.get(step_key)
             if not step:
-                step = Step(get_path_type(interval, True),
+                step = Step(get_extended_pathtype(interval, True),
                             interval.to_edge,
                             from_step)
                 steps_by_fromstep_toedge[step_key] = step
@@ -187,6 +192,8 @@ class Workflow(object):
             content = StepContent(interval, step, from_content)
             self.len_contents += 1
             newcontent_by_req[interval.request] = content
+        if not self.reqs:
+            self.reqs = newcontent_by_req.keys()
         self._content_by_req = newcontent_by_req
 
     def __repr__(self):

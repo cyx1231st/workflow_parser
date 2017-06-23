@@ -195,7 +195,7 @@ def general_purpose_analysis(master_graph,
     report_i.register("Addedup total", "%.5f %.2f(rate)" % (
         addedup_total, addedup_total/lapse_total))
     addedup_df = extendedints_df\
-                 .groupby("path_type")["lapse"]\
+                 .groupby("path")["lapse"]\
                  .sum()\
                  .sort_values(ascending=False)
     addedup_by_ptype = {}
@@ -206,7 +206,7 @@ def general_purpose_analysis(master_graph,
 
     report_i.register("Average", None)
     average_df = extendedints_df\
-                 .groupby("path_type")["lapse"]\
+                 .groupby("path")["lapse"]\
                  .mean()\
                  .sort_values(ascending=False)
     average_by_ptype = {}
@@ -215,7 +215,7 @@ def general_purpose_analysis(master_graph,
         report_i.register("avg %s" % name, "%.5f" % lapse)
 
     report_i.register("Projection", None)
-    extendedints_by_type = extendedints_df.groupby("path_type")
+    extendedints_by_type = extendedints_df.groupby("path")
     projection_result = []
     for p_type, e_df in extendedints_by_type:
         from_tos = [(r[1]["from_seconds"],
@@ -380,8 +380,8 @@ def general_purpose_analysis(master_graph,
             # 15. workflow plot
             d_engine.draw_workflow(start_end,
                     workflow_byrtype[r_type],
-                    r_type+"_workflow")
+                    r_type)
             # 16. stacked intervals plot
             d_engine.draw_profiling(start_end,
                     requestinss_byrtype[r_type],
-                    r_type+"_profiling")
+                    r_type)
