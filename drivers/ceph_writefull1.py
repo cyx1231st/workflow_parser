@@ -29,7 +29,101 @@ client.color = "#54c0e8"
 
 class CephWritefull(DriverBase):
     def build_graph(self, graph):
-        # client issue writefull
+#### functions ####
+        # function queue transaction
+        e30, n29, f_queuet = graph.build_func(
+                              29, "replicatedbackend queue_transactions start", "queue_transactions")
+        e31, n30 = n29.build( 30, "filestore queue_transactions")
+        e32, n31 = n30.build( 31, "filejournal queue_writeq start")
+        e33, n32 = n31.build( 32, "filejournal queue_writeq finish")
+        e34, n33 = n32.build_endf("replicatedbackend queue_transactions finish")
+
+        # function main osd receive OSD_OP
+        e21, n21, f_doreq = graph.build_func(
+                              21, "primarylogpg do_request start", "do_request")
+        e22, n22 = n21.build( 22, "primarylogpg execute_ctx start")
+        e23, n23 = n22.build( 23, "primarylogpg prepare_transaction start")
+        e24, n24 = n23.build( 24, "primarylogpg do_osd_ops start")
+        e25, n25 = n24.build( 25, "primarylogpg do_osd_ops finish")
+        e26, n26 = n25.build( 26, "primarylogpg prepare_transaction finish")
+        e27, n27 = n26.build( 27, "primarylogpg submit_transaction start")
+        e28, n28 = n27.build( 28, "replicatedbackend send_message_osd_cluster start")
+        e29, n93 = n28.build( 93, "replicatedbackend send_message_osd_cluster finish")
+        _  , _   = n93.build(n28, e28)
+        _  , n33 = n93.build( 33, f_queuet)
+        e35, n34 = n33.build( 34, "primarylogpg submit_transaction finish")
+        e36, n35 = n34.build( 35, "primarylogpg execute_ctx finish")
+        e37, _   = n35.build_endf("primarylogpg do_request finish")
+
+        # function osd handle message
+        e39, n38, f_handlemsg = graph.build_func(
+                              38, "replicatedbackend handle_message", "handle_message")
+        # replica osd write disk
+        e90, _   = n38.build_endf(f_queuet)
+        # main osd receive sub_op_reply
+        e40, n39 = n38.build( 39, "replicatedbackend sub_op_modify_reply start")
+        e41, _   = n39.build_endf("replicatedbackend sub_op_modify_reply finish")
+        _  , n90 = n39.build( 90, f_onapplied)
+        e86, n91 = n39.build( 91, f_oncommit)
+        _  , _   = n90.build_endf(e41)
+        _  , _   = n90.build(n91, e86)
+        _  , _   = n91.build_endf(e41)
+
+        # function on success and finish
+        e52, n50, f_success = graph.build_func(
+                              50, "primarylogpg register_on_success start")
+        e53, n51 = n50.build( 51, "primarylogpg register_on_success finish")
+        e54, n52 = n51.build( 52, "primarylogpg register_on_finish start")
+        e55, n53 = n52.build_endf("primarylogpg register_on_finish finish")
+
+        # function all applied
+        e43, n41, f_allapplied = graph.build_func(
+                              41, "primarylogpg repop_all_applied start", "all_applied")
+        e44, n42 = n41.build_endf("primarylogpg repop_all_applied finish")
+        _  , n92 = n41.build( 92, f_success)
+        _  , _   = n92.build_endf(e44)
+
+        # function on applied callback
+        e42, n40, f_onapplied = graph.build_func(
+                              40, "replicatedbackend execute_on_applied start", "on_applied")
+        _  , n42 = n40.build( 42, f_allapplied)
+        e45, n43 = n42.build_endf("replicatedbackend execute_on_applied finish")
+
+        # function all committed
+        e47, n45, f_allcommitted = graph.build_func(
+                              45, "primarylogpg repop_all_committed start", "all_committed")
+        e48, n46 = n45.build( 46, "primarylogpg register_on_commit start")
+        e49, n47 = n46.build( 47, "primarylogpg send_message_osd_cluster start")
+        e50, n48 = n47.build( 48, "primarylogpg send_message_osd_cluster finish")
+        e51, n49 = n48.build( 49, "primarylogpg register_on_commit finish")
+        e56, _   = n49.build_endf("primarylogpg repop_all_committed finish")
+        _  , n53 = n49.build( 53, f_success)
+        _  , n54 = n53.build_endf(e56)
+
+        # function on commit callback
+        e46, n44, f_oncommit = graph.build_func(
+                              44, "replicatedbackend execute_on_commit start", "on_commit")
+        _  , n54 = n44.build( 54, f_allcommitted)
+        e57, _   = n54.build_endf("replicatedbackend execute_on_commit finish")
+
+        # function replica osd send reply
+        e81, n78, f_sendrep = graph.build_func(
+                              78, "replicatedbackend send_message_osd_cluster start", "send_reply")
+        e82, _   = n78.build_endf("replicatedbackend send_message_osd_cluster finish")
+
+#### nested request write_journal ####
+        # thread osd journal write
+        e62, n59 = graph.build_thread(osd,
+                              59, "filejournal singlewrite", "write_journal")
+        _  , _   = n59.build(n59, e62)
+        e63, n60 = n59.build( 60, "filejournal queue_completions_thru")
+        e64, n61 = n60.build( 61, "filejournal queue_finisher start")
+        e65, n62 = n61.build( 62, "filejournal queue_finisher finish")
+        _  , _   = n62.build(n60, e63)
+        n62.set_state("SUCCESS")
+
+#### request write_full ####
+        # thread client issue writefull
         e1,  n1  = graph.build_thread(client,
                                1, "IoCtx writefull start", "write_full")
         e2,  n2  =  n1.build(  2, "objecter _op_submit start")
@@ -42,13 +136,13 @@ class CephWritefull(DriverBase):
         e9,  n9  =  n8.build(  9, "IoCtx lock finish")
         e10, n10 =  n9.build( 10, "IoCtx writefull finish")
 
-        # client receive message
+        # thread client receive message
         e11, n11 = graph.build_thread(client,
                               11, "messenger fast_dispatch start")
         e12, n12 = n11.build( 12, "objecter ms_dispatch")
         e13, n13 = n12.build( 13, "messenger fast_dispatch finish")
 
-        # osd recieive message
+        # thread osd recieive message
         e14, n14 = graph.build_thread(osd,
                               14, "messenger fast_dispatch start")
         e15, n15 = n14.build( 15, "osd dispatch_op_fast start")
@@ -57,101 +151,28 @@ class CephWritefull(DriverBase):
         e18, n18 = n17.build( 18, "osd dispatch_op_fast finish")
         e19, n19 = n18.build( 19, "messenger fast_dispatch finish")
 
-        # osd dequeue op
+        # thread osd dequeue op
         e20, n20 = graph.build_thread(osd,
                               20, "osd dequeue_op start")
-
-        # main osd receive OSD_OP
-        e21, n21 = n20.build( 21, "primarylogpg do_request start")
-        e22, n22 = n21.build( 22, "primarylogpg execute_ctx start")
-        e23, n23 = n22.build( 23, "primarylogpg prepare_transaction start")
-        e24, n24 = n23.build( 24, "primarylogpg do_osd_ops start")
-        e25, n25 = n24.build( 25, "primarylogpg do_osd_ops finish")
-        e26, n26 = n25.build( 26, "primarylogpg prepare_transaction finish")
-        e27, n27 = n26.build( 27, "primarylogpg submit_transaction start")
-        e28, n28 = n27.build( 28, "replicatedbackend send_message_osd_cluster start")
-        e29, _   = n28.build(n27, "replicatedbackend send_message_osd_cluster finish")
-        e30, n29 = n27.build( 29, "replicatedbackend queue_transactions start")
-        e31, n30 = n29.build( 30, "filestore queue_transactions")
-        e32, n31 = n30.build( 31, "filejournal queue_writeq start")
-        e33, n32 = n31.build( 32, "filejournal queue_writeq finish")
-        e34, n33 = n32.build( 33, "replicatedbackend queue_transactions finish")
-        e35, n34 = n33.build( 34, "primarylogpg submit_transaction finish")
-        e36, n35 = n34.build( 35, "primarylogpg execute_ctx finish")
-        e37, n36 = n35.build( 36, "primarylogpg do_request finish")
-
+        _  , n36 = n20.build( 36, f_doreq)
+        _  , _   = n20.build(n36, f_handlemsg)
         e38, n37 = n36.build( 37, "osd dequeue_op finish")
 
-        # main osd receive sub_op_reply
-        e39, n38 = n20.build( 38, "replicatedbackend handle_message")
-        e40, n39 = n38.build( 39, "replicatedbackend sub_op_modify_reply start")
-        e41, _   = n39.build(n36, "replicatedbackend sub_op_modify_reply finish")
-
-        # main osd applied 3 osds
-        e42, n40 = n39.build( 40, "replicatedbackend execute_on_applied start")
-        e43, n41 = n40.build( 41, "primarylogpg repop_all_applied start")
-        e44, n42 = n41.build( 42, "primarylogpg repop_all_applied finish")
-        e45, n43 = n42.build( 43, "replicatedbackend execute_on_applied finish")
-
-        e46, n44 = n43.build( 44, "replicatedbackend execute_on_commit start")
-        e47, n45 = n44.build( 45, "primarylogpg repop_all_committed start")
-        e48, n46 = n45.build( 46, "primarylogpg register_on_commit start")
-        e49, n47 = n46.build( 47, "primarylogpg send_message_osd_cluster start")
-        e50, n48 = n47.build( 48, "primarylogpg send_message_osd_cluster finish")
-        e51, n49 = n48.build( 49, "primarylogpg register_on_commit finish")
-        e52, n50 = n49.build( 50, "primarylogpg register_on_success start")
-        e53, n51 = n50.build( 51, "primarylogpg register_on_success finish")
-        e54, n52 = n51.build( 52, "primarylogpg register_on_finish start")
-        e55, n53 = n52.build( 53, "primarylogpg register_on_finish finish")
-        e56, n54 = n53.build( 54, "primarylogpg repop_all_committed finish")
-        e57, _   = n54.build(n39, "replicatedbackend execute_on_commit finish")
-
-        # case on commit first
-        _  , _   = n39.build(n44, e46)
-        _  , _   = n49.build(n54, e56)
-
-        # case all applied separatly
-        _  , _   = n43.build(n36, e41)
-
-        # case applied - success - finish
-        _  , _   = n41.build(n50, e52)
-        _  , _   = n53.build(n42, e44)
-
-        # TODO: model call operations
-        # replica osd 
-        _  , _   = n38.build(n29, e30)
-        _  , _   = n33.build(n37, e38)
-
-        # main osd on applied
+        # thread main osd on applied
         e58, n55 = graph.build_thread(osd,
                               55, "replicatedbackend op_applied start")
         e59, n56 = n55.build( 56, "replicatedbackend op_applied finish")
+        _  , n94 = n55.build( 94, f_allapplied)
+        _  , _   = n94.build(n56, e59)
 
-        # case call all applied
-        _  , _   = n55.build(n41, e43)
-        _  , _   = n42.build(n56, e59)
-
-        # main osd on commit
+        # thread main osd on commit
         e60, n57 = graph.build_thread(osd,
                               57, "replicatedbackend op_commit start")
         e61, n58 = n57.build( 58, "replicatedbackend op_commit finish")
+        _  , n95 = n57.build( 95, f_allcommitted)
+        _  , _   = n95.build(n58, e61)
 
-        # journal write
-        e62, n59 = graph.build_thread(osd,
-                              59, "filejournal singlewrite", "write_journal")
-        _  , _   = n59.build(n59, e62)
-        e63, n60 = n59.build( 60, "filejournal queue_completions_thru")
-        e64, n61 = n60.build( 61, "filejournal queue_finisher start")
-        e65, n62 = n61.build( 62, "filejournal queue_finisher finish")
-        _  , _   = n62.build(n60, e63)
-
-        n62.set_state("SUCCESS")
-
-        # case call all commit
-        _  , _   = n57.build(n45, e47)
-        _  , _   = n54.build(n58, e61)
-
-        # journaled ahead
+        # thread journaled ahead
         e66, n63 = graph.build_thread(osd,
                               63, "filestore _journaled_ahead start")
         e67, n64 = n63.build( 64, "filestore queue_op start")
@@ -160,35 +181,31 @@ class CephWritefull(DriverBase):
         e70, n67 = n66.build( 67, "filestore queue_ondisk_finishers finish")
         e71, n68 = n67.build( 68, "filestore _journaled_ahead finish")
 
-        # disk write
+        # thread disk write
         e72, n69 = graph.build_thread(osd,
                               69, "filestore _do_op start")
         e73, n70 = n69.build( 70, "filestore _do_op finish")
         e74, n71 = n70.build( 71, "filestore _finish_op start")
+        # replica osd disk write
+        e77, n74 = n71.build( 74, "filestore queue_onreadable start")
         e75, n72 = n71.build( 72, "filestore execute_onreadable_sync start")
         e76, n73 = n72.build( 73, "filestore execute_onreadable_sync finish")
-        e77, n74 = n73.build( 74, "filestore queue_onreadable start")
+        _  , _   = n73.build(n74, e77)
         e78, n75 = n74.build( 75, "filestore queue_onreadable finish")
         e79, n76 = n75.build( 76, "filestore _finish_op finish")
 
-        # replica osd disk write
-        _  , _   = n71.build(n74, e77)
-
-        ## replica osd on commit
+        # thread replica osd on commit
         e80, n77 = graph.build_thread(osd,
                               77, "replicatedbackend sub_op_modify_commit start")
-        e81, n78 = n77.build( 78, "replicatedbackend send_message_osd_cluster start")
-        e82, n79 = n78.build( 79, "replicatedbackend send_message_osd_cluster finish")
+        _  , n79 = n77.build( 79, f_sendrep)
         e83, n80 = n79.build( 80, "replicatedbackend sub_op_modify_commit finish")
 
-        ## replica osd on applied
+        # thread replica osd on applied
         e84, n81 = graph.build_thread(osd,
                               81, "replicatedbackend sub_op_modify_applied start")
         e85, n82 = n81.build( 82, "replicatedbackend sub_op_modify_applied finish")
-
-        #! case  on applied sendmsg
-        _  , _   = n81.build(n78, e81)
-        _  , _   = n79.build(n82, e85)
+        _  , n96 = n81.build( 96, f_sendrep)
+        _  , _   = n96.build(e85)
 
         n3.set_lock()
         n5.set_lock()
@@ -227,9 +244,9 @@ class CephWritefull(DriverBase):
         j6 = e69.join_local(e80, ["tracked_op_seq"])
         # replica osd reply main osd
         j7 = e81.join_remote(e14, ["tid",
-                                   "msg_op",
-                                   ("target_t", "target"),
-                                   ("target", "target_s")])
+                                    "msg_op",
+                                    ("target_t", "target"),
+                                    ("target", "target_s")])
         # main osd on apply
         j8 = e77.join_local(e58, ["tracked_op_seq"])
         # replica osd on apply

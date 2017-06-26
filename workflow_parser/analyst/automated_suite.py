@@ -161,7 +161,7 @@ def general_purpose_analysis(master_graph,
 
         comp_df = extendedints_df[extendedints_df["request_type"] == r_type]
         for comp in comps:
-            _df = comp_df[comp_df["path"] == str(comp)]["lapse"]
+            _df = comp_df[comp_df["path_type"] == str(comp)]["lapse"]
             report.register("%s %s dist:" % (r_type, comp),
                     ("%6.2f%% " % (_df.sum()/cumulated*100))
                     + f_dist([v for v in _df], 9))
