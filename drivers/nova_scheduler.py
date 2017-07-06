@@ -38,7 +38,7 @@ class NovaScheduler(DriverBase):
     def build_graph(self, graph):
 
         e1,  n1  = graph.build_thread(api,
-                               1, "received", True)
+                               1, "received", "boot")
         e2,  n20 =  n1.build( 20, "failed:")
         e3,  n2  =  n1.build(  2, "sent/retried")
         e4,  n27 =  n2.build( 27, "api returned")
@@ -75,8 +75,6 @@ class NovaScheduler(DriverBase):
         e26, n32 = n31.build( 32, "finished: rescheduled")
         e27, n23 = n15.build( 23, "fail:")
         e28, n26 = n23.build( 26, "finished:")
-
-        n5.set_lock()
 
         e3.join_remote(e5)
         e10.join_remote(e14)

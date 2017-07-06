@@ -985,6 +985,11 @@ class Master(object):
 #-------
     def build_thread(self, component, tonode_or_id, payload_or_edge,
                      request_type=None):
+        if request_type is not None and not isinstance(request_type, str):
+            raise RuntimeError("build_thread() requires request_type as str!")
+        if not isinstance(component, Component):
+            raise RuntimeError("build_thread() requires component as Component!")
+
         self._thread_index += 1
         t_name = "g%d" % self._thread_index
         thread = ThreadGraph(t_name, component, self, request_type)
@@ -994,9 +999,12 @@ class Master(object):
         return from_node.build(tonode_or_id, payload_or_edge)
 
     def build_func(self, tonode_or_id, payload_or_edge, func_name):
+        if not isinstance(func_name, str):
+            raise RuntimeError("build_func() requires func_name as str!")
         if func_name in self.funcgraphs_byname:
             raise RuntimeError("build_func() error: already has function %s!"
                     % func_name)
+
         function = FunctionGraph(func_name, self)
         self.funcgraphs_byname[func_name] = function
         from_node = function.start_node

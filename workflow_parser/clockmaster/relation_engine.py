@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from numbers import Rational
+from numbers import Real
 
 
 class HostConstraint(object):
@@ -212,7 +212,7 @@ class RelationConstraint(object):
 
 
 class CausalEngine(object):
-    def __init__(self, relations):
+    def __init__(self):
         self.hosts = {}
         self.unknown_hostcs = []
         self.determined_hostcs = set()
@@ -237,22 +237,22 @@ class CausalEngine(object):
     def register(self, from_host, to_host, from_seconds, to_seconds):
         assert isinstance(from_host, str)
         assert isinstance(to_host, str)
-        assert isinstance(from_seconds, Rational)
-        assert isinstance(to_seconds, Rational)
+        assert isinstance(from_seconds, Real)
+        assert isinstance(to_seconds, Real)
 
-        from_hostc = self._create_hostc(relation.from_host)
-        to_hostc = self._create_hostc(relation.to_host)
+        from_hostc = self._create_hostc(from_host)
+        to_hostc = self._create_hostc(to_host)
 
         r_key = (from_host, to_host)
-        relationcon = _relationcon_by_from_to.get(r_key)
+        relationcon = self._relationcon_by_from_to.get(r_key)
         if not relationcon:
             relationcon = RelationConstraint(from_hostc, to_hostc)
             self.relationcons.add(relationcon)
 
-            _relationcon_by_from_to[r_key] = relationcon
+            self._relationcon_by_from_to[r_key] = relationcon
             r_rkey = (to_host, from_host)
-            assert r_rkey not in _relationcon_by_from_to
-            _relationcon_by_from_to[r_rkey] = relationcon
+            assert r_rkey not in self._relationcon_by_from_to
+            self._relationcon_by_from_to[r_rkey] = relationcon
 
             from_hostc.relationcons.append(relationcon)
             to_hostc.relationcons.append(relationcon)

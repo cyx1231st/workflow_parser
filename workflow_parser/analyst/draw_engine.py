@@ -337,7 +337,10 @@ class DrawEngine(object):
         with self._build_fig("boxplot", name,
                 figsize=(fig_wid+4, 5)) as fig:
             ax = sns.boxplot(color=color, palette=palette, **kwargs)
-            ax.set_xticklabels(ordered_x.index,rotation=90)
+            x_labels = []
+            for k in ordered_x.index:
+                x_labels.append("%s(%d)" % (k, len(x_groups.get_group(k))))
+            ax.set_xticklabels(x_labels,rotation=90)
             if if_swarm:
                 sns.swarmplot(**kwargs)
 
