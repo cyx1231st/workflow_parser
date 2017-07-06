@@ -12,7 +12,7 @@ import pandas as pd
 import seaborn as sns
 from sys import maxint
 
-from ..target import Target
+from ..datasource import Target
 from ..workflow.entities.join import InnerjoinInterval
 from ..workflow.entities.join import InterfaceInterval
 from ..workflow.entities.join import InterfacejoinInterval

@@ -6,10 +6,10 @@ from os import path
 import sys
 
 from ..service_registry import ServiceRegistry
-from ..target import Target
-from ..target import Thread
-from ..target import Line
 from ..utils import Report
+from . import Target
+from . import Thread
+from . import Line
 from .exc import LogError
 from .log_entities import LogFile
 from .log_entities import LogLine

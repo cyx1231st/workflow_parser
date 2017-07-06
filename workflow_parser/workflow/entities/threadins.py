@@ -3,10 +3,10 @@ from collections import defaultdict
 from functools import total_ordering
 
 from ... import reserved_vars as rv
-from ...target import Line
-from ...target import Thread
-from ...graph import State
-from ...graph import Step
+from ...datasource import Line
+from ...datasource import Thread
+from ...graph.token import State
+from ...graph.token import Step
 from ...graph import ThreadGraph
 
 

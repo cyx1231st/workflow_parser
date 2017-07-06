@@ -2,11 +2,11 @@ from __future__ import print_function
 
 from collections import defaultdict
 
-from ...target import Target
-from ...target import Thread
-from ...target import Line
+from ...datasource import Target
+from ...datasource import Thread
+from ...datasource import Line
 from ...graph import Master
-from ...graph import Token
+from ...graph.token import Token
 from ...utils import Report
 from ..entities.threadins import BlankInterval
 from ..entities.threadins import Pace
