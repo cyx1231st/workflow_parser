@@ -1,4 +1,5 @@
 from abc import ABCMeta
+from abc import abstractproperty
 
 from ...graph import JoinBase
 from ...graph import InnerJoin
@@ -44,6 +45,18 @@ class JoinIntervalBase(IntervalBase):
     @property
     def join_obj(self):
         return self.entity
+
+    @abstractproperty
+    def requestins(self):
+        raise NotImplementedError()
+
+    @property
+    def request(self):
+        return self.requestins.request
+
+    @property
+    def request_type(self):
+        return self.requestins.request_type
 
     @property
     def from_threadins(self):
@@ -120,7 +133,7 @@ class JoinIntervalBase(IntervalBase):
     def __repr__(self):
         return "<%s#%s %f -> %f, %s -> %s%s>" % (
                 self.__class__.__name__,
-                self.path_name,
+                self.path,
                 self.from_seconds, self.to_seconds,
                 self.from_host, self.to_host,
                 self.__str__marks__())
@@ -134,17 +147,12 @@ class EmptyJoin(JoinIntervalBase):
         else:
             assert to_pace
             self._pace = to_pace
-        self.path_name = "EMPTY"
         self.from_pace = from_pace
         self.to_pace = to_pace
 
     @property
     def requestins(self):
         return self._pace.threadins.requestins
-
-    @property
-    def request(self):
-        return self.requestins.request
 
     def __repr__(self):
         info = ""
@@ -184,10 +192,6 @@ class InnerjoinIntervalBase(JoinIntervalBase):
         to_ = self.to_pace.threadins.requestins
         assert from_ is to_
         return from_
-
-    @property
-    def request(self):
-        return self.requestins.request
 
     @classmethod
     def create(cls, join_obj, from_item, to_item):
@@ -233,10 +237,10 @@ class InterfaceInterval(InnerjoinIntervalBase):
         str_marks = super(InterfaceInterval, self).__str__marks__()
         if self.joins_crossrequest_int is not None:
             str_marks += ", [%s, %s, %s | %s, %s, %s]" %\
-                (self.joins_crossrequest_int.path_name,
+                (self.joins_crossrequest_int.path,
                  self.joins_crossrequest_int.to_seconds,
                  self.joins_crossrequest_int.to_host,
-                 self.joined_crossrequest_int.path_name,
+                 self.joined_crossrequest_int.path,
                  self.joined_crossrequest_int.from_seconds,
                  self.joined_crossrequest_int.from_host)
         return str_marks
@@ -272,7 +276,6 @@ class InterfacejoinInterval(JoinIntervalBase):
                     join_obj, from_entity, to_entity,
                     to_pace=to_entity.to_pace)
         self.interface_int = interface_int
-        # self.path_name = name
         self.join_nr_int = None
 
         if join_obj.is_left:
@@ -304,10 +307,6 @@ class InterfacejoinInterval(JoinIntervalBase):
     @property
     def requestins(self):
         return self.interface_int.requestins
-
-    @property
-    def request(self):
-        return self.requestins.request
 
     @property
     def joined_int(self):
@@ -351,6 +350,11 @@ class NestedrequestInterval(JoinIntervalBase):
         self.right_cr_int = right_cr_int
 
     @property
+    def state_name(self):
+        ret = super(NestedrequestInterval, self).state_name
+        return "nest"+ret
+
+    @property
     def interface_int(self):
         return self.left_cr_int.interface_int
 
@@ -361,10 +365,6 @@ class NestedrequestInterval(JoinIntervalBase):
     @property
     def requestins(self):
         return self.left_cr_int.requestins
-
-    @property
-    def request(self):
-        return self.left_cr_int.request
 
     @property
     def joined_int(self):

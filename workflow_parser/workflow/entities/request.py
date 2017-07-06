@@ -1,7 +1,7 @@
 from collections import defaultdict
 from itertools import chain
 
-from ...graph import MasterGraph
+from ...graph import Master
 from ..exc import StateError
 from .join import EmptyJoin
 from .join import InnerjoinInterval
@@ -16,14 +16,24 @@ from .threadins import ThreadIntervalBase
 class RequestInterval(ThreadInterval):
     def __init__(self, from_pace, to_pace):
         assert from_pace.threadins is to_pace.threadins
-        super(ThreadIntervalBase, self).__init__(from_pace, to_pace, None)
+        super(ThreadIntervalBase, self).__init__(
+                from_pace, to_pace, from_pace.threadins.component)
+
+    @property
+    def path(self):
+        ret = super(RequestInterval, self).path
+        if self.is_request_end:
+            ret = "-"+ret
+        if self.is_request_start:
+            ret = "+"+ret
+        return ret
 
 
 class RequestInstance(object):
     _index_dict = defaultdict(lambda: 0)
 
     def __init__(self, mastergraph, request, builder):
-        assert isinstance(mastergraph, MasterGraph)
+        assert isinstance(mastergraph, Master)
 
         self.request = request
         self.mastergraph = mastergraph
@@ -57,7 +67,9 @@ class RequestInstance(object):
 
     @property
     def request_type(self):
-        return self.start_interval.from_node.request_name
+        ret = self.start_interval.from_pace.request_type
+        assert ret
+        return ret
 
     @property
     def components(self):
@@ -147,16 +159,9 @@ class RequestInstance(object):
                 next_i = None
                 if isinstance(interval, ThreadInterval):
                     if isinstance(interval.prv_int, ThreadInterval):
-                        if interval.prv_int.is_lock:
-                            if interval.joined_int:
-                                next_i = interval.joined_int
-                            else:
-                                next_i = interval.prv_int
+                        if interval.joined_int:
+                            next_i = interval.joined_int
                         else:
-                            if interval.joined_int:
-                                e = StateError("Both prv_int and joined_int are accetable")
-                                e.where = interval.node.name
-                                raise e
                             next_i = interval.prv_int
                     else:
                         next_i = interval.joined_int
@@ -171,7 +176,7 @@ class RequestInstance(object):
                 if (next_i is None and not interval.is_request_start) or\
                         isinstance(next_i, EmptyJoin):
                     e = StateError("The path backward is empty")
-                    e.where = interval.entity.name
+                    e.where = interval.state_name
                     raise e
                 interval = next_i
         else:

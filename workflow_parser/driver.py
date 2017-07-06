@@ -3,7 +3,7 @@ from abc import abstractmethod
 
 from . import reserved_vars as rv
 from .datasource.log_entities import DriverPlugin
-from .graph import MasterGraph
+from .graph import Master
 from .parse import main1
 from .service_registry import ServiceRegistry
 
@@ -20,7 +20,7 @@ class DriverBase(DriverPlugin):
             assert isinstance(name, str)
             self.name = name
         self.services = services
-        self.graph = MasterGraph(self.name)
+        self.graph = Master(self.name)
 
         self.build_graph(self.graph)
         super(DriverBase, self).__init__()

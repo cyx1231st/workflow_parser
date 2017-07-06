@@ -5,25 +5,23 @@ from functools import total_ordering
 from ... import reserved_vars as rv
 from ...target import Line
 from ...target import Thread
-from ...graph import Edge
-from ...graph import Node
+from ...graph import State
+from ...graph import Step
 from ...graph import ThreadGraph
 
 
 @total_ordering
 class Pace(object):
     """ Pace is relative to transition. """
-    def __init__(self, line_obj, from_node, edge, threadins):
+    def __init__(self, line_obj, step, threadins):
         assert isinstance(line_obj, Line)
         assert line_obj._assigned is None
-        assert isinstance(from_node, Node)
-        assert isinstance(edge, Edge)
+        assert isinstance(step, Step)
         assert isinstance(threadins, ThreadInstance)
         assert line_obj.thread_obj is threadins.thread_obj
 
         self.line_obj = line_obj
-        self.from_node = from_node
-        self.edge = edge
+        self.step = step
         self.threadins = threadins
         self.prv_int = None
         self.nxt_int = None
@@ -38,16 +36,16 @@ class Pace(object):
         assert self.thread == self.thread_obj.thread
 
     @property
-    def to_node(self):
-        return self.edge.node
+    def path(self):
+        return self.step.path
 
     @property
-    def request_state(self):
-        return self.to_node.request_state
+    def step_name(self):
+        return self.step.name
 
     @property
     def marks(self):
-        return self.to_node.marks
+        return self.step.to_state.marks
 
     @property
     def thread_obj(self):
@@ -90,20 +88,45 @@ class Pace(object):
             return None
 
     @property
+    def request_state(self):
+        return self.step.to_state.request_state
+
+    @property
+    def request_type(self):
+        return self.step.from_state.request_type
+
+    @property
     def is_request_start(self):
-        return self.from_node.is_request_start
+        return self.step.from_state.is_request_start
 
     @property
     def is_request_end(self):
-        return self.to_node.is_request_end
+        return self.step.to_state.is_request_end
 
     @property
     def is_thread_start(self):
-        return self.from_node.is_thread_start
+        return self.step.from_state.is_thread_start
 
     @property
     def is_thread_end(self):
-        return self.to_node.is_thread_end
+        return self.step.to_state.is_thread_end and\
+                not isinstance(self.nxt_int, ThreadInterval)
+
+    @property
+    def joins_objs(self):
+        return self.step.joins_objs
+
+    @property
+    def joined_objs(self):
+        return self.step.joined_objs
+
+    @property
+    def joins_interface(self):
+        return self.step.joins_interface
+
+    @property
+    def joined_interface(self):
+        return self.step.joined_interface
 
     # total ordering
     __eq__ = lambda self, other: self.seconds == other.seconds
@@ -137,22 +160,22 @@ class Pace(object):
 
     def _mark_str(self):
         mark_str = ""
-        if self.edge.joins_objs:
+        if self.step.joins_objs:
             mark_str += ", join:"
             if self.joins_int:
                 mark_str += "[%s->%.3f,%s]" %\
-                        (self.joins_int.path_name,
+                        (self.joins_int.path,
                          self.joins_pace.seconds,
-                         self.joins_pace.edge.name)
+                         self.joins_pace.step.name)
             else:
                 mark_str += "?"
-        if self.edge.joined_objs:
+        if self.step.joined_objs:
             mark_str += ", joined:"
             if self.joined_int:
                 mark_str += "[%s<-%.3f,%s]" %\
-                        (self.joined_int.path_name,
+                        (self.joined_int.path,
                          self.joined_pace.seconds,
-                         self.joined_pace.edge.name)
+                         self.joined_pace.step_name)
             else:
                 mark_str += "?"
         if self.is_thread_start:
@@ -163,15 +186,15 @@ class Pace(object):
             mark_str += ",e"
         if self.is_request_end:
             mark_str += ",E"
+        if self.request_state:
+            mark_str += "@%s" % self.request_state
         return mark_str
 
     def __str__(self):
         mark_str = self._mark_str()
-        return "<Pace %.3f {%s>%s>%s}, `%s`, %d lvars, %s-%s %s%s>" % (
+        return "<Pace %.3f {%s}, `%s`, %d lvars, %s-%s %s%s>" % (
                 self.seconds,
-                self.from_node.name,
-                self.edge.name,
-                self.to_node.name,
+                self.step.path,
                 self.keyword,
                 len(self.line_obj.keys),
                 self.target,
@@ -179,14 +202,12 @@ class Pace(object):
                 self.request,
                 mark_str)
 
-    def __str__thread__(self):
+    def __str_thread__(self):
         mark_str = self._mark_str()
 
-        return "%.3f {%s>%s>%s}, `%s`, %d lvars%s" % (
+        return "%.3f {%s}, `%s`, %d lvars%s" % (
                 self.seconds,
-                self.from_node.name,
-                self.edge.name,
-                self.to_node.name,
+                self.step.path,
                 self.keyword,
                 len(self.line_obj.keys),
                 mark_str)
@@ -206,31 +227,26 @@ class IntervalBase(object):
 
         self.from_pace = from_pace
         self.to_pace = to_pace
+        # state or join_obj or None
         self.entity = entity
         self.is_main = False
-        if self.entity:
-            name_str = self.entity.name
-        else:
-            name_str = "Nah"
-        self.path_name = "%s(%s)%s" % (self.from_edge.name,
-                                       name_str,
-                                       self.to_edge.name)
 
     @property
-    def from_node(self):
-        return self.from_pace.from_node
+    def fromstep_name(self):
+        return self.from_pace.step_name if self.from_pace else "Nah"
 
     @property
-    def to_node(self):
-        return self.to_pace.to_node
+    def tostep_name(self):
+        return self.to_pace.step_name if self.to_pace else "Nah"
 
     @property
-    def from_edge(self):
-        return self.from_pace.edge
+    def state_name(self):
+        return self.entity.name if self.entity else "Nah"
 
     @property
-    def to_edge(self):
-        return self.to_pace.edge
+    def path(self):
+        return "%s[%s]%s" % (
+                self.fromstep_name, self.state_name, self.tostep_name)
 
     @property
     def from_seconds(self):
@@ -256,14 +272,21 @@ class IntervalBase(object):
     def is_violated(self):
         return self.from_seconds > self.to_seconds
 
+    @property
+    def marks(self):
+        if isinstance(self.entity, State):
+            return self.entity.marks
+        else:
+            return []
+
     def __repr__(self):
         return "<%s#%s: %s %s |--> %s %s>" % (
                 self.__class__.__name__,
-                self.path_name,
+                self.path,
                 self.from_seconds,
-                self.from_edge.keyword,
+                self.from_pace.step.keyword,
                 self.to_seconds,
-                self.to_edge.keyword)
+                self.to_pace.step.keyword)
 
 
 class ThreadIntervalBase(IntervalBase):
@@ -336,9 +359,11 @@ class BlankInterval(ThreadIntervalBase):
 
 class ThreadInterval(ThreadIntervalBase):
     def __init__(self, from_pace, to_pace):
+        state = from_pace.step.to_state
+        assert to_pace.step.from_state is state
         super(ThreadInterval, self).__init__(from_pace,
                                              to_pace,
-                                             from_pace.to_node)
+                                             state)
         assert from_pace.threadins is to_pace.threadins
 
     @property
@@ -354,12 +379,8 @@ class ThreadInterval(ThreadIntervalBase):
         return self.from_pace.joined_int
 
     @property
-    def node(self):
+    def state(self):
         return self.entity
-
-    @property
-    def is_lock(self):
-        return self.node.is_lock
 
     @property
     def requestins(self):
@@ -369,33 +390,41 @@ class ThreadInterval(ThreadIntervalBase):
     def request(self):
         return self.requestins.request
 
+    @property
+    def request_type(self):
+        return self.requestins.request_type
+
     # inheritance
     @property
     def is_request_start(self):
-        return self.from_node.is_request_start
+        return self.from_pace.is_request_start
 
     @property
     def is_request_end(self):
-        return self.to_node.is_request_end
+        return self.to_pace.is_request_end
 
     @property
     def is_thread_start(self):
-        return self.from_node.is_thread_start
+        return self.from_pace.is_thread_start
 
     @property
     def is_thread_end(self):
-        return self.to_node.is_thread_end and\
-                self is self.threadins.intervals[-1]
+        if self.to_pace.is_thread_end:
+            assert self is self.threadins.intervals[-1]
+            return True
+        else:
+            return False
 
     @property
     def request_state(self):
-        return self.to_node.request_state
+        return self.to_pace.request_state
 
 
 class ThreadInstance(object):
     def __init__(self, thread_obj, threadgraph):
         assert isinstance(thread_obj, Thread)
         assert isinstance(threadgraph, ThreadGraph)
+        assert thread_obj.component is threadgraph.component
 
         self.thread_obj = thread_obj
         self.threadgraph = threadgraph
@@ -531,7 +560,7 @@ class ThreadInstance(object):
         ret_str += "\n  %s" % self.threadgraph
         ret_str += "\n  Paces:"
         for pace in self._iter_paces():
-            ret_str += "\n  | %s" % pace.__str__thread__()
+            ret_str += "\n  | %s" % pace.__str_thread__()
         return ret_str
 
     def _iter_paces(self, reverse=False):

@@ -31,90 +31,90 @@ class CephWritefull(DriverBase):
     def build_graph(self, graph):
 #### functions ####
         # function queue transaction
-        e30, n29, f_queuet = graph.build_func(
-                              29, "replicatedbackend queue_transactions start", "queue_transactions")
-        e31, n30 = n29.build( 30, "filestore queue_transactions")
-        e32, n31 = n30.build( 31, "filejournal queue_writeq start")
-        e33, n32 = n31.build( 32, "filejournal queue_writeq finish")
-        e34, n33 = n32.build_endf("replicatedbackend queue_transactions finish")
+        e30, n1 , f_queuet = graph.build_func(
+                               1, "replicatedbackend queue_transactions start", "qetrn")
+        e31, n2  =  n1.build(  2, "filestore queue_transactions")
+        e32, n3  =  n2.build(  3, "filejournal queue_writeq start")
+        e33, n4  =  n3.build(  4, "filejournal queue_writeq finish")
+        e34, _   =  n4.build_endf("replicatedbackend queue_transactions finish")
 
         # function main osd receive OSD_OP
-        e21, n21, f_doreq = graph.build_func(
-                              21, "primarylogpg do_request start", "do_request")
-        e22, n22 = n21.build( 22, "primarylogpg execute_ctx start")
-        e23, n23 = n22.build( 23, "primarylogpg prepare_transaction start")
-        e24, n24 = n23.build( 24, "primarylogpg do_osd_ops start")
-        e25, n25 = n24.build( 25, "primarylogpg do_osd_ops finish")
-        e26, n26 = n25.build( 26, "primarylogpg prepare_transaction finish")
-        e27, n27 = n26.build( 27, "primarylogpg submit_transaction start")
-        e28, n28 = n27.build( 28, "replicatedbackend send_message_osd_cluster start")
-        e29, n93 = n28.build( 93, "replicatedbackend send_message_osd_cluster finish")
-        _  , _   = n93.build(n28, e28)
-        _  , n33 = n93.build( 33, f_queuet)
-        e35, n34 = n33.build( 34, "primarylogpg submit_transaction finish")
-        e36, n35 = n34.build( 35, "primarylogpg execute_ctx finish")
-        e37, _   = n35.build_endf("primarylogpg do_request finish")
-
-        # function osd handle message
-        e39, n38, f_handlemsg = graph.build_func(
-                              38, "replicatedbackend handle_message", "handle_message")
-        # replica osd write disk
-        e90, _   = n38.build_endf(f_queuet)
-        # main osd receive sub_op_reply
-        e40, n39 = n38.build( 39, "replicatedbackend sub_op_modify_reply start")
-        e41, _   = n39.build_endf("replicatedbackend sub_op_modify_reply finish")
-        _  , n90 = n39.build( 90, f_onapplied)
-        e86, n91 = n39.build( 91, f_oncommit)
-        _  , _   = n90.build_endf(e41)
-        _  , _   = n90.build(n91, e86)
-        _  , _   = n91.build_endf(e41)
+        e21, n1 , f_doreq = graph.build_func(
+                               1, "primarylogpg do_request start", "doreq")
+        e22, n2  =  n1.build(  2, "primarylogpg execute_ctx start")
+        e23, n3  =  n2.build(  3, "primarylogpg prepare_transaction start")
+        e24, n4  =  n3.build(  4, "primarylogpg do_osd_ops start")
+        e25, n5  =  n4.build(  5, "primarylogpg do_osd_ops finish")
+        e26, n6  =  n5.build(  6, "primarylogpg prepare_transaction finish")
+        e27, n7  =  n6.build(  7, "primarylogpg submit_transaction start")
+        e28, n8  =  n7.build(  8, "replicatedbackend send_message_osd_cluster start")
+        e29, n9 =   n8.build(  9, "replicatedbackend send_message_osd_cluster finish")
+        _  , _   =  n9.build( n8, e28)
+        _  , n10 =  n9.build( 10, f_queuet)
+        e35, n11 = n10.build( 11, "primarylogpg submit_transaction finish")
+        e36, n12 = n11.build( 12, "primarylogpg execute_ctx finish")
+        e37, _   = n12.build_endf("primarylogpg do_request finish")
 
         # function on success and finish
-        e52, n50, f_success = graph.build_func(
-                              50, "primarylogpg register_on_success start")
-        e53, n51 = n50.build( 51, "primarylogpg register_on_success finish")
-        e54, n52 = n51.build( 52, "primarylogpg register_on_finish start")
-        e55, n53 = n52.build_endf("primarylogpg register_on_finish finish")
+        e52, n1 , f_success = graph.build_func(
+                               1, "primarylogpg register_on_success start", "onsuc")
+        e53, n2  =  n1.build(  2, "primarylogpg register_on_success finish")
+        e54, n3  =  n2.build(  3, "primarylogpg register_on_finish start")
+        e55, _   =  n3.build_endf("primarylogpg register_on_finish finish")
 
         # function all applied
-        e43, n41, f_allapplied = graph.build_func(
-                              41, "primarylogpg repop_all_applied start", "all_applied")
-        e44, n42 = n41.build_endf("primarylogpg repop_all_applied finish")
-        _  , n92 = n41.build( 92, f_success)
-        _  , _   = n92.build_endf(e44)
+        e43, n1 , f_allapplied = graph.build_func(
+                               1, "primarylogpg repop_all_applied start", "alapl")
+        e44, _   =  n1.build_endf("primarylogpg repop_all_applied finish")
+        _  , n2  =  n1.build(  2, f_success)
+        _  , _   =  n2.build_endf(e44)
 
         # function on applied callback
-        e42, n40, f_onapplied = graph.build_func(
-                              40, "replicatedbackend execute_on_applied start", "on_applied")
-        _  , n42 = n40.build( 42, f_allapplied)
-        e45, n43 = n42.build_endf("replicatedbackend execute_on_applied finish")
+        e42, n1 , f_onapplied = graph.build_func(
+                               1, "replicatedbackend execute_on_applied start", "onapl")
+        _  , n2  =  n1.build(  2, f_allapplied)
+        e45, _   =  n2.build_endf("replicatedbackend execute_on_applied finish")
 
         # function all committed
-        e47, n45, f_allcommitted = graph.build_func(
-                              45, "primarylogpg repop_all_committed start", "all_committed")
-        e48, n46 = n45.build( 46, "primarylogpg register_on_commit start")
-        e49, n47 = n46.build( 47, "primarylogpg send_message_osd_cluster start")
-        e50, n48 = n47.build( 48, "primarylogpg send_message_osd_cluster finish")
-        e51, n49 = n48.build( 49, "primarylogpg register_on_commit finish")
-        e56, _   = n49.build_endf("primarylogpg repop_all_committed finish")
-        _  , n53 = n49.build( 53, f_success)
-        _  , n54 = n53.build_endf(e56)
+        e47, n1 , f_allcommitted = graph.build_func(
+                               1, "primarylogpg repop_all_committed start", "alcmt")
+        e48, n2  =  n1.build(  2, "primarylogpg register_on_commit start")
+        e49, n3  =  n2.build(  3, "primarylogpg send_message_osd_cluster start")
+        e50, n4  =  n3.build(  4, "primarylogpg send_message_osd_cluster finish")
+        e51, n5  =  n4.build(  5, "primarylogpg register_on_commit finish")
+        e56, _   =  n5.build_endf("primarylogpg repop_all_committed finish")
+        _  , n6  =  n5.build(  6, f_success)
+        _  , _   =  n6.build_endf(e56)
 
         # function on commit callback
-        e46, n44, f_oncommit = graph.build_func(
-                              44, "replicatedbackend execute_on_commit start", "on_commit")
-        _  , n54 = n44.build( 54, f_allcommitted)
-        e57, _   = n54.build_endf("replicatedbackend execute_on_commit finish")
+        e46, n1 , f_oncommit = graph.build_func(
+                               1, "replicatedbackend execute_on_commit start", "oncmt")
+        _  , n2  =  n1.build(  2, f_allcommitted)
+        e57, _   =  n2.build_endf("replicatedbackend execute_on_commit finish")
+
+        # function osd handle message
+        e39, n1 , f_handlemsg = graph.build_func(
+                               1, "replicatedbackend handle_message", "hdmsg")
+        # replica osd write disk
+        e90, _   =  n1.build_endf(f_queuet)
+        # main osd receive sub_op_reply
+        e40, n2  =  n1.build(  2, "replicatedbackend sub_op_modify_reply start")
+        e41, _   =  n2.build_endf("replicatedbackend sub_op_modify_reply finish")
+        _  , n3  =  n2.build(  3, f_onapplied)
+        e86, n4  =  n2.build(  4, f_oncommit)
+        _  , _   =  n3.build_endf(e41)
+        _  , _   =  n3.build( n4, e86)
+        _  , _   =  n4.build_endf(e41)
 
         # function replica osd send reply
-        e81, n78, f_sendrep = graph.build_func(
-                              78, "replicatedbackend send_message_osd_cluster start", "send_reply")
-        e82, _   = n78.build_endf("replicatedbackend send_message_osd_cluster finish")
+        e81, n1 , f_sendrep = graph.build_func(
+                               1, "replicatedbackend send_message_osd_cluster start", "sdrep")
+        e82, _   =  n1.build_endf("replicatedbackend send_message_osd_cluster finish")
 
 #### nested request write_journal ####
         # thread osd journal write
         e62, n59 = graph.build_thread(osd,
-                              59, "filejournal singlewrite", "write_journal")
+                              59, "filejournal singlewrite", "writejournal")
         _  , _   = n59.build(n59, e62)
         e63, n60 = n59.build( 60, "filejournal queue_completions_thru")
         e64, n61 = n60.build( 61, "filejournal queue_finisher start")
@@ -125,7 +125,7 @@ class CephWritefull(DriverBase):
 #### request write_full ####
         # thread client issue writefull
         e1,  n1  = graph.build_thread(client,
-                               1, "IoCtx writefull start", "write_full")
+                               1, "IoCtx writefull start", "writefull")
         e2,  n2  =  n1.build(  2, "objecter _op_submit start")
         e3,  n3  =  n2.build(  3, "objecter calculate start")
         e4,  n4  =  n3.build(  4, "objecter calculate finish")
@@ -205,21 +205,7 @@ class CephWritefull(DriverBase):
                               81, "replicatedbackend sub_op_modify_applied start")
         e85, n82 = n81.build( 82, "replicatedbackend sub_op_modify_applied finish")
         _  , n96 = n81.build( 96, f_sendrep)
-        _  , _   = n96.build(e85)
-
-        n3.set_lock()
-        n5.set_lock()
-        n8.set_lock()
-        n16.set_lock()
-        n28.set_lock()
-        n31.set_lock()
-        n39.set_lock()
-        n47.set_lock()
-        n61.set_lock()
-        n64.set_lock()
-        n66.set_lock()
-        n74.set_lock()
-        n78.set_lock()
+        _  , _   = n96.build(n82, e85)
 
         # client send osd
         j1 = e5.join_remote(e14, ["tid",

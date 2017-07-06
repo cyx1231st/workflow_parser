@@ -10,31 +10,6 @@ from ..workflow.entities.join import NestedrequestInterval
 from ..workflow.entities.request import RequestInterval
 
 
-def get_extended_pathtype(interval, mark=False):
-    ret = ""
-    if isinstance(interval, RequestInterval):
-        if mark:
-            if interval.is_request_start:
-                ret += "+"
-            if interval.is_request_end:
-                ret += "-"
-        ret += str(interval.component)
-    elif isinstance(interval, InnerjoinInterval)\
-            or isinstance(interval, InterfacejoinInterval):
-        if mark:
-            if interval.is_remote:
-                ret += "r_"
-            else:
-                ret += "l_"
-        ret += interval.join_obj.name
-    else:
-        assert isinstance(interval, NestedrequestInterval)
-        if mark:
-            ret += "nest_"
-        ret += interval.join_obj.name
-    return ret
-
-
 def projection_time(from_tos):
     from_tos.sort()
 
@@ -59,9 +34,9 @@ def projection_time(from_tos):
 class StepContent(object):
     def __init__(self, interval, step, from_content):
         assert isinstance(step, Step)
-        assert interval.from_edge is step.from_edge
-        assert get_extended_pathtype(interval, True) == step.path_type
-        assert interval.to_edge is step.to_edge
+        assert interval.fromstep_name == step.fromstep_name
+        assert interval.state_name == step.state_name
+        assert interval.tostep_name == step.tostep_name
 
         self.interval = interval
         self.step = step
@@ -88,9 +63,9 @@ class StepContent(object):
 
 
 class Step(object):
-    def __init__(self, path_type, to_edge, prv_step):
-        self.path_type = path_type
-        self.to_edge = to_edge
+    def __init__(self, state_name, tostep_name, prv_step):
+        self.state_name = state_name
+        self.tostep_name = tostep_name
         self.contents = []
 
         self.nxt_steps = []
@@ -100,15 +75,15 @@ class Step(object):
             prv_step.nxt_steps.append(self)
 
     @property
-    def from_edge(self):
-        return self.prv_step and self.prv_step.to_edge
+    def fromstep_name(self):
+        return self.prv_step and self.prv_step.tostep_name
 
     @property
     def path(self):
-        return "%s->%s->%s" % (
-                self.from_edge and self.from_edge.name,
-                self.path_type,
-                self.to_edge.name)
+        return "%s[%s]%s" % (
+                self.fromstep_name,
+                self.state_name,
+                self.tostep_name)
 
     @property
     def len_ints(self):
@@ -165,7 +140,7 @@ class Workflow(object):
         return len(self.reqs)
 
     def build(self, intervals):
-        steps_by_fromstep_toedge = {}
+        steps_by_fromstep_tostepname = {}
         newcontent_by_req = {}
         for interval in intervals:
             if interval is None:
@@ -173,21 +148,21 @@ class Workflow(object):
             if not self._content_by_req:
                 if not self.start_step:
                     self.start_step = Step("START",
-                                           interval.from_edge,
+                                           interval.fromstep_name,
                                            None)
                 from_content = None
                 from_step = self.start_step
             else:
                 from_content = self._content_by_req[interval.request]
                 from_step = from_content.step
-            assert from_step.to_edge is interval.from_edge
-            step_key = (from_step, interval.to_edge)
-            step = steps_by_fromstep_toedge.get(step_key)
+            assert from_step.tostep_name == interval.fromstep_name
+            step_key = (from_step, interval.tostep_name)
+            step = steps_by_fromstep_tostepname.get(step_key)
             if not step:
-                step = Step(get_extended_pathtype(interval, True),
-                            interval.to_edge,
+                step = Step(interval.state_name,
+                            interval.tostep_name,
                             from_step)
-                steps_by_fromstep_toedge[step_key] = step
+                steps_by_fromstep_tostepname[step_key] = step
                 self.len_steps += 1
             content = StepContent(interval, step, from_content)
             self.len_contents += 1

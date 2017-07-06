@@ -7,7 +7,6 @@ import pandas as pd
 from ..workflow.entities.request import RequestInstance
 from ..workflow.entities.request import RequestInterval
 from .automated_suite import general_purpose_analysis
-from .statistic_helper import get_extended_pathtype
 
 
 def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
@@ -105,20 +104,16 @@ def do_statistics(master_graph, requestinss, d_engine, report):
             chain(chain.from_iterable(req.join_ints for req in requestinss.itervalues())),
             None,
             ("request",
-             ("request_type", lambda i: requestinss[i.request].request_type),
-             ("entity", lambda i: i.entity.name),
+             "request_type",
+             "state_name",
              "lapse",
-             "path_name",
+             "path",
              "is_main",
              ("int_type", lambda i: i.__class__.__name__),
              "from_seconds",
              "to_seconds",
              "from_time",
              "to_time",
-             ("from_node", lambda i: i.from_node.name),
-             ("to_node", lambda i: i.to_node.name),
-             ("from_edge", lambda i: i.from_edge.name),
-             ("to_edge", lambda i: i.to_edge.name),
              #join_int
              "remote_type",
              "from_target",
@@ -134,40 +129,32 @@ def do_statistics(master_graph, requestinss, d_engine, report):
             chain.from_iterable(req.thread_ints for req in requestinss.itervalues()),
             None,
             ("request",
-             ("request_type", lambda i: requestinss[i.request].request_type),
-             ("entity", lambda i: i.entity.name),
+             "request_type",
+             "state_name",
              "lapse",
-             "path_name",
+             "path",
              "is_main",
              ("int_type", lambda i: i.__class__.__name__),
              "from_seconds",
              "to_seconds",
              "from_time",
              "to_time",
-             ("from_node", lambda i: i.from_node.name),
-             ("to_node", lambda i: i.to_node.name),
-             ("from_edge", lambda i: i.from_edge.name),
-             ("to_edge", lambda i: i.to_edge.name),
              #thread_int
              "target",
              "host",
              "component",
              "thread"))
 
-    def _get_extended_pathtype(interval):
-        return "%s->%s->%s" % (interval.from_edge.name,
-                               get_extended_pathtype(interval, True),
-                               interval.to_edge.name)
     extendedints_df = _convert_to_dataframe(
             chain.from_iterable(req.extended_ints for req in requestinss.itervalues()),
             None,
             ("request",
-             ("request_type", lambda i: i.requestins.request_type),
+             "request_type",
              "from_seconds",
              "to_seconds",
              "lapse",
-             ("path_type", get_extended_pathtype),
-             ("path", _get_extended_pathtype)))
+             "state_name",
+             "path"))
 
     request_df = _convert_to_dataframe(
             requestinss.itervalues(),

@@ -400,7 +400,6 @@ class DrawEngine(object):
         markersize = 10
         node_markersize = 5
         int_style = "-"
-        int_lock_style = ":"
         main_linewidth = 3
         other_linewidth = 1
 
@@ -485,16 +484,13 @@ class DrawEngine(object):
                 for int_ in ti.intervals:
                     from_x = int_.from_seconds - start
                     to_x = int_.to_seconds - start
-                    if int_.is_lock:
-                        linestyle = int_lock_style
-                    else:
-                        linestyle = int_style
+                    linestyle = int_style
                     linewidth = _process_main(int_)
                     ax.plot([from_x, to_x],
                              [plot_y, plot_y],
                              linestyle=linestyle,
                              color=color,
-                             label=int_.node.name,
+                             label=int_.state_name,
                              linewidth=linewidth)
 
             # 4. annotate thread intervals
@@ -514,7 +510,7 @@ class DrawEngine(object):
                          markersize=markersize)
 
                 # annotate start edge
-                ax.annotate("%s" % ti.intervals[0].from_edge.name,
+                ax.annotate("%s" % ti.intervals[0].fromstep_name,
                              (ti.start_seconds-start, plot_y),
                              (ti.start_seconds-start-annot_off_x, plot_y),
                              **annot_kw)
@@ -556,14 +552,14 @@ class DrawEngine(object):
                              color=color,
                              markersize=t_markersize)
 
-                    # annotate end edge
+                    # annotate end step
                     if int_.is_thread_end:
-                        ax.annotate("%s" % int_.to_edge.name,
+                        ax.annotate("%s" % int_.tostep_name,
                                      (to_x, plot_y),
                                      (to_x+annot_off_x, plot_y),
                                      **annot_kw)
                     elif int_.lapse >= mark_lim:
-                        ax.annotate("%s" % int_.to_edge.name,
+                        ax.annotate("%s" % int_.tostep_name,
                                      (to_x, plot_y),
                                      (to_x, plot_y+annot_off),
                                      **annot_kw)
@@ -601,11 +597,11 @@ class DrawEngine(object):
         # 1. get main stacked axis list
         main_stacked_results = []
         def _walk_workflow(step):
-            type_ = step.path_type
+            state_name = step.state_name
             color = getcolor_byint(step.contents[0].interval,
                                    ignore_lr=True)
             main_stacked_results.append((
-                type_,
+                state_name,
                 color,
                 [(c.from_seconds, c.to_seconds) for c in step.contents]))
             for nxt_s in step.nxt_steps:
@@ -655,10 +651,10 @@ class DrawEngine(object):
             assert isinstance(req, RequestInstance)
             counter_byentity = defaultdict(lambda: 0)
             for int_ in req.iter_mainpath():
-                path_name = int_.path_name
-                ilist = intlists_byentity[path_name]
-                counter = counter_byentity[path_name]
-                counter_byentity[path_name] += 1
+                path_ = int_.path
+                ilist = intlists_byentity[path_]
+                counter = counter_byentity[path_]
+                counter_byentity[path_] += 1
 
                 if counter > len(ilist):
                     raise RuntimeError()
@@ -792,7 +788,6 @@ class DrawEngine(object):
         markersize = 10
         node_markersize = 5
         int_style = "-"
-        int_lock_style = ":"
         main_linewidth = 2
         other_linewidth = 1
         ##############
@@ -861,7 +856,7 @@ class DrawEngine(object):
                      markersize=markersize)
 
             # annotate start edge
-            ax.annotate("%s" % ti.intervals[0].from_edge.name,
+            ax.annotate("%s" % ti.intervals[0].fromstep_name,
                          (ti.start_seconds-start, tiy[ti]),
                          (ti.start_seconds-start, tiy[ti]+annot_off_y),
                          **annot_kw)
@@ -874,10 +869,7 @@ class DrawEngine(object):
                 to_y = from_y
 
                 # draw interval
-                if int_.is_lock:
-                    linestyle = int_lock_style
-                else:
-                    linestyle = int_style
+                linestyle = int_style
                 if int_.is_main:
                     linewidth = main_linewidth
                     assert plot_main
@@ -892,7 +884,7 @@ class DrawEngine(object):
                          [from_y, to_y],
                          linestyle=linestyle,
                          color=ti_color,
-                         label=int_.node.name,
+                         label=int_.state_name,
                          linewidth=linewidth)
 
                 # mark interval
@@ -902,12 +894,12 @@ class DrawEngine(object):
                     annot_off = -annot_off_y
 
                 if int_.lapse >= pres_lim:
-                    ax.annotate("%s=%.2f" % (int_.node.name, int_.lapse),
+                    ax.annotate("%s=%.2f" % (int_.state_name, int_.lapse),
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
-                    ax.annotate("%s" % int_.node.name,
+                    ax.annotate("%s" % int_.state_name,
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
@@ -932,7 +924,7 @@ class DrawEngine(object):
 
                 # draw thread end
                 if int_.is_thread_end:
-                    ax.annotate("%s" % int_.to_edge.name,
+                    ax.annotate("%s" % int_.tostep_name,
                                  (to_x, to_y),
                                  (to_x, to_y+annot_off_y),
                                  **annot_kw)

@@ -292,7 +292,7 @@ class RequestBuilder(object):
             for joins_int in threadins.joinsints_by_type[EmptyJoin]:
                 requestins.joinints_by_type[EmptyJoin].add(joins_int)
                 unjoins_pace = joins_int.from_pace
-                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
+                self.e_unjoins_paces_by_edge[unjoins_pace.step._edge].add(unjoins_pace)
             for joins_int in threadins.joinsints_by_type[InnerjoinInterval]:
                 requestins.joinints_by_type[InnerjoinInterval].add(joins_int)
                 _process(joins_int.to_threadins)
@@ -323,7 +323,7 @@ class RequestBuilder(object):
             for joins_int in threadins.joinsinterfaceints_by_type[EmptyJoin]:
                 requestins.joinsinterfaceints_by_type[EmptyJoin].add(joins_int)
                 unjoins_pace = joins_int.from_pace
-                self.e_unjoins_paces_by_edge[unjoins_pace.edge].add(unjoins_pace)
+                self.e_unjoins_paces_by_edge[unjoins_pace.step._edge].add(unjoins_pace)
 
             for joined_int in threadins.joinedinterfaceints_by_type[InterfacejoinInterval]:
                 requestins.joinedinterfaceints_by_type[InterfacejoinInterval].add(joined_int)

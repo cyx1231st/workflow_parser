@@ -24,9 +24,6 @@ from .workflow.engine import StateEngine
 from .clockmaster import adjust_clock
 from .utils import Report as ParserReport
 
-# from workflow_parser.relation_engine import relation_parse
-# from workflow_parser.statistics import Report
-
 
 def main1(driver):
     from workflow_parser.driver import DriverBase
@@ -80,6 +77,9 @@ def main1(driver):
         draw_engine = DrawEngine(args.outfolder)
         report.set_outfile(args.outfolder+"/report.csv", True)
     do_statistics(master, requestinss, draw_engine, report)
+
+
+
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)

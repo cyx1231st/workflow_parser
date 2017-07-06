@@ -5,7 +5,7 @@ from collections import defaultdict
 from ...target import Target
 from ...target import Thread
 from ...target import Line
-from ...graph import MasterGraph
+from ...graph import Master
 from ...graph import Token
 from ...utils import Report
 from ..entities.threadins import BlankInterval
@@ -18,18 +18,17 @@ def _apply_token(token, threadins, line_obj, join_info):
     assert isinstance(token, Token)
     assert isinstance(threadins, ThreadInstance)
     assert isinstance(line_obj, Line)
-    assert line_obj.keyword == token.keyword
 
-    edge = token.edge
-    pace = Pace(line_obj, token.from_node, edge, threadins)
-    if edge.joins_objs:
-        join_info["innerjoin"]["joins"].append((pace, edge.joins_objs))
-    if edge.joined_objs:
-        join_info["innerjoin"]["joined"].append((pace, edge.joined_objs))
-    if edge.joined_interface:
-        join_info["crossjoin"]["joined"].append((pace, edge.joined_interface))
-    if edge.joins_interface:
-        join_info["crossjoin"]["joins"].append((pace, edge.joins_interface))
+    step = token.step
+    pace = Pace(line_obj, step, threadins)
+    if step.joins_objs:
+        join_info["innerjoin"]["joins"].append((pace, step.joins_objs))
+    if step.joined_objs:
+        join_info["innerjoin"]["joined"].append((pace, step.joined_objs))
+    if step.joined_interface:
+        join_info["crossjoin"]["joined"].append((pace, step.joined_interface))
+    if step.joins_interface:
+        join_info["crossjoin"]["joins"].append((pace, step.joins_interface))
 
     for key in line_obj.keys:
         if key in ("keyword", "time", "seconds"):
@@ -77,17 +76,19 @@ def _apply_token(token, threadins, line_obj, join_info):
         interval = ThreadInterval(threadins._start_pace, pace)
         threadins.intervals.append(interval)
     else:
+        interval = None
         threadins._start_pace = pace
         thread_obj = threadins.thread_obj
         if thread_obj.threadinss:
             BlankInterval(thread_obj.threadinss[-1].end_interval.to_pace, pace)
 
-    for mark in token.from_node.marks:
-        threadins.intervals_by_mark[mark].append(interval)
+    if interval is not None:
+        for mark in interval.marks:
+            threadins.intervals_by_mark[mark].append(interval)
 
 
 def _try_create_threadins(mastergraph, line_obj, thread_obj, join_info):
-    assert isinstance(mastergraph, MasterGraph)
+    assert isinstance(mastergraph, Master)
     assert isinstance(line_obj, Line)
     assert isinstance(thread_obj, Thread)
 
@@ -104,7 +105,7 @@ def _try_create_threadins(mastergraph, line_obj, thread_obj, join_info):
 
 
 def build_thread_instances(target_objs, mastergraph, report):
-    assert isinstance(mastergraph, MasterGraph)
+    assert isinstance(mastergraph, Master)
     assert isinstance(report, Report)
 
     valid_lineobjs = 0
@@ -122,7 +123,7 @@ def build_thread_instances(target_objs, mastergraph, report):
             for line_obj in thread_obj.line_objs:
                 assert isinstance(line_obj, Line)
                 if token is not None:
-                    if token.step(line_obj.keyword):
+                    if token.do_step(line_obj.keyword):
                         _apply_token(token, ongoing_threadins, line_obj,
                                      join_info)
                     else:
@@ -221,7 +222,7 @@ def build_thread_instances(target_objs, mastergraph, report):
             _report_ignored(line_objs[0])
         print()
 
-    edges = mastergraph.edges - mastergraph.seen_edges
+    edges = mastergraph.get_unseenedges()
     if edges:
         print("! WARN !")
         print("Unseen graph edges: %s" %

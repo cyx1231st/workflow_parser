@@ -6,7 +6,7 @@ from itertools import izip_longest
 import pandas as pd
 import numpy as np
 
-from ..graph import MasterGraph
+from ..graph import Master
 from ..workflow.entities.join import InnerjoinInterval
 from ..workflow.entities.join import InterfaceInterval
 from ..workflow.entities.join import InterfacejoinInterval
@@ -50,7 +50,7 @@ def general_purpose_analysis(master_graph,
                              join_intervals_df, td_intervals_df,
                              extendedints_df, request_df, targets_df,
                              d_engine, report):
-    assert isinstance(master_graph, MasterGraph)
+    assert isinstance(master_graph, Master)
     assert isinstance(requestinss_by_request, dict)
     assert isinstance(requestinss_byrtype, dict)
     assert isinstance(targetobjs_by_target, dict)
@@ -161,7 +161,7 @@ def general_purpose_analysis(master_graph,
 
         comp_df = extendedints_df[extendedints_df["request_type"] == r_type]
         for comp in comps:
-            _df = comp_df[comp_df["path_type"] == str(comp)]["lapse"]
+            _df = comp_df[comp_df["state_name"] == str(comp)]["lapse"]
             report.register("%s %s dist:" % (r_type, comp),
                     ("%6.2f%% " % (_df.sum()/cumulated*100))
                     + f_dist([v for v in _df], 9))
@@ -334,17 +334,17 @@ def general_purpose_analysis(master_graph,
                    "local": LOCAL_C}
         # 10. join intervals lapse by remote type box/violinplot
         d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
-                "path_name", "lapse", hue="remote_type", palette=palette)
+                "path", "lapse", hue="remote_type", palette=palette)
         d_engine.draw_violinplot(alljoins_df, "joinintervals_lapse_bytype",
-                "path_name", "lapse", hue="remote_type", palette=palette)
+                "path", "lapse", hue="remote_type", palette=palette)
 
         # 11. top 5 slowest thread intervals by host boxplot
-        ordered_x = td_intervals_df.groupby("path_name")["lapse"].median()
+        ordered_x = td_intervals_df.groupby("path")["lapse"].median()
         ordered_x.sort(ascending=False)
         ordered_x = ordered_x.keys()
         lim = min(len(ordered_x), 5)
         for i in range(lim):
-            to_draw = td_intervals_df[td_intervals_df["path_name"]==ordered_x[i]]
+            to_draw = td_intervals_df[td_intervals_df["path"]==ordered_x[i]]
             d_engine.draw_boxplot(to_draw, "tdint_%s_byhost" % ordered_x[i],
                                   x="host", y="lapse",
                                   color=to_draw.iloc[0]["component"].color)
@@ -353,28 +353,28 @@ def general_purpose_analysis(master_graph,
         for r in chain(td_intervals_df.iterrows(),
                        join_intervals_df.iterrows()):
             r = r[1]
-            palette_path[r["path_name"]] = getcolor_byint(r["_entity"],
+            palette_path[r["path"]] = getcolor_byint(r["_entity"],
                     ignore_lr=True)
         # 12. thread intervals lapse by path box/violinplot
         d_engine.draw_boxplot(td_intervals_df, "tdints_lapse_bypath",
-                "path_name", "lapse", palette=palette_path)
+                "path", "lapse", palette=palette_path)
         d_engine.draw_violinplot(td_intervals_df, "tdints_lapse_bypath",
-                "path_name", "lapse", palette=palette_path)
+                "path", "lapse", palette=palette_path)
 
         # 13. all intervals lapse by path box/violinplot
         all_intervals_df = pd.concat([td_intervals_df, join_intervals_df],
                                      ignore_index=True)
         d_engine.draw_boxplot(all_intervals_df, "allints_lapse_bypath",
-                              "path_name", "lapse", palette=palette_path, nth=20)
+                              "path", "lapse", palette=palette_path, nth=20)
         d_engine.draw_violinplot(all_intervals_df, "allints_lapse_bypath",
-                                 "path_name", "lapse", palette=palette_path, nth=20)
+                                 "path", "lapse", palette=palette_path, nth=20)
 
         # 14. main intervals lapse by path box/violinplot
         main_intervals_df = all_intervals_df[all_intervals_df["is_main"]==True]
         d_engine.draw_boxplot(main_intervals_df, "mainints_lapse_bypath",
-                              "path_name", "lapse", palette=palette_path)
+                              "path", "lapse", palette=palette_path)
         d_engine.draw_violinplot(main_intervals_df, "mainints_lapse_bypath",
-                              "path_name", "lapse", palette=palette_path)
+                              "path", "lapse", palette=palette_path)
 
         for r_type in requestinss_byrtype.keys():
             # 15. workflow plot

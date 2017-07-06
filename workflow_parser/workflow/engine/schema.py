@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 from ...graph import InnerJoin
 from ...graph import InterfaceJoin
-from ...graph import MasterGraph
+from ...graph import Master
 from ...graph import RequestInterface
 from ...utils import Report
 from ..entities.join import EmptyJoin
@@ -307,7 +307,7 @@ class SchemaEngine(object):
 
 
 def join_paces(join_info, target_objs, mastergraph, report):
-    assert isinstance(mastergraph, MasterGraph)
+    assert isinstance(mastergraph, Master)
     assert isinstance(report, Report)
 
     join_attempt_cnt = 0
