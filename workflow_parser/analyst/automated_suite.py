@@ -347,14 +347,17 @@ def general_purpose_analysis(master_graph,
                    "local_remote": LOCALREMOTE_C,
                    "local": LOCAL_C}
         # 10. join intervals lapse by remote type box/violinplot
-        d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
-                "path", "lapse", hue="remote_type", palette=palette)
-        d_engine.draw_violinplot(alljoins_df, "joinintervals_lapse_bytype",
-                "path", "lapse", hue="remote_type", palette=palette)
+        if not len(alljoins_df):
+            print("No joins to print")
+        else:
+            d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
+                    "path", "lapse", hue="remote_type", palette=palette)
+            d_engine.draw_violinplot(alljoins_df, "joinintervals_lapse_bytype",
+                    "path", "lapse", hue="remote_type", palette=palette)
 
         # 11. top 5 slowest thread intervals by host boxplot
         ordered_x = td_intervals_df.groupby("path")["lapse"].median()
-        ordered_x.sort(ascending=False)
+        ordered_x.sort_values(ascending=False, inplace=True)
         ordered_x = ordered_x.keys()
         lim = min(len(ordered_x), 5)
         for i in range(lim):

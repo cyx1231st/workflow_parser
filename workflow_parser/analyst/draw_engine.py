@@ -19,6 +19,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 import heapq
 from itertools import chain
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import patches as mpatches
 from matplotlib import pyplot as plt
 import numpy as np
