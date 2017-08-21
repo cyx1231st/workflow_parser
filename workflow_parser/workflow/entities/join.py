@@ -161,8 +161,7 @@ class EmptyJoin(JoinIntervalBase):
         else:
             assert to_pace
             self._pace = to_pace
-        self.from_pace = from_pace
-        self.to_pace = to_pace
+        super(JoinIntervalBase, self).__init__(from_pace, to_pace, None)
 
     @property
     def requestins(self):

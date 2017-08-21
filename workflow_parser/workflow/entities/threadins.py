@@ -176,7 +176,8 @@ class Pace(object):
         mark_str = ""
         if self.step.joins_objs:
             mark_str += ", join:"
-            if self.joins_int:
+            if self.joins_int and self.joins_pace:
+                # TODO: ugly
                 mark_str += "[%s->%.3f,%s]" %\
                         (self.joins_int.path,
                          self.joins_pace.seconds,
@@ -185,7 +186,8 @@ class Pace(object):
                 mark_str += "?"
         if self.step.joined_objs:
             mark_str += ", joined:"
-            if self.joined_int:
+            if self.joined_int and self.joined_pace:
+                # TODO: ugly
                 mark_str += "[%s<-%.3f,%s]" %\
                         (self.joined_int.path,
                          self.joined_pace.seconds,
@@ -236,8 +238,10 @@ class IntervalBase(object):
     __metaclass__ = ABCMeta
 
     def __init__(self, from_pace, to_pace, entity):
-        assert isinstance(from_pace, Pace)
-        assert isinstance(to_pace, Pace)
+        if from_pace:
+            assert isinstance(from_pace, Pace)
+        if to_pace:
+            assert isinstance(to_pace, Pace)
 
         self.from_pace = from_pace
         self.to_pace = to_pace
@@ -264,23 +268,38 @@ class IntervalBase(object):
 
     @property
     def from_seconds(self):
-        return self.from_pace.seconds
+        if self.from_pace:
+            return self.from_pace.seconds
+        else:
+            return None
 
     @property
     def to_seconds(self):
-        return self.to_pace.seconds
+        if self.to_pace:
+            return self.to_pace.seconds
+        else:
+            return None
 
     @property
     def from_time(self):
-        return self.from_pace.time
+        if self.from_pace:
+            return self.from_pace.time
+        else:
+            return None
 
     @property
     def to_time(self):
-        return self.to_pace.time
+        if self.to_pace:
+            return self.to_pace.time
+        else:
+            return None
 
     @property
     def lapse(self):
-        return self.to_seconds - self.from_seconds
+        if self.from_pace and self.to_pace:
+            return self.to_seconds - self.from_seconds
+        else:
+            return None
 
     @property
     def is_violated(self):

@@ -38,24 +38,21 @@ def _assert_emptyjoin(pace, cls, is_joins, is_forced):
 
     empty_join = None
     if is_joins:
-        if is_forceed:
+        if is_forced:
             assert getattr(pace, cls.entity_joins_int) is None
             empty_join = EmptyJoin(pace, None)
             setattr(pace, cls.entity_joins_int, empty_join)
         else:
-            assert not isinstance(getattr(pace, cls.entity_joins_int),
-                                  EmptyJoin)
-            if getattr(pace, cls.entity_joins_int) is None:
-                empty_join = EmptyJoin(pace, None)
-                setattr(pace, cls.entity_joins_int, empty_join)
+            assert False
     else:
         if is_forced:
             assert getattr(pace, cls.entity_joined_int) is None
             empty_join = EmptyJoin(None, pace)
             setattr(pace, cls.entity_joined_int, empty_join)
         else:
-            assert not isinstance(getattr(pace, cls.entity_joined_int),
-                                  EmptyJoin)
+            # case not stand: multiple joins map to one joined
+            # assert not isinstance(getattr(pace, cls.entity_joined_int),
+            #                           EmptyJoin)
             if getattr(pace, cls.entity_joined_int) is None:
                 empty_join = EmptyJoin(None, pace)
                 setattr(pace, cls.entity_joined_int, empty_join)
@@ -64,15 +61,15 @@ def _assert_emptyjoin(pace, cls, is_joins, is_forced):
         threadins = pace.threadins
         if cls is InnerjoinIntervalBase:
             if is_joins:
-                threadins.joinsints_by_type[EmptyJoin].append(empty_join)
+                threadins.joinsints_by_type[EmptyJoin].add(empty_join)
             else:
-                threadins.joinedints_by_type[EmptyJoin].append(empty_join)
+                threadins.joinedints_by_type[EmptyJoin].add(empty_join)
         else:
             assert cls is InterfacejoinInterval
             if is_joins:
-                threadins.joinsints_by_type[EmptyJoin].append(empty_join)
+                threadins.joinsints_by_type[EmptyJoin].add(empty_join)
             else:
-                threadins.joinedinterfaceints_by_type[EmptyJoin].append(empty_join)
+                threadins.joinedinterfaceints_by_type[EmptyJoin].add(empty_join)
 
 
 class SchemaEngine(object):
@@ -81,8 +78,10 @@ class SchemaEngine(object):
 
         self.name = joininterval_type.__name__
 
+        # pace to join, item to connect
         self.joins_items = []
 
+        # pace to be joined, item to be connected
         self.joined_items = []
         self.joineditems_by_jo = defaultdict(list)
         self.joineditems_by_jo_host = defaultdict(lambda: defaultdict(list))
@@ -244,7 +243,7 @@ class SchemaEngine(object):
             joins_int = getattr(item, self.joininterval_type.entity_joins_int)
             if isinstance(joins_int, EmptyJoin):
                 if isinstance(item, Pace):
-                    unjoinspaces_by_edge[item.edge].append(item)
+                    unjoinspaces_by_edge[item.step._edge].append(item)
                 else:
                     unjoinspaces_by_edge[item.join_obj].append(item)
             elif isinstance(joins_int, JoinIntervalBase):
@@ -256,7 +255,7 @@ class SchemaEngine(object):
             joined_int = getattr(item, self.joininterval_type.entity_joined_int)
             if isinstance(joined_int, EmptyJoin):
                 if isinstance(item, Pace):
-                    unjoinedpaces_by_edge[item.edge].append(item)
+                    unjoinedpaces_by_edge[item.step._edge].append(item)
                 else:
                     unjoinedpaces_by_edge[item.join_obj].append(item)
             elif isinstance(joined_int, JoinIntervalBase):
@@ -309,9 +308,8 @@ class SchemaEngine(object):
                 print("  %s: %d unjoins paces"
                         % (edge.name,
                            len(notjoins_paces)))
-            print("  --------")
             for edge, notjoined_paces in unjoinedpaces_by_edge.iteritems():
-                print("%s: %d unjoined paces"
+                print("  %s: %d unjoined paces"
                         % (edge.name,
                            len(notjoined_paces)))
             print()
