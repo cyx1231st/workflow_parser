@@ -480,34 +480,50 @@ class ThreadInstance(object):
 
     @property
     def start_interval(self):
+        if not self.intervals:
+            return None
         return self.intervals[0]
 
     @property
     def end_interval(self):
+        if not self.intervals:
+            return None
         return self.intervals[-1]
 
     @property
     def request_state(self):
+        if not self.intervals:
+            return None
         return self.end_interval.request_state
 
     @property
     def is_request_start(self):
-        return self.start_interval.is_request_start
+        return self._start_pace.is_request_start
 
     @property
     def is_request_end(self):
-        return self.end_interval.is_request_end
+        if not self.intervals:
+            return False
+        else:
+            return self.end_interval.is_request_end
 
     @property
     def is_complete(self):
-        return self.end_interval.is_thread_end
+        if not self.intervals:
+            return False
+        else:
+            return self.end_interval.is_thread_end
 
     @property
     def start_seconds(self):
+        if not self.intervals:
+            return self._start_pace.seconds
         return self.start_interval.from_seconds
 
     @property
     def end_seconds(self):
+        if not self.intervals:
+            return self._start_pace.seconds
         return self.end_interval.to_seconds
 
     @property
@@ -516,10 +532,14 @@ class ThreadInstance(object):
 
     @property
     def start_time(self):
+        if not self.intervals:
+            return self._start_pace.time
         return self.start_interval.from_time
 
     @property
     def end_time(self):
+        if not self.intervals:
+            return self._start_pace.time
         return self.end_interval.to_time
 
     @property
@@ -540,8 +560,21 @@ class ThreadInstance(object):
         else:
             return None
 
+    @property
+    def from_pace(self):
+        return self._start_pace
+
+    @property
+    def to_pace(self):
+        if not self.intervals:
+            return self._start_pace
+        else:
+            return self.end_interval.to_pace
+
     def __repr__(self):
         mark_str = ""
+        if not self.intervals:
+            mark_str += ", NO INTERVALS %s" % self._start_pace.keyword
         if not self.is_complete:
             mark_str += ", INCOMPLETE"
         if self.is_request_start:

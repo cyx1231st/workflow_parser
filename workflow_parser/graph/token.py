@@ -175,6 +175,19 @@ class Step(object):
     def joins_interface(self):
         return self._edge.joins_interface
 
+    @property
+    def calldepth(self):
+        return len(self.callstack)
+
+    @property
+    def where(self):
+        if self.calldepth:
+            return "%s@%s" % (self.callstack[-1].func_name,
+                              self.keyword)
+        else:
+            return "%s@%s" % (self.runtime.thread_graph.name,
+                              self.keyword)
+
     def __repr__(self):
         return "<%s: %s, `%s`, %d-%d jo, %s-%s ji>" % (
                 self.__class__.__name__,

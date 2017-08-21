@@ -38,7 +38,7 @@ def main1(driver):
                         help="Don't export report and draw figures.")
     parser.add_argument('--outfolder',
                         help="Folder to put figures.",
-                        default="/home/vagrant/cyxvagrant/tmp/png/")
+                        default="/root/ceph_workdir/runtime/out/")
     # parser.add_argument('--csv-print-header', action="store_true",
     #                     help="Write a row into the CSV file for the headers.")
     # parser.add_argument('--outfile',

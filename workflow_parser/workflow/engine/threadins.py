@@ -15,6 +15,7 @@
 from __future__ import print_function
 
 from collections import defaultdict
+from collections import OrderedDict
 
 from ...datasource import Target
 from ...datasource import Thread
@@ -26,6 +27,137 @@ from ..entities.threadins import BlankInterval
 from ..entities.threadins import Pace
 from ..entities.threadins import ThreadInstance
 from ..entities.threadins import ThreadInterval
+
+
+class Error(object):
+    def __init__(self, keyword):
+        assert isinstance(keyword, str)
+        self.keyword = keyword
+        self.before_error = defaultdict(list)
+
+    def append(self, line_obj):
+        assert isinstance(line_obj, Line)
+        assert line_obj.keyword == self.keyword
+
+        before = line_obj.prv_thread_line
+        if not before:
+            self.before_error["START"].append(line_obj)
+        else:
+            pace = before._assigned
+            # prev line_obj must be parsed if prv exists
+            assert pace
+            assert isinstance(pace, Pace)
+            self.before_error[pace.step.where].append(line_obj)
+
+    def report(self, blanks=0):
+        s_blank = " "*blanks
+        key_list = [(len(self.before_error[k]), k)
+                for k in self.before_error.keys()]
+        key_list.sort()
+        for num, key in key_list:
+            print("%s%s: %s" % (s_blank, key, num))
+
+
+class Errors(object):
+    def __init__(self):
+        self.start_errors = {}
+        self.incomplete_errors = {}
+        self.workflow_incomplete = {}
+        self.len_start_errors = 0
+        self.len_incomplete_errors = 0
+        self.len_incomplete_success = 0
+
+        self.is_success = False
+
+    def success(self):
+        self.is_success = True
+
+    @staticmethod
+    def _append(errors_, line_obj):
+        keyword = line_obj.keyword
+        err = errors_.get(keyword)
+        if not err:
+            err = Error(keyword)
+            errors_[keyword] = err
+        err.append(line_obj)
+
+    def append_incomplete_failed(self, line_obj):
+        assert isinstance(line_obj, Line)
+        if self.is_success:
+            # line_obj must not be the first one
+            assert line_obj.prv_thread_line
+            assert line_obj.prv_thread_line._assigned
+
+            self._append(self.incomplete_errors, line_obj)
+            self.is_success = False
+        self.len_incomplete_errors += 1
+
+    def append_start_failed(self, line_obj):
+        assert isinstance(line_obj, Line)
+        if self.is_success:
+            self._append(self.start_errors, line_obj)
+            self.is_success = False
+        self.len_start_errors += 1
+
+    def append_incomplete_success(self, line_obj):
+        assert isinstance(line_obj, Line)
+        self._append(self.workflow_incomplete, line_obj)
+        self.len_incomplete_success += 1
+
+    def report(self):
+        if self.start_errors:
+            print("! ERROR !")
+            print("Threadgraph start errors: %d" % self.len_start_errors)
+            keys = sorted(self.start_errors.keys())
+            for key in keys:
+                print("  %s:" % key)
+                self.start_errors[key].report(4)
+            print()
+
+        if self.incomplete_errors:
+            print("! ERROR !")
+            print("Threadgraph incomplete errors: %s" %
+                    self.len_incomplete_errors)
+            keys = sorted(self.incomplete_errors.keys())
+            for key in keys:
+                print("  %s:" % key)
+                self.incomplete_errors[key].report(4)
+            print()
+
+        if self.workflow_incomplete:
+            print("! WARN !")
+            print("Thread workflow incomplete: %s" %
+                    self.len_incomplete_success)
+            keys = sorted(self.workflow_incomplete.keys())
+            for key in keys:
+                print("  %s:" % key)
+                self.workflow_incomplete[key].report(4)
+            print()
+
+    @staticmethod
+    def _debug(errors_, key_err, key_prv):
+        found_err = []
+        for key in errors_.keys():
+            if key_err in key:
+                found_err.append(errors_[key])
+
+        ret = []
+        for err in found_err:
+            for key in err.before_error.keys():
+                if key_prv in key:
+                    ret.append(err.before_error[key][0])
+        return ret
+
+
+    def debug(self, key_err, key_prv):
+        lines = self._debug(self.incomplete_errors, key_err, key_prv)
+        if lines:
+            print("Incomplete errors: %d" % len(lines))
+            for line in lines:
+                line.debug()
+
+
+errors = Errors()
 
 
 def _apply_token(token, threadins, line_obj, join_info):
@@ -94,7 +226,7 @@ def _apply_token(token, threadins, line_obj, join_info):
         threadins._start_pace = pace
         thread_obj = threadins.thread_obj
         if thread_obj.threadinss:
-            BlankInterval(thread_obj.threadinss[-1].end_interval.to_pace, pace)
+            BlankInterval(thread_obj.threadinss[-1].to_pace, pace)
 
     if interval is not None:
         for mark in interval.marks:
@@ -114,8 +246,10 @@ def _try_create_threadins(mastergraph, line_obj, thread_obj, join_info):
     else:
         threadins = None
         # error: failed to create new graph
-        import pdb; pdb.set_trace()
     return token, threadins
+
+
+cnf_threadparse_proceed_at_failure = False
 
 
 def build_thread_instances(target_objs, mastergraph, report):
@@ -134,28 +268,60 @@ def build_thread_instances(target_objs, mastergraph, report):
             token = None
             ongoing_threadins = None
             thread_valid_lineobjs = 0
+
             for line_obj in thread_obj.line_objs:
                 assert isinstance(line_obj, Line)
                 if token is not None:
+                    assert ongoing_threadins is not None
+
                     if token.do_step(line_obj.keyword):
                         _apply_token(token, ongoing_threadins, line_obj,
                                      join_info)
+                        # success: token proceed
+                        errors.success()
                     else:
-                        if not token.is_complete:
-                            # error: incomplete token
-                            import pdb; pdb.set_trace()
-                        token, ongoing_threadins = _try_create_threadins(
+                        _token, _ongoing_threadins = _try_create_threadins(
                                 mastergraph, line_obj, thread_obj, join_info)
+                        if not token.is_complete:
+                            if not _token:
+                                # failed: token failed, threadins incomplete
+                                errors.append_incomplete_failed(line_obj)
+                                if not cnf_threadparse_proceed_at_failure:
+                                    token = _token
+                                    ongoing_threadins = _ongoing_threadins
+                            else:
+                                # ~success: token renewed, threadins incomplete
+                                errors.append_incomplete_success(line_obj)
+                                token = _token
+                                ongoing_threadins = _ongoing_threadins
+                        else:
+                            if not _token:
+                                # failed: token failed renew, threadins complete
+                                errors.append_start_failed(line_obj)
+                                if not cnf_threadparse_proceed_at_failure:
+                                    token = _token
+                                    ongoing_threadins = _ongoing_threadins
+                            else:
+                                # success: token renewed
+                                errors.success()
+                                token = _token
+                                ongoing_threadins = _ongoing_threadins
                 else:
                     token, ongoing_threadins = _try_create_threadins(
                             mastergraph, line_obj, thread_obj, join_info)
+                    if not token:
+                        # failed: token failed, no threadins
+                        errors.append_start_failed(line_obj)
+                    else:
+                        # success: token newed
+                        errors.success()
 
-                if token is not None:
-                    thread_valid_lineobjs += 1
-                    assert line_obj._assigned is not None
-                else:
+                if not token:
                     thread_obj.dangling_lineobjs.append(line_obj)
                     assert line_obj._assigned is None
+                else:
+                    thread_valid_lineobjs += 1
+                    assert line_obj._assigned is not None
 
             assert len(thread_obj.dangling_lineobjs) + thread_valid_lineobjs\
                     == len(thread_obj.line_objs)
@@ -224,16 +390,13 @@ def build_thread_instances(target_objs, mastergraph, report):
                 rightinterface=cnt_joinsinterface_paces)
 
     #### errors #####
+    errors.report()
+    # import pdb; pdb.set_trace()
+
     if ignored_lineobjs_by_component:
-        def _report_ignored(tup):
-            # (logline, loglines, index, thread, component, target)
-            print("  example:")
-            raise NotImplementedError()
-            # report_loglines(tup[1], tup[2], blanks=4, printend=True)
         print("! WARN !")
         for comp, line_objs in ignored_lineobjs_by_component.iteritems():
             print("%s: %d ignored line_objs" % (comp, len(line_objs)))
-            _report_ignored(line_objs[0])
         print()
 
     edges = mastergraph.get_unseenedges()

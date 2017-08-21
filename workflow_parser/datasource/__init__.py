@@ -140,12 +140,13 @@ class Line(object):
         return ret
 
     def __str_thread__(self):
+        kvs = [ str(item[0])+":"+str(item[1]) for item in self._schema_vars.iteritems()]
         ret = "<L>%.3f %s %s: <%s>%s%s" % (
               self.seconds,
               self.time,
               self.request,
               self.keyword,
-              ",".join(self._schema_vars.keys()),
+              ",".join(kvs),
               self.__str_marks__())
         return ret
 
@@ -156,6 +157,81 @@ class Line(object):
             ret += "%s=%s," % (k, v)
         ret += "\n  %s: %s" % (self.target_obj._entity.name, self.line)
         return ret
+
+    def debug(self):
+        n_nxt = 10
+        n_prv = 10
+        line = self
+
+        def _print_line(l, cur=False):
+            marks = []
+            if cur:
+                marks.append(">")
+            else:
+                marks.append(" ")
+
+            if not l._assigned:
+                marks.append(" ")
+                marks.append(" ")
+                marks.append(str(l.__str_thread__()))
+            else:
+                assigned = l._assigned
+                if assigned.is_thread_start and assigned.is_thread_end:
+                    marks.append("*")
+                elif assigned.is_thread_start:
+                    marks.append("+")
+                elif assigned.is_thread_end:
+                    marks.append("-")
+                else:
+                    marks.append("|")
+                marks.append(" ")
+                marks.append(str(l.__str_thread__()))
+
+            print("".join(marks))
+
+        thread_obj = line.thread_obj
+        print("[Thread %s, %s, %s]" % (
+            thread_obj.target,
+            thread_obj.host,
+            thread_obj.thread))
+
+        cnt_nxt = 0
+        more = True
+        while cnt_nxt < n_nxt:
+            if line.nxt_thread_line:
+                line = line.nxt_thread_line
+                cnt_nxt += 1
+            else:
+                more = False
+                break
+
+        if more:
+            print("-"*5 + " more... " + "-"*6)
+        else:
+            print("-"*5 + " end " + "-"*10)
+
+        while cnt_nxt > 0:
+            _print_line(line)
+            line = line.prv_thread_line
+            cnt_nxt -= 1
+
+        _print_line(line, True)
+
+        cnt_prv = 0
+        less = True
+        while cnt_prv < n_prv:
+            if line.prv_thread_line:
+                line = line.prv_thread_line
+                _print_line(line)
+                cnt_prv += 1
+            else:
+                less = False
+                break
+
+        if less:
+            print("-"*5 + " less... " + "-"*6)
+        else:
+            print("-"*5 + " start " + "-"*8)
 
 
 class Thread(object):
