@@ -125,6 +125,7 @@ class NodeBase(object):
                     "build() failed: cannot build edge with "
                     "conflicting keyword `%s`" % edge.keyword)
         self.edges.add(edge)
+        self.graph._tail_nodes.discard(self)
 
         return ret_edge, ret_tonode
 
@@ -272,6 +273,8 @@ class Graph(object):
         self.nodes = OrderedSet()
         self.edges = OrderedSet()
 
+        self._tail_nodes = OrderedSet()
+
     @abstractproperty
     def namespace(self):
         return None
@@ -324,6 +327,7 @@ class Graph(object):
         to_node = self.namespace.create_node(cls, self, tonode_id)
         self.nodes.add(to_node)
         edge = self.create_edge_withnode(to_node, payload)
+        self._tail_nodes.add(to_node)
 
         return edge, to_node
 
@@ -661,7 +665,6 @@ class FunctionGraph(Graph):
                 FnNode, self, "S")
         self.end_node = self.namespace.create_node_unindexed(
                 FnNode, self, "E")
-        self._tail_nodes = OrderedSet()
 
         assert self.start_node.is_start
         assert self.end_node.is_end
@@ -704,8 +707,6 @@ class FunctionGraph(Graph):
     def create_edge_withnid(self, from_node, tonode_id, payload):
         edge, to_node = super(FunctionGraph, self).create_edge_withnid(
                 FnNode, from_node, tonode_id, payload)
-        self._tail_nodes.add(to_node)
-        self._tail_nodes.discard(from_node)
         return edge, to_node
 
 
@@ -732,6 +733,8 @@ class TdNode(NodeBase):
             return True
         else:
             return False
+
+    # TODO: also need to specify end node in some cases.
 
     def __str_marks__(self):
         ret_s = super(TdNode, self).__str_marks__()
@@ -789,7 +792,6 @@ class ThreadGraph(Graph):
 
         self.component = component
         self.start_nodes = OrderedSet()
-        self.end_nodes = OrderedSet()
 
         # internal init
         if request_type is not None:
@@ -811,6 +813,10 @@ class ThreadGraph(Graph):
     def namespace(self):
         return self.master.namespace
 
+    @property
+    def end_nodes(self):
+        return self._tail_nodes
+
     def __str_marks__(self):
         ret = super(ThreadGraph, self).__str_marks__()
         ret += ", %s" % self.component
@@ -830,9 +836,6 @@ class ThreadGraph(Graph):
     def create_edge_withnid(self, from_node, tonode_id, payload):
         edge, to_node = super(ThreadGraph, self).create_edge_withnid(
                 TdNode, from_node, tonode_id, payload)
-        self.end_nodes.add(to_node)
-        self.end_nodes.discard(from_node)
-
         return edge, to_node
 
     def merge(self, graph):
