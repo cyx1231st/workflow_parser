@@ -120,6 +120,7 @@ class CephWritefull(DriverBase):
         e64, n61 = n60.build( 61, "filejournal queue_finisher start")
         e65, n62 = n61.build( 62, "filejournal queue_finisher finish")
         _  , _   = n62.build(n60, e63)
+        n62.set_end()
         n62.set_state("SUCCESS")
 
 #### request write_full ####
@@ -208,52 +209,52 @@ class CephWritefull(DriverBase):
         _  , _   = n96.build(n82, e85)
 
         # client send osd
-        j1 = e5.join_remote(e14, ["tid",
+        j1 = e5.join_one(e14, True, ["tid",
                                   "msg_op",
                                   ("target_t", "target"),
                                   ("target", "target_s")])
         # osd enqueue op
-        j2 = e16.join_local(e20, ["tracked_op_seq",
+        j2 = e16.join_one(e20, False, ["tracked_op_seq",
                                   "pgid"])
         # main osd send sub_op to replica osd
-        j3 = e28.join_remote(e14, ["tid",
+        j3 = e28.join_one(e14, True, ["tid",
                                    "msg_op",
                                    ("target_t", "target"),
                                    ("target", "target_s")])
 
         # filejournal write disk
-        j4 = e67.join_local(e72, ["tracked_op_seq",
+        j4 = e67.join_one(e72, False, ["tracked_op_seq",
                                   "seq"])
         # main osd on commit
-        j5 = e69.join_local(e60, ["tracked_op_seq"])
+        j5 = e69.join_one(e60, False, ["tracked_op_seq"])
         # replica osd on commit
-        j6 = e69.join_local(e80, ["tracked_op_seq"])
+        j6 = e69.join_one(e80, False, ["tracked_op_seq"])
         # replica osd reply main osd
-        j7 = e81.join_remote(e14, ["tid",
+        j7 = e81.join_one(e14, True, ["tid",
                                     "msg_op",
                                     ("target_t", "target"),
                                     ("target", "target_s")])
         # main osd on apply
-        j8 = e77.join_local(e58, ["tracked_op_seq"])
+        j8 = e77.join_one(e58, False, ["tracked_op_seq"])
         # replica osd on apply
-        j9 = e77.join_local(e84, ["tracked_op_seq"])
+        j9 = e77.join_one(e84, False, ["tracked_op_seq"])
         # main osd send reply
         # NOTE: msg_op not match
-        j10 = e49.join_remote(e11, ["tid",
+        j10 = e49.join_one(e11, True, ["tid",
                                     ("target_t", "target"),
                                     ("target", "target_s")])
         # main osd unlock ioctx
-        j11 = e13.join_local(e9, ["tid",
+        j11 = e13.join_one(e9, False, ["tid",
                                   ("target_s", "target_t")])
 
         # filejournal queue writeq
-        i1 = e32.join_local(e66, ["tracked_op_seq", "seq"], "journal")
+        i1 = e32.join_one(e66, False, ["tracked_op_seq", "seq"], "journal")
 
         n10.set_state("SUCCESS")
 
         ########
-        i1.call_req(e62, ["tracked_op_seq", "seq"], False,
-                    e64, ["tracked_op_seq", "seq"], False)
+        i1.call_req(e62, False, ["tracked_op_seq", "seq"],
+                    e64, False, ["tracked_op_seq", "seq"])
 
     def filter_logfile(self, f_dir, f_name, var_dict):
         if f_name.startswith("out"):
