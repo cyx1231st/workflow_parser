@@ -17,7 +17,7 @@ from __future__ import print_function
 from collections import defaultdict
 
 from ..workflow.entities.request import RequestInstance
-from ..workflow.entities.join import JoinIntervalBase
+from ..workflow.entities.join import JoinActivityBase
 from .relation_engine import CausalEngine
 
 
@@ -26,9 +26,9 @@ def adjust_clock(requestinss):
     targetobjs_by_host = defaultdict(set)
     for requestins in requestinss.itervalues():
         assert isinstance(requestins, RequestInstance)
-        for j_ins in requestins.join_ints:
-            if j_ins.remote_type == "remote":
-                remote_relations.add(j_ins)
+        for join in requestins.iter_joins():
+            if join.remote_type == "remote":
+                remote_relations.add(join)
         for target_obj in requestins.target_objs:
             targetobjs_by_host[target_obj.host].add(target_obj)
 

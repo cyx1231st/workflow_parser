@@ -29,14 +29,11 @@ import seaborn as sns
 from sys import maxint
 
 from ..datasource import Target
-from ..workflow.entities.join import InnerjoinInterval
-from ..workflow.entities.join import InterfaceInterval
-from ..workflow.entities.join import InterfacejoinInterval
-from ..workflow.entities.join import JoinIntervalBase
-from ..workflow.entities.join import NestedrequestInterval
+from ..workflow.entities.join import JoinActivityBase
+from ..workflow.entities.join import RequestjoinActivity
+from ..workflow.entities.request import ExtendedInterval
 from ..workflow.entities.request import RequestInstance
-from ..workflow.entities.threadins import BlankInterval
-from ..workflow.entities.threadins import ThreadInterval
+from ..workflow.entities.threadins import ThreadActivity
 from .statistic_helper import Workflow
 
 
@@ -48,12 +45,15 @@ NESTED_C = "#ff3719"
 
 
 def getcolor_byint(interval, ignore_lr=False):
-    if isinstance(interval, ThreadInterval):
+    if isinstance(interval, ThreadActivity) or \
+       isinstance(interval, ExtendedInterval):
         return interval.component.color
-    elif isinstance(interval, BlankInterval):
-        raise RuntimeError()
-    elif isinstance(interval, InnerjoinInterval) or\
-            isinstance(interval, InterfacejoinInterval):
+    elif isinstance(interval, RequestjoinActivity):
+        if interval.is_nest:
+            return NESTED_C
+        else:
+            return INTERFACE_C
+    elif isinstance(interval, JoinActivityBase):
         r_type = interval.remote_type
         if r_type == "local_remote":
             if ignore_lr:
@@ -64,12 +64,8 @@ def getcolor_byint(interval, ignore_lr=False):
             return REMOTE_C
         else:
             return LOCAL_C
-    elif isinstance(interval, InterfaceInterval):
-        return INTERFACE_C
-    elif isinstance(interval, NestedrequestInterval):
-        return NESTED_C
     else:
-        raise RuntimeError()
+        raise RuntimeError("%r" % interval)
 
 
 def _patch_violinplot():
@@ -379,16 +375,16 @@ class DrawEngine(object):
         assert isinstance(requestins, RequestInstance)
 
         if start_end is None:
-            start_end = {"seconds": {"start": requestins.start_seconds,
+            start_end = {"seconds": {"start": requestins.from_seconds,
                                      "end": requestins.last_seconds},
-                         "time":    {"start": requestins.start_time,
+                         "time":    {"start": requestins.from_time,
                                      "end": requestins.last_time}}
 
         self.draw_intervalvisual(requestins.threadinss,
-                                 requestins.join_ints,
+                                 requestins.iter_joins(),
                                  name, start_end,
                                  plot_main=True,
-                                 title=str(requestins))
+                                 title=repr(requestins))
 
     def draw_intervalvisual(self, threadinss, joinints, name, start_end,
                             plot_main=False, title=None):
@@ -500,7 +496,7 @@ class DrawEngine(object):
             for ti in threadinss:
                 color = ti.component.color
                 plot_y = tos_y[ti.thread_obj]
-                for int_ in ti.intervals:
+                for int_ in ti.iter_ints():
                     from_x = int_.from_seconds - start
                     to_x = int_.to_seconds - start
                     linestyle = int_style
@@ -509,7 +505,7 @@ class DrawEngine(object):
                              [plot_y, plot_y],
                              linestyle=linestyle,
                              color=color,
-                             label=int_.state_name,
+                             label=int_.int_name,
                              linewidth=linewidth)
 
             # 4. annotate thread intervals
@@ -523,19 +519,19 @@ class DrawEngine(object):
                 else:
                     t_marker = "."
                     color = "k"
-                ax.plot(ti.start_seconds-start, plot_y,
+                ax.plot(ti.from_seconds-start, plot_y,
                          marker=t_marker,
                          color=color,
                          markersize=markersize)
 
                 # annotate start edge
-                ax.annotate("%s" % ti.intervals[0].fromstep_name,
-                             (ti.start_seconds-start, plot_y),
-                             (ti.start_seconds-start-annot_off_x, plot_y),
+                ax.annotate("%s" % ti.from_edgename,
+                             (ti.from_seconds-start, plot_y),
+                             (ti.from_seconds-start-annot_off_x, plot_y),
                              **annot_kw)
 
                 marker=7
-                for int_ in ti.intervals:
+                for int_ in ti.iter_ints():
                     from_x = int_.from_seconds-start
                     to_x = int_.to_seconds-start
 
@@ -545,7 +541,7 @@ class DrawEngine(object):
                     else:
                         annot_off = -annot_off_y
                     if int_.lapse >= mark_lim:
-                        a_str = "%s" % int_.entity.name
+                        a_str = "%s" % int_.int_name
                         if int_.lapse >= pres_lim:
                             a_str += "=%.3f" % int_.lapse
                         ax.annotate(a_str,
@@ -573,12 +569,12 @@ class DrawEngine(object):
 
                     # annotate end step
                     if int_.is_thread_end:
-                        ax.annotate("%s" % int_.tostep_name,
+                        ax.annotate("%s" % int_.to_edgename,
                                      (to_x, plot_y),
                                      (to_x+annot_off_x, plot_y),
                                      **annot_kw)
                     elif int_.lapse >= mark_lim:
-                        ax.annotate("%s" % int_.tostep_name,
+                        ax.annotate("%s" % int_.to_edgename,
                                      (to_x, plot_y),
                                      (to_x, plot_y+annot_off),
                                      **annot_kw)
@@ -592,10 +588,10 @@ class DrawEngine(object):
                 to_x = int_.to_seconds - start
                 to_y = tos_y[int_.to_threadobj]
 
-                annot_str = "%s=%.2f" % (int_.entity.name, int_.lapse)
+                annot_str = "%s=%.2f" % (int_.int_name, int_.lapse)
                 anot_x = (from_x+to_x)/2.0
                 anot_y = (from_y+to_y)/2.0
-                if isinstance(int_, NestedrequestInterval):
+                if isinstance(int_, RequestjoinActivity):
                     annot_str += "(%d)" % int_.cnt_nested
                 ax.annotate(annot_str,
                             (anot_x, anot_y),
@@ -616,11 +612,11 @@ class DrawEngine(object):
         # 1. get main stacked axis list
         main_stacked_results = []
         def _walk_workflow(step):
-            state_name = step.state_name
+            int_name = step.int_name
             color = getcolor_byint(step.contents[0].interval,
                                    ignore_lr=True)
             main_stacked_results.append((
-                state_name,
+                int_name,
                 color,
                 [(c.from_seconds, c.to_seconds) for c in step.contents]))
             for nxt_s in step.nxt_steps:
@@ -669,7 +665,7 @@ class DrawEngine(object):
         for req in reqinss:
             assert isinstance(req, RequestInstance)
             counter_byentity = defaultdict(lambda: 0)
-            for int_ in req.iter_mainpath():
+            for int_ in req.iter_mainints():
                 path_ = int_.path
                 ilist = intlists_byentity[path_]
                 counter = counter_byentity[path_]
@@ -773,7 +769,7 @@ class DrawEngine(object):
         ax.set_ylabel("wait time (seconds)")
 
         for threadins in thread_obj.threadinss:
-            ax.plot([threadins.start_seconds, threadins.end_seconds],
+            ax.plot([threadins.from_seconds, threadins.to_seconds],
                      [0, 0],
                      linestyle="-",
                      color=threadins.component.color,
@@ -834,8 +830,8 @@ class DrawEngine(object):
         start = maxint
         last = 0
         for ti in threadgroup:
-            start = min(start, ti.start_seconds)
-            last = max(last, ti.end_seconds)
+            start = min(start, ti.from_seconds)
+            last = max(last, ti.to_seconds)
         start = 0
         all_lapse = last - start
         plot_main = False
@@ -869,19 +865,19 @@ class DrawEngine(object):
             else:
                 t_marker = "."
                 color = "k"
-            ax.plot(ti.start_seconds-start, tiy[ti],
+            ax.plot(ti.from_seconds-start, tiy[ti],
                      marker=t_marker,
                      color=color,
                      markersize=markersize)
 
             # annotate start edge
-            ax.annotate("%s" % ti.intervals[0].fromstep_name,
-                         (ti.start_seconds-start, tiy[ti]),
-                         (ti.start_seconds-start, tiy[ti]+annot_off_y),
+            ax.annotate("%s" % ti.from_edgename,
+                         (ti.from_seconds-start, tiy[ti]),
+                         (ti.from_seconds-start, tiy[ti]+annot_off_y),
                          **annot_kw)
 
             marker=7
-            for int_ in ti.intervals:
+            for int_ in ti.iter_ints():
                 from_x = int_.from_seconds - start
                 from_y = tiy[int_.threadins]
                 to_x = int_.to_seconds - start
@@ -903,7 +899,7 @@ class DrawEngine(object):
                          [from_y, to_y],
                          linestyle=linestyle,
                          color=ti_color,
-                         label=int_.state_name,
+                         label=int_.int_name,
                          linewidth=linewidth)
 
                 # mark interval
@@ -913,12 +909,12 @@ class DrawEngine(object):
                     annot_off = -annot_off_y
 
                 if int_.lapse >= pres_lim:
-                    ax.annotate("%s=%.2f" % (int_.state_name, int_.lapse),
+                    ax.annotate("%s=%.2f" % (int_.int_name, int_.lapse),
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
                 elif int_.lapse >= mark_lim:
-                    ax.annotate("%s" % int_.state_name,
+                    ax.annotate("%s" % int_.int_name,
                                  ((from_x + to_x)/2, to_y),
                                  ((from_x + to_x)/2, to_y+annot_off),
                                  **annot_kw)
@@ -943,7 +939,7 @@ class DrawEngine(object):
 
                 # draw thread end
                 if int_.is_thread_end:
-                    ax.annotate("%s" % int_.tostep_name,
+                    ax.annotate("%s" % int_.to_edgename,
                                  (to_x, to_y),
                                  (to_x, to_y+annot_off_y),
                                  **annot_kw)

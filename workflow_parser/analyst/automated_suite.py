@@ -21,10 +21,9 @@ import pandas as pd
 import numpy as np
 
 from ..graph import Master
-from ..workflow.entities.join import InnerjoinInterval
-from ..workflow.entities.join import InterfaceInterval
-from ..workflow.entities.join import InterfacejoinInterval
-from ..workflow.entities.join import NestedrequestInterval
+from ..workflow.entities.join import CrossjoinActivity
+from ..workflow.entities.join import InnerjoinActivity
+from ..workflow.entities.join import RequestjoinActivity
 from .draw_engine import DrawEngine
 from .statistic_helper import projection_time
 from .statistic_helper import Workflow
@@ -34,7 +33,7 @@ from .draw_engine import (REMOTE_C,
                           INTERFACE_C,
                           NESTED_C,
                           getcolor_byint)
-from . import Report
+from .report import Report
 
 
 def f_dist(iterable, lim=None):
@@ -74,7 +73,7 @@ def general_purpose_analysis(master_graph,
     assert isinstance(extendedints_df, pd.DataFrame)
     assert isinstance(request_df, pd.DataFrame)
     assert isinstance(targets_df, pd.DataFrame)
-    assert isinstance(d_engine, DrawEngine)
+    # assert isinstance(d_engine, DrawEngine)
     assert isinstance(report, Report)
 
     r_types = master_graph.request_types
@@ -141,18 +140,23 @@ def general_purpose_analysis(master_graph,
         report.blank()
 
     innerjoinints_df = join_intervals_df\
-            .loc[join_intervals_df["int_type"] == InnerjoinInterval.__name__]
-    interfacejints_df = join_intervals_df\
-            .loc[join_intervals_df["int_type"] == InterfacejoinInterval.__name__]
-    nestedreqints_df = join_intervals_df\
-            .loc[join_intervals_df["int_type"] == NestedrequestInterval.__name__]
+            .loc[join_intervals_df["int_type"] == InnerjoinActivity.__name__]
+    crossjoinints_df = join_intervals_df\
+            .loc[join_intervals_df["int_type"] == CrossjoinActivity.__name__]
+    reqjoinints_df = join_intervals_df\
+            .loc[join_intervals_df["int_type"] == RequestjoinActivity.__name__]
+    assert len(innerjoinints_df) + len(crossjoinints_df) + len(reqjoinints_df) == len(join_intervals_df)
+
     mainjoins_df = join_intervals_df[join_intervals_df["is_main"] == True]
-    nested_index = mainjoins_df["int_type"]==NestedrequestInterval.__name__
-    mainnested_df = mainjoins_df[nested_index]
-    mainjoins_df = mainjoins_df[~nested_index]
+
+    _nested_index = (mainjoins_df["int_type"] == RequestjoinActivity.__name__)
+    mainnested_df = mainjoins_df[_nested_index]
+    mainjoins_df = mainjoins_df[~_nested_index]
+
     mainlocaljoins_df = mainjoins_df[mainjoins_df["remote_type"]=="local"]
     mainremoteljoins_df = mainjoins_df[mainjoins_df["remote_type"]=="local_remote"]
     mainremotejoins_df = mainjoins_df[mainjoins_df["remote_type"]=="remote"]
+
     for r_type in r_types:
         report.register("%s td_ints" % r_type,
                 td_intervals_df["request_type"].value_counts().get(r_type, 0))
@@ -160,11 +164,11 @@ def general_purpose_analysis(master_graph,
         report.register("%s innerjoin_ints" % r_type,
                 innerjoinints_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s interfacejoin_ints" % r_type,
-                interfacejints_df["request_type"].value_counts().get(r_type, 0))
+        report.register("%s crossjoin_ints" % r_type,
+                crossjoinints_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s nestedreq_ints" % r_type,
-                nestedreqints_df["request_type"].value_counts().get(r_type, 0))
+        report.register("%s requestjoin_ints" % r_type,
+                reqjoinints_df["request_type"].value_counts().get(r_type, 0))
 
         report.register("%s lapse dist" % r_type,
                 "100.00% " +
@@ -175,7 +179,7 @@ def general_purpose_analysis(master_graph,
 
         comp_df = extendedints_df[extendedints_df["request_type"] == r_type]
         for comp in comps:
-            _df = comp_df[comp_df["state_name"] == str(comp)]["lapse"]
+            _df = comp_df[comp_df["int_name"] == str(comp)]["lapse"]
             report.register("%s %s dist:" % (r_type, comp),
                     ("%6.2f%% " % (_df.sum()/cumulated*100))
                     + f_dist([v for v in _df], 9))
@@ -248,7 +252,7 @@ def general_purpose_analysis(master_graph,
     workflow_byrtype = {}
     for r_type in r_types:
         _requestinss = requestinss_byrtype.get(r_type, [])
-        requestins_iters = [iter(r.extended_ints) for r in _requestinss]
+        requestins_iters = [r.iter_mainints(extended=True) for r in _requestinss]
         workflow = Workflow(r_type)
         for intervals in izip_longest(*requestins_iters):
             workflow.build(intervals)
@@ -258,9 +262,7 @@ def general_purpose_analysis(master_graph,
 
     #####  visualization  #####
     if d_engine:
-        alljoins_df = join_intervals_df[
-                join_intervals_df["int_type"]!=\
-                        NestedrequestInterval.__name__]
+        alljoins_df = join_intervals_df[join_intervals_df["int_type"]!=RequestjoinActivity.__name__]
         # 1. host remote relations heatmap
         crosshost_relations_df = alljoins_df\
                 .loc[alljoins_df["remote_type"] != "local"]\

@@ -12,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from abc import ABCMeta
+from abc import abstractproperty
 from functools import total_ordering
 import numbers
 
@@ -19,52 +21,69 @@ from .. import reserved_vars as rv
 from ..service_registry import Component
 
 
+class LineStateBase(object):
+    __metaclass__ = ABCMeta
+
+    @abstractproperty
+    def _ls_state(self):
+        return "?"
+
+    @abstractproperty
+    def _ls_request(self):
+        return "?"
+
+    @abstractproperty
+    def _ls_path(self):
+        return "?"
+
+
 @total_ordering
 class Line(object):
-    def __init__(self, time,
+    _str_lines_nxtlim = 10
+    _str_lines_prvlim = 10
+
+    def __init__(self, lino,
+                       time,
                        seconds,
                        keyword,
                        request,
                        thread_obj,
                        vs,
-                       entity,
-                       prv_thread_line,
-                       prv_target_line):
+                       line,
+                       entity):
         assert isinstance(time, str)
         assert isinstance(seconds, numbers.Real)
         assert isinstance(keyword, str)
         assert isinstance(thread_obj, Thread)
+        assert isinstance(line, str)
         assert entity is not None
         assert entity._assigned is None
 
         assert isinstance(vs, dict)
         assert not rv.ALL_VARS & vs.viewkeys()
 
+        self.lino = lino
         self.time = time
         self._seconds = seconds
         self.keyword = keyword
         self.request = request
 
-        self.line = entity.line
+        self.line = line
         self.thread_obj = thread_obj
         self._schema_vars = vs
-        self._entity = entity
-        self._assigned = None
+        self._built_from = entity
+        self._line_state = None
 
-        self.prv_thread_line = prv_thread_line
+        self.prv_thread_line = None
         self.nxt_thread_line = None
-        self.prv_target_line = prv_target_line
+        self.prv_target_line = None
         self.nxt_target_line = None
 
-        if prv_thread_line:
-            assert isinstance(prv_thread_line, Line)
-            assert prv_thread_line <= self
-            prv_thread_line.nxt_thread_line = self
-        if prv_target_line:
-            assert isinstance(prv_target_line, Line)
-            assert prv_target_line <= self
-            prv_target_line.nxt_target_line = self
         entity._assigned = self
+
+    @property
+    def name(self):
+        return "%s~%s" % (self.target, self.lino)
 
     @property
     def seconds(self):
@@ -90,13 +109,17 @@ class Line(object):
     def target_obj(self):
         return self.thread_obj.target_obj
 
-    # total ordering
-    __eq__ = lambda self, other: self.seconds == other.seconds
-    __lt__ = lambda self, other: self.seconds < other.seconds
-
     @property
     def keys(self):
         return self._schema_vars.viewkeys() | rv.ALL_VARS
+
+    @property
+    def keys_(self):
+        return self._schema_vars.viewkeys()
+
+    # total ordering
+    __eq__ = lambda self, other: self.seconds == other.seconds
+    __lt__ = lambda self, other: self.seconds < other.seconds
 
     def __contains__(self, item):
         return item in self.keys
@@ -108,134 +131,107 @@ class Line(object):
         else:
             return self._schema_vars.get(key)
 
-    def __str_marks__(self):
+    def __repr_marks__(self):
         mark_str = ""
-        if not self._assigned:
-            mark_str += ", ~ASSIGN"
+        if self._schema_vars:
+            kvs = [ str(item[0])+"="+str(item[1]) for item in self._schema_vars.iteritems()]
+            mark_str += ", (%s)"% ",".join(kvs)
+        if self._line_state is None:
+            mark_str += ", ~PATH"
+        else:
+            mark_str += ", %s" % self._line_state._ls_path
         return mark_str
 
-    def __str__(self):
-        ret = "<L>%.3f %s %s [%s %s %s] %s: <%s>%s%s" % (
+    def __repr__(self):
+        ret = "<L#%s: %.3f %s [%s %s] %s %s `%s`%s>" % (
+              self.name,
               self.seconds,
               self.time,
-              self.thread,
-              self.target,
               self.host,
               self.component,
+              self.thread,
               self.request,
               self.keyword,
-              ",".join(self._schema_vars.keys()),
-              self.__str_marks__())
+              self.__repr_marks__())
         return ret
 
-    def __str_target__(self):
-        ret = "<L>%.3f %s %s %s: <%s>%s%s" % (
+    def __repr_target__(self):
+        ret = "#%s: %.3f %s %s %s `%s`%s" % (
+              self.lino,
               self.seconds,
               self.time,
               self.thread,
               self.request,
               self.keyword,
-              ",".join(self._schema_vars.keys()),
-              self.__str_marks__())
+              self.__repr_marks__())
         return ret
 
-    def __str_thread__(self):
-        kvs = [ str(item[0])+":"+str(item[1]) for item in self._schema_vars.iteritems()]
-        ret = "<L>%.3f %s %s: <%s>%s%s" % (
+    def __repr_thread__(self):
+        if not self._line_state:
+            prefix = "."
+            req = self.request
+        else:
+            prefix = self._line_state._ls_state
+            req = self._line_state._ls_request
+
+        ret = "%s #%s %.3f %s %s `%s`%s" % (
+              prefix,
+              self.lino,
               self.seconds,
               self.time,
-              self.request,
+              req,
               self.keyword,
-              ",".join(kvs),
-              self.__str_marks__())
+              self.__repr_marks__())
         return ret
 
-    def __repr__(self):
-        ret = str(self)
-        ret += "\n  V:"
-        for k, v in self._schema_vars.iteritems():
-            ret += "%s=%s," % (k, v)
-        ret += "\n  %s: %s" % (self.target_obj._entity.name, self.line)
-        return ret
-
-    def debug(self):
-        n_nxt = 10
-        n_prv = 10
+    def __str__(self):
+        ret = repr(self.thread_obj)+":"
         line = self
-
-        def _print_line(l, cur=False):
-            marks = []
-            if cur:
-                marks.append(">")
-            else:
-                marks.append(" ")
-
-            if not l._assigned:
-                marks.append(" ")
-                marks.append(" ")
-                marks.append(str(l.__str_thread__()))
-            else:
-                assigned = l._assigned
-                if assigned.is_thread_start and assigned.is_thread_end:
-                    marks.append("*")
-                elif assigned.is_thread_start:
-                    marks.append("+")
-                elif assigned.is_thread_end:
-                    marks.append("-")
-                else:
-                    marks.append("|")
-                marks.append(" ")
-                marks.append(str(l.__str_thread__()))
-
-            print("".join(marks))
-
-        thread_obj = line.thread_obj
-        print("[Thread %s, %s, %s]" % (
-            thread_obj.target,
-            thread_obj.host,
-            thread_obj.thread))
-
         cnt_nxt = 0
-        more = True
-        while cnt_nxt < n_nxt:
+        while cnt_nxt < self._str_lines_nxtlim:
             if line.nxt_thread_line:
                 line = line.nxt_thread_line
                 cnt_nxt += 1
             else:
-                more = False
                 break
 
-        if more:
-            print("-"*5 + " more... " + "-"*6)
-        else:
-            print("-"*5 + " end " + "-"*10)
+        ret += "\n------- end -----"
+        if line is not None and line.nxt_thread_line is not None:
+            ret += "\n "+self.thread_obj.last_lineobj.__repr_thread__()
+            if line.nxt_thread_line is not self.thread_obj.last_lineobj:
+                ret += "\n . ......"
 
         while cnt_nxt > 0:
-            _print_line(line)
+            ret += "\n "+line.__repr_thread__()
             line = line.prv_thread_line
             cnt_nxt -= 1
 
-        _print_line(line, True)
+        ret += "\n>"+line.__repr_thread__()
 
         cnt_prv = 0
-        less = True
-        while cnt_prv < n_prv:
+        while cnt_prv < self._str_lines_prvlim:
             if line.prv_thread_line:
                 line = line.prv_thread_line
-                _print_line(line)
+                ret += "\n "+line.__repr_thread__()
                 cnt_prv += 1
             else:
-                less = False
                 break
 
-        if less:
-            print("-"*5 + " less... " + "-"*6)
-        else:
-            print("-"*5 + " start " + "-"*8)
+        if line is not None and line.prv_thread_line is not None:
+            if line.prv_thread_line is not self.thread_obj.start_lineobj:
+                ret += "\n . ......"
+            ret += "\n "+self.thread_obj.start_lineobj.__repr_thread__()
+        ret += "\n------- start ---"
+        return ret
+
+    def set_linestate(self, ls):
+        assert isinstance(ls, LineStateBase)
+        assert self._line_state is None
+        self._line_state = ls
 
 
 class Thread(object):
-    _repr_lines_lim = 10
+    _str_lines_lim = 10
 
     def __init__(self, id_, target_obj, thread):
         assert isinstance(id_, int)
@@ -245,9 +241,13 @@ class Thread(object):
         self.id_ = id_
         self.thread = thread
         self.target_obj = target_obj
-        self.line_objs = []
+
+        self.start_lineobj = None
+        self.last_lineobj = None
+        self.len_lineobjs = 0
 
         # after thread instances are built
+        # TODO: change to interval
         self.threadinss = []
         self.dangling_lineobjs = []
 
@@ -272,29 +272,61 @@ class Thread(object):
         assert self.threadinss
         return sum(ti.lapse for ti in self.threadinss)
 
-    def __str__(self):
-        return "<Thread#%s: %s, %d lines, %d dangling, %d threadinss>" %\
+    def __repr__(self):
+        return "<Thread#%s-%s: %d lines, %d threadinss, comp=%s, host=%s>" %\
                 (self.name,
                  self.thread,
-                 len(self.line_objs),
-                 len(self.dangling_lineobjs),
-                 len(self.threadinss))
+                 self.len_lineobjs,
+                 len(self.threadinss),
+                 self.component,
+                 self.host)
 
-    def __repr__(self):
-        ret = str(self)
-        lim = self._repr_lines_lim
-        ret += "\n^ ---- last ----"
-        for line in reversed(self.line_objs):
-            ret += "\n| %s" % line.__str_thread__()
+    def __str__(self):
+        ret = repr(self)
+        lim = self._str_lines_lim
+        ret += "\n------ end -----"
+
+        line = self.last_lineobj
+        while line is not None:
+            ret += "\n%s" % line.__repr_thread__()
             lim -= 1
             if lim <= 0:
-                ret += "\n ......"
-        ret += "\n  ---- first ---"
+                break
+            line = line.prv_thread_line
+
+        if line is None:
+            pass
+        elif line is self.start_lineobj:
+            ret += "\n%s" % line.__repr_thread__()
+        else:
+            ret += "\n. ......"
+            ret += "\n%s" % self.start_lineobj.__repr_thread__()
+        ret += "\n------ start ---"
+
         return ret
+
+    def _append_line(self, **kwds):
+        line_obj = Line(thread_obj=self,
+                        **kwds)
+        if self.start_lineobj is None:
+            self.start_lineobj = line_obj
+        else:
+            assert line_obj.lino > self.last_lineobj.lino
+            self.last_lineobj.nxt_thread_line = line_obj
+            line_obj.prv_thread_line = self.last_lineobj
+        self.last_lineobj = line_obj
+        self.len_lineobjs += 1
+        return line_obj
+
+    def iter_lineobjs(self):
+        line = self.start_lineobj
+        while line is not None:
+            yield line
+            line = line.nxt_thread_line
 
 
 class Target(object):
-    _repr_lines_lim = 10
+    _str_lines_lim = 10
 
     def __init__(self, target, component, host, entity):
         assert isinstance(target, str)
@@ -306,11 +338,14 @@ class Target(object):
         self.host = host
 
         self._offset = 0
-        self.line_objs = []
         self.thread_objs = {}
-        self.threadobjs_list = []
 
-        self._entity = entity
+        self.start_lineobj = None
+        self.last_lineobj = None
+        self.len_lineobjs = 0
+
+        self._built_from = entity
+        self._index_thread = 0
 
     @property
     def offset(self):
@@ -321,24 +356,56 @@ class Target(object):
         assert isinstance(val, numbers.Real)
         self._offset = val
 
-    def __str__(self):
-        return "<Target#%s: from %s, comp=%s, host=%s, off=%d, %d lines, %d threads>" % (
+    def __repr__(self):
+        return "<%s#%s: comp=%s, host=%s, off=%d, %d lines, %d threads, built-from %s>" % (
+               self.__class__.__name__,
                self.target,
-               self._entity.name,
                self.component,
                self.host,
                self._offset,
-               len(self.line_objs),
-               len(self.thread_objs))
+               self.len_lineobjs,
+               len(self.thread_objs),
+               self._built_from.name)
 
-    def __repr__(self):
-        ret = str(self)
-        lim = self._repr_lines_lim
-        ret += "\n^ ---- last ----"
-        for line in reversed(self.line_objs):
-            ret += "\n| %s" % line.__str_target__()
+    def __str__(self):
+        ret = repr(self)
+        lim = self._str_lines_lim
+        ret += "\n---- end -----"
+
+        line = self.last_lineobj
+        while line is not None:
+            ret += "\n%s" % line.__repr_target__()
             lim -= 1
             if lim <= 0:
-                ret += "\n ......"
-        ret += "\n  ---- first ---"
+                break
+            line = line.prv_target_line
+
+        if line is None:
+            pass
+        elif line is self.start_lineobj:
+            ret += "\n%s" % line.__repr_target__()
+        else:
+            ret += "\n ......"
+            ret += "\n%s" % self.start_lineobj.__repr_target__()
+        ret += "\n---- start ---"
+
         return ret
+
+    def append_line(self, thread, **kwds):
+        assert isinstance(thread, str)
+
+        thread_obj = self.thread_objs.get(thread)
+        if thread_obj is None:
+            self._index_thread += 1
+            thread_obj = Thread(self._index_thread, self, thread)
+            self.thread_objs[thread] = thread_obj
+
+        line_obj = thread_obj._append_line(**kwds)
+        if self.start_lineobj is None:
+            self.start_lineobj = line_obj
+        else:
+            self.last_lineobj.nxt_target_line = line_obj
+            line_obj.prv_target_line = self.last_lineobj
+        self.last_lineobj = line_obj
+        self.len_lineobjs += 1
+        return line_obj

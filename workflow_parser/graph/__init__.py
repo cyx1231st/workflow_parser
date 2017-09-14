@@ -253,6 +253,10 @@ class ClEdge(EdgeBase):
     def func_name(self):
         return self.func_graph.func_name
 
+    @property
+    def func_startedge(self):
+        return self.func_graph.start_edge
+
     def __str__(self):
         ret_s = super(ClEdge, self).__str__()
         ret_s += "\n  Calls:"+repr(self.func_graph)

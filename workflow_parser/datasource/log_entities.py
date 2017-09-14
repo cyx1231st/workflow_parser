@@ -132,7 +132,8 @@ class DriverPlugin(object):
 
 @total_ordering
 class LogLine(object):
-    def __init__(self, line, logfile, vs):
+    def __init__(self, lino, line, logfile, vs):
+        assert isinstance(lino, int)
         assert isinstance(line, str)
         assert isinstance(logfile, LogFile)
         assert isinstance(vs, dict)
@@ -146,6 +147,7 @@ class LogLine(object):
         # required after 2nd pass:
         self.request = None
 
+        self.lino = lino
         self.logfile = logfile
         self.line = line.strip()
         self._vars = {}
@@ -386,16 +388,16 @@ class LogFile(object):
             for line in reader:
                 assert isinstance(line, str)
                 self.total_lines += 1
-                yield line
+                yield self.total_lines, line
 
     def _build_loglines(self, lines, plugin):
-        for line in lines:
+        for lino,line in lines:
             assert isinstance(line, str)
             ret, vs = plugin.do_filter_logline(line)
             if not ret:
                 continue
             try:
-                lg = LogLine(line, self, vs)
+                lg = LogLine(lino, line, self, vs)
                 if lg.thread is not None:
                     self.threads.add(lg.thread)
                 if lg.request is not None:

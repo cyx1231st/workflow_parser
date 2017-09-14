@@ -15,18 +15,15 @@
 from __future__ import print_function
 
 from collections import defaultdict
-from collections import OrderedDict
 
 from ...datasource import Target
 from ...datasource import Thread
 from ...datasource import Line
 from ...graph import Master
-from ...graph.token import Token
 from ...utils import Report
-from ..entities.threadins import BlankInterval
 from ..entities.threadins import Pace
 from ..entities.threadins import ThreadInstance
-from ..entities.threadins import ThreadInterval
+from .schema import SchemaEngine
 
 
 class Error(object):
@@ -43,11 +40,11 @@ class Error(object):
         if not before:
             self.before_error["START"].append(line_obj)
         else:
-            pace = before._assigned
+            pace = before._line_state
             # prev line_obj must be parsed if prv exists
             assert pace
             assert isinstance(pace, Pace)
-            self.before_error[pace.step.where].append(line_obj)
+            self.before_error[pace.edgename].append(line_obj)
 
     def report(self, blanks=0):
         s_blank = " "*blanks
@@ -86,7 +83,7 @@ class Errors(object):
         if self.is_success:
             # line_obj must not be the first one
             assert line_obj.prv_thread_line
-            assert line_obj.prv_thread_line._assigned
+            assert line_obj.prv_thread_line._line_state
 
             self._append(self.incomplete_errors, line_obj)
             self.is_success = False
@@ -158,174 +155,82 @@ class Errors(object):
 
 
 errors = Errors()
-
-
-def _apply_token(token, threadins, line_obj, join_info):
-    assert isinstance(token, Token)
-    assert isinstance(threadins, ThreadInstance)
-    assert isinstance(line_obj, Line)
-
-    step = token.step
-    pace = Pace(line_obj, step, threadins)
-    if step.joins_objs:
-        join_info["innerjoin"]["joins"].append((pace, step.joins_objs))
-    if step.joined_objs:
-        join_info["innerjoin"]["joined"].append((pace, step.joined_objs))
-    if step.joined_interface:
-        join_info["crossjoin"]["joined"].append((pace, step.joined_interface))
-    if step.joins_interface:
-        join_info["crossjoin"]["joins"].append((pace, step.joins_interface))
-
-    for key in line_obj.keys:
-        if key in ("keyword", "time", "seconds"):
-            continue
-
-        new_val = line_obj[key]
-        if key in ("component", "target", "host", "thread"):
-            val = getattr(threadins, key)
-            if val != line_obj[key]:
-                raise StateError("(ThreadInstance) parse error: "
-                        "variable %s mismatch: %s is not %s!"
-                        % (key, val, new_val))
-            else:
-                pass
-        elif key == "request":
-            if new_val is None:
-                pass
-            elif threadins.request is None:
-                threadins.request = new_val
-            elif threadins.request != new_val:
-                raise StateError("(ThreadInstance) parse error: "
-                        "request mismatch: %s is not %s!"
-                        % (val, new_val))
-            else:
-                pass
-        else:
-            if key in threadins.thread_vars_dup:
-                threadins.thread_vars_dup[key].add(new_val)
-            else:
-                val = threadins.thread_vars.get(key)
-                if val is None:
-                    threadins.thread_vars[key] = new_val
-                elif val != new_val:
-                    threadins.thread_vars_dup[key].add(val)
-                    threadins.thread_vars_dup[key].add(new_val)
-                    threadins.thread_vars.pop(key)
-                else:
-                    pass
-
-    if threadins.intervals:
-        prv_pace = threadins.intervals[-1].to_pace
-        interval = ThreadInterval(prv_pace, pace)
-        threadins.intervals.append(interval)
-    elif threadins._start_pace:
-        interval = ThreadInterval(threadins._start_pace, pace)
-        threadins.intervals.append(interval)
-    else:
-        interval = None
-        threadins._start_pace = pace
-        thread_obj = threadins.thread_obj
-        if thread_obj.threadinss:
-            BlankInterval(thread_obj.threadinss[-1].to_pace, pace)
-
-    if interval is not None:
-        for mark in interval.marks:
-            threadins.intervals_by_mark[mark].append(interval)
-
-
-def _try_create_threadins(mastergraph, line_obj, thread_obj, join_info):
-    assert isinstance(mastergraph, Master)
-    assert isinstance(line_obj, Line)
-    assert isinstance(thread_obj, Thread)
-
-    token = Token.new(mastergraph, line_obj.keyword, thread_obj.component)
-    if token:
-        threadins = ThreadInstance(thread_obj, token.thread_graph)
-        _apply_token(token, threadins, line_obj, join_info)
-        thread_obj.threadinss.append(threadins)
-    else:
-        threadins = None
-        # error: failed to create new graph
-    return token, threadins
-
-
 cnf_threadparse_proceed_at_failure = False
 
 
-def build_thread_instances(target_objs, mastergraph, report):
+def build_thread_instances(target_objs, mastergraph, schema_engine, report):
     assert isinstance(mastergraph, Master)
+    assert isinstance(schema_engine, SchemaEngine)
     assert isinstance(report, Report)
 
     valid_lineobjs = 0
     thread_objs = []
-    join_info = defaultdict(lambda: defaultdict(list))
 
     print("Build thread instances...")
     for target_obj in target_objs.itervalues():
         assert isinstance(target_obj, Target)
         for thread_obj in target_obj.thread_objs.itervalues():
             assert isinstance(thread_obj, Thread)
-            token = None
-            ongoing_threadins = None
+            threadins = None
             thread_valid_lineobjs = 0
 
-            for line_obj in thread_obj.line_objs:
+            for line_obj in thread_obj.iter_lineobjs():
                 assert isinstance(line_obj, Line)
-                if token is not None:
-                    assert ongoing_threadins is not None
 
-                    if token.do_step(line_obj.keyword):
-                        _apply_token(token, ongoing_threadins, line_obj,
-                                     join_info)
-                        # success: token proceed
+                pace = None
+                if threadins is not None:
+                    pace = threadins.do_step(line_obj)
+                    if pace is not None:
+                        # success: threadins proceed
                         errors.success()
                     else:
-                        _token, _ongoing_threadins = _try_create_threadins(
-                                mastergraph, line_obj, thread_obj, join_info)
-                        if not token.is_complete:
-                            if not _token:
-                                # failed: token failed, threadins incomplete
+                        nxt_threadins, pace = ThreadInstance.new(
+                                mastergraph, line_obj, thread_obj)
+                        if not threadins.is_complete:
+                            if nxt_threadins is None:
+                                # failed: renew failed, threadins incomplete
                                 errors.append_incomplete_failed(line_obj)
                                 if not cnf_threadparse_proceed_at_failure:
-                                    token = _token
-                                    ongoing_threadins = _ongoing_threadins
+                                    threadins = None
                             else:
-                                # ~success: token renewed, threadins incomplete
+                                # ~success: threadins renewed, but incomplete
                                 errors.append_incomplete_success(line_obj)
-                                token = _token
-                                ongoing_threadins = _ongoing_threadins
+                                threadins.set_finish()
+                                threadins = nxt_threadins
                         else:
-                            if not _token:
-                                # failed: token failed renew, threadins complete
+                            if nxt_threadins is None:
+                                # failed: renew failed, threadins complete
                                 errors.append_start_failed(line_obj)
                                 if not cnf_threadparse_proceed_at_failure:
-                                    token = _token
-                                    ongoing_threadins = _ongoing_threadins
+                                    threadins = None
                             else:
-                                # success: token renewed
+                                # success: threadins renewed
                                 errors.success()
-                                token = _token
-                                ongoing_threadins = _ongoing_threadins
+                                threadins.set_finish()
+                                threadins = nxt_threadins
                 else:
-                    token, ongoing_threadins = _try_create_threadins(
-                            mastergraph, line_obj, thread_obj, join_info)
-                    if not token:
-                        # failed: token failed, no threadins
+                    threadins, pace = ThreadInstance.new(
+                            mastergraph, line_obj, thread_obj)
+                    if threadins is None:
+                        # failed: new failed
                         errors.append_start_failed(line_obj)
                     else:
-                        # success: token newed
+                        # success: new success
                         errors.success()
 
-                if not token:
+                if pace is None:
                     thread_obj.dangling_lineobjs.append(line_obj)
-                    assert line_obj._assigned is None
+                    assert line_obj._line_state is None
                 else:
                     thread_valid_lineobjs += 1
-                    assert line_obj._assigned is not None
+                    schema_engine.load_pace(pace)
+                    assert line_obj._line_state is not None
 
             assert len(thread_obj.dangling_lineobjs) + thread_valid_lineobjs\
-                    == len(thread_obj.line_objs)
+                    == thread_obj.len_lineobjs
 
+            if threadins is not None:
+                threadins.set_finish()
             thread_objs.append(thread_obj)
             valid_lineobjs += thread_valid_lineobjs
     print("-------------------------")
@@ -340,10 +245,6 @@ def build_thread_instances(target_objs, mastergraph, report):
     complete_threadinss_by_graph = defaultdict(list)
     start_threadinss = []
     duplicated_vars = set()
-    cnt_innerjoins_paces = len(join_info["innerjoin"]["joins"])
-    cnt_innerjoined_paces = len(join_info["innerjoin"]["joined"])
-    cnt_joinedinterface_paces = len(join_info["crossjoin"]["joined"])
-    cnt_joinsinterface_paces = len(join_info["crossjoin"]["joins"])
 
     for thread_obj in thread_objs:
         if thread_obj.dangling_lineobjs:
@@ -355,10 +256,10 @@ def build_thread_instances(target_objs, mastergraph, report):
             targets.add(thread_obj.target)
         for threadins in thread_obj.threadinss:
             if not threadins.is_complete:
-                incomplete_threadinss_by_graph[threadins.threadgraph.name]\
+                incomplete_threadinss_by_graph[threadins.threadgraph_name]\
                         .append(threadins)
             else:
-                complete_threadinss_by_graph[threadins.threadgraph.name]\
+                complete_threadinss_by_graph[threadins.threadgraph_name]\
                         .append(threadins)
             if threadins.is_request_start:
                 start_threadinss.append(threadins)
@@ -384,10 +285,10 @@ def build_thread_instances(target_objs, mastergraph, report):
                 thread=len(thread_objs),
                 request=len(start_threadinss),
                 threadins=len(threadinss),
-                innerjoin=cnt_innerjoins_paces,
-                innerjoined=cnt_innerjoined_paces,
-                leftinterface=cnt_joinedinterface_paces,
-                rightinterface=cnt_joinsinterface_paces)
+                innerjoin=len(schema_engine.innerj_proj.from_items),
+                innerjoined=len(schema_engine.innerj_proj.to_items),
+                leftinterface=len(schema_engine.crossj_proj.from_items),
+                rightinterface=len(schema_engine.crossj_proj.to_items))
 
     #### errors #####
     errors.report()
@@ -419,4 +320,4 @@ def build_thread_instances(target_objs, mastergraph, report):
             print("  %s: %d t_instances" % (gname, len(tis)))
         print()
 
-    return threadinss, join_info
+    return threadinss

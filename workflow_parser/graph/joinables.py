@@ -22,6 +22,11 @@ def _defensive_check(cls, obj, *attrs):
         assert not hasattr(super(cls, obj), attr)
 
 
+ONE = "ONE"
+ALL = "ALL"
+ANY = "ANY"
+JoinTypes = {ONE, ALL, ANY}
+
 ##### JoinObjs #####
 
 class JoinBase(object):
@@ -72,6 +77,10 @@ class JoinBase(object):
     def to_keyword(self):
         return self.to_item._jm_keyword
 
+    @property
+    def strategy(self):
+        return ALL
+
     def __repr_marks__(self):
         if self.is_remote:
             return ", REMOTE"
@@ -104,6 +113,12 @@ class InnerJoin(JoinBase):
                 from_item=from_item,
                 to_item=to_item,
                 **kwds)
+
+    @property
+    def strategy(self):
+        st = self.from_item._jm_inner_jstype
+        assert st in JoinTypes
+        return st
 
     def __repr_marks__(self):
         mark = super(InnerJoin, self).__repr_marks__()
@@ -181,12 +196,6 @@ class CrossJoin(JoinBase):
 
 ##### JoinMixins #####
 
-ONE = "ONE"
-ALL = "ALL"
-ANY = "ANY"
-InnerJoinTypes = {ONE, ALL, ANY}
-
-
 class JoinMixinBase(object):
     __metaclass__ = ABCMeta
 
@@ -218,7 +227,7 @@ class InnerjoinMixin(JoinMixinBase):
         self._jm_inner_jedobjs = OrderedSet()
 
     def _join(self, type_, to_item, **kwds):
-        assert type_ in InnerJoinTypes
+        assert type_ in JoinTypes
         assert isinstance(to_item, InnerjoinMixin)
 
         if self._jm_inner_jstype is None:
@@ -304,28 +313,13 @@ class RequestJoin(JoinMixinBase, InnerJoin):
         self.caller_jobjpeers = []
         self.reqname = reqname
 
-    def call_req(self, from_item, from_isremote, from_schemas,
-                       to_item, to_isremote, to_schemas):
-        index = len(self.caller_jobjpeers)
-        left_joinobj = self._jm_master._create_cross_joinobj(
-                is_left=True,
-                caller=self,
-                caller_index=index,
-                callee=from_item,
-                is_remote=from_isremote,
-                schemas=from_schemas)
-        right_joinobj = self._jm_master._create_cross_joinobj(
-                is_left=False,
-                caller=self,
-                caller_index=index,
-                callee=to_item,
-                is_remote=to_isremote,
-                schemas=to_schemas)
-        left_joinobj.call_peer = right_joinobj
-        right_joinobj.call_peer = left_joinobj
-        from_item._jm_callee_jedobjs.add(left_joinobj)
-        to_item._jm_callee_jsobjs.add(right_joinobj)
-        self.caller_jobjpeers.append((left_joinobj, right_joinobj))
+    @property
+    def joins_objs(self):
+        return [joins for joins, _ in self.caller_jobjpeers]
+
+    @property
+    def joined_objs(self):
+        return [joined for _, joined in self.caller_jobjpeers]
 
     def __repr_marks__(self):
         mark = super(RequestJoin, self).__repr_marks__()
@@ -345,6 +339,32 @@ class RequestJoin(JoinMixinBase, InnerJoin):
                     "\n    "+repr(l)+"\n    "+repr(r)
                     for l, r in self.caller_jobjpeers)
         return str_
+
+    def call_req(self, from_item, from_isremote, from_schemas,
+                       to_item, to_isremote, to_schemas):
+        index = len(self.caller_jobjpeers)
+        if index:
+            raise RuntimeError("call_req() failed, %s already has calling schema!"
+                    % self.name)
+        left_joinobj = self._jm_master._create_cross_joinobj(
+                is_left=True,
+                caller=self,
+                caller_index=index,
+                callee=from_item,
+                is_remote=from_isremote,
+                schemas=from_schemas)
+        right_joinobj = self._jm_master._create_cross_joinobj(
+                is_left=False,
+                caller=self,
+                caller_index=index,
+                callee=to_item,
+                is_remote=to_isremote,
+                schemas=to_schemas)
+        left_joinobj.call_peer = right_joinobj
+        right_joinobj.call_peer = left_joinobj
+        from_item._jm_callee_jedobjs.add(left_joinobj)
+        to_item._jm_callee_jsobjs.add(right_joinobj)
+        self.caller_jobjpeers.append((left_joinobj, right_joinobj))
 
 
 class CrossCalleeMixin(JoinMixinBase):

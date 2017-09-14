@@ -15,7 +15,7 @@
 from orderedset import OrderedSet
 
 from ..service_registry import Component
-from . import (FnEdge,
+from . import (ClEdge,
                FnNode,
                KwEdge,
                Master,
@@ -25,32 +25,27 @@ from . import (FnEdge,
                ThreadGraph)
 
 
-class GraphRuntime(object):
-    def __init__(self, thread_graph):
-        assert isinstance(thread_graph, ThreadGraph)
-        self.thread_graph = thread_graph
-        self.states = []
-
-
+# Refer to a Node
 class State(object):
-    def __init__(self, node, callstack, from_step=None, runtime=None):
+    def __init__(self, node, callstack, from_step, token):
         assert isinstance(node, NodeBase)
         assert isinstance(callstack, list)
+        assert isinstance(token, Token)
         if from_step is not None:
             assert isinstance(from_step, Step)
-            from_step.to_state = self
-            runtime = from_step.runtime
-        assert isinstance(runtime, GraphRuntime)
-        runtime.states.append(self)
+            assert token is from_step.token
+        else:
+            assert isinstance(node, TdNode)
+            assert node.is_start
 
         self._node = node
+        self._callstack = callstack
         self.from_step = from_step
         self.to_step = None
-        self.callstack = callstack
-        self.runtime = runtime
+        self.token = token
 
     @property
-    def name(self):
+    def nodename(self):
         return self._node.name
 
     @property
@@ -58,16 +53,63 @@ class State(object):
         if self.from_step is None:
             from_ = "|["
         else:
-            from_ = "%s[" % self.from_step.name
+            from_ = "%s[" % self.from_step.edgename
         if self.to_step is None:
             to_ = "]|"
         else:
-            to_ = "]%s" % self.to_step.name
-        return from_ + self.name + to_
+            to_ = "]%s" % self.to_step.edgename
+        return from_ + self.nodename + to_
+
+    @property
+    def callstack(self):
+        ret = self.token.threadgraph_name
+        if self._callstack:
+            ret += "(%d.%s@%s)" % (
+                len(self._callstack),
+                self._callstack[-1].func_name,
+                self.nodename)
+        else:
+            ret += "(@%s)" % self.nodename
+        return ret
 
     @property
     def marks(self):
         return self._node.marks
+
+    @property
+    def is_thread_start(self):
+        if isinstance(self._node, TdNode):
+            return self._node.is_start
+        else:
+            return False
+
+    @property
+    def is_thread_end(self):
+        if isinstance(self._node, TdNode):
+            return self._node.is_end
+        else:
+            return False
+
+    @property
+    def is_request_start(self):
+        if isinstance(self._node, ReqNode):
+            return True
+        else:
+            return False
+
+    @property
+    def request_type(self):
+        if self.is_request_start:
+            return self._node.request_type
+        else:
+            return None
+
+    @property
+    def is_request_end(self):
+        if isinstance(self._node, TdNode):
+            return self._node.is_request_end
+        else:
+            return False
 
     @property
     def request_state(self):
@@ -75,166 +117,136 @@ class State(object):
             return self._node.request_state
         return None
 
-    @property
-    def request_type(self):
-        if self.is_request_start:
-            ret = self._node.request_type
-            assert ret
-            return ret
-        else:
-            return None
-
-    @property
-    def is_thread_start(self):
-        if isinstance(self._node, TdNode):
-            return self._node.is_start
-        return False
-
-    @property
-    def is_thread_end(self):
-        if isinstance(self._node, TdNode):
-            return self._node.is_end
-        return False
-
-    @property
-    def is_request_start(self):
-        if isinstance(self._node, ReqNode):
-            assert self._node.is_start
-            return True
-        return False
-
-    @property
-    def is_request_end(self):
-        if isinstance(self._node, TdNode):
-            return self._node.is_request_end
-        return False
-
     def __repr__(self):
         marks = ""
-        if self.is_request_start:
-            marks += ", S"
-        elif self.is_thread_start:
+        if self.is_thread_start:
             marks += ", s"
-        if self.is_request_end:
-            marks += ", E@%s" % self.request_state
-        else:
+        if self.is_thread_end:
             marks += ", e"
-        if self.marks:
-            marks += ", m(%s)" % ",".join(self.marks)
-        return "<%s: %s%s>" % (
+        marks += self._node.__repr_marks__()
+        return "<%s: %s, %s%s>" % (
                 self.__class__.__name__,
                 self.path,
+                self.callstack,
                 marks)
 
 
+# Refer to a KwEdge
 class Step(object):
-    def __init__(self, edge, callstack, from_state):
-        assert isinstance(edge, KwEdge)
+    def __init__(self, kwedge, callstack, from_state):
+        assert isinstance(kwedge, KwEdge)
         assert isinstance(callstack, list)
         assert isinstance(from_state, State)
 
-        self._edge = edge
+        self._kwedge = kwedge
+        self._callstack = callstack
         self.from_state = from_state
         self.to_state = None
-        self.callstack = callstack
-        self.runtime = from_state.runtime
+        self.token = from_state.token
 
         assert from_state.to_step is None
         from_state.to_step = self
 
     @property
-    def name(self):
-        return self._edge.name
+    def edgename(self):
+        return self._kwedge.name
+
+    @property
+    def joinable(self):
+        return self._kwedge
 
     @property
     def path(self):
-        from_ = self.from_state.name
         if self.to_state is None:
             to_ = "?"
         else:
-            to_ = self.to_state.name
-        return "[" + from_ + "]" + self.name + "[" + to_ + "]"
+            to_ = self.to_state.nodename
+        return "["+self.from_state.nodename+"]"\
+               +self.edgename\
+               +"["+to_+"]"
 
     @property
     def keyword(self):
-        return self._edge.keyword
+        return self._kwedge.keyword
 
     @property
-    def joins_objs(self):
-        return self._edge.joins_objs
-
-    @property
-    def joined_objs(self):
-        return self._edge.joined_objs
-
-    @property
-    def joined_interface(self):
-        return self._edge.joined_interface
-
-    @property
-    def joins_interface(self):
-        return self._edge.joins_interface
-
-    @property
-    def calldepth(self):
-        return len(self.callstack)
-
-    @property
-    def where(self):
-        if self.calldepth:
-            return "%s@%s" % (self.callstack[-1].func_name,
-                              self.keyword)
+    def callstack(self):
+        ret = self.token.threadgraph_name
+        if self._callstack:
+            ret += "(%d.%s@%s-`%s`)" % (
+                    len(self._callstack),
+                    self._callstack[-1].func_name,
+                    self.edgename,
+                    self.keyword)
         else:
-            return "%s@%s" % (self.runtime.thread_graph.name,
-                              self.keyword)
+            ret += "(@%s-`%s`)" % (
+                    self.edgename, self.keyword)
+        return ret
 
     def __repr__(self):
-        return "<%s: %s, `%s`, %d-%d jo, %s-%s ji>" % (
+        return "<%s: %s, %s%s>" % (
                 self.__class__.__name__,
                 self.path,
-                self.keyword,
-                len(self.joins_objs),
-                len(self.joined_objs),
-                "1" if self.joins_interface else "0",
-                "1" if self.joined_interface else "0")
+                self.callstack,
+                self._kwedge.__repr_marks__())
 
 
+# Refer to a ThreadGraph
 class Token(object):
+    # private
     def __init__(self, start_node, master):
         assert isinstance(start_node, TdNode)
+        assert isinstance(start_node.graph, ThreadGraph)
         assert start_node.is_start
         assert isinstance(master, Master)
 
-        self.runtime = GraphRuntime(start_node.graph)
-        self.callstack = []
-        self.step = None
-        self.state = State(start_node, self.callstack, runtime=self.runtime)
-        self.master = master
+        self._master = master
+        self._callstack = []
+
+        self._thread_graph = start_node.graph
+        self.start_state = State(start_node, self._callstack, None, self)
+        self.to_step = None
+        self.to_state = self.start_state
+        self.len_states = 1
+        self.len_steps = 0
+
+    @property
+    def threadgraph_name(self):
+        return self._thread_graph.name
+
+    @property
+    def component(self):
+        return self._thread_graph.component
 
     @property
     def is_complete(self):
-        return self.state.is_thread_end
-
-    @property
-    def thread_graph(self):
-        return self.runtime.thread_graph
+        if self.to_state.is_thread_end:
+            assert not self._callstack
+            return True
+        else:
+            return False
 
     def _step_edge(self, edge):
-        self.master.seen_edges.add(edge)
-        while isinstance(edge, FnEdge):
-            self.callstack = self.callstack[:]
-            self.callstack.append(edge)
-            edge = edge.func_graph.start_edge
-            self.master.seen_edges.add(edge)
+        self._master.seen_edges.add(edge)
+        while isinstance(edge, ClEdge):
+            self._callstack = self._callstack[:]
+            self._callstack.append(edge)
+            edge = edge.func_startedge
+            self._master.seen_edges.add(edge)
         assert isinstance(edge, KwEdge)
-        self.step = Step(edge, self.callstack, self.state)
+        self.to_step = Step(edge, self._callstack, self.to_state)
+        self.to_state.to_step = self.to_step
+        self.to_state = None
+        self.len_steps += 1
 
         node = edge.node
         while isinstance(node, FnNode) and node.is_end:
-            self.callstack = self.callstack[:]
-            f_edge = self.callstack.pop()
+            self._callstack = self._callstack[:]
+            f_edge = self._callstack.pop()
             node = f_edge.node
-        self.state = State(node, self.callstack, self.step)
+        self.to_state = State(node, self._callstack, self.to_step, self)
+        self.to_step.to_state = self.to_state
+        self.len_states += 1
 
     @classmethod
     def new(cls, master, keyword, component):
@@ -242,7 +254,7 @@ class Token(object):
         assert isinstance(keyword, str)
         assert isinstance(component, Component)
 
-        threadgraphs = master.threadgraphs_by_component.get(component, OrderedSet())
+        threadgraphs = master.threadgraphs_bycomponent.get(component, OrderedSet())
         for t_g in threadgraphs:
             for s_node in t_g.start_nodes:
                 edge = s_node.decide_edge(keyword)
@@ -254,26 +266,51 @@ class Token(object):
 
     def do_step(self, keyword):
         assert isinstance(keyword, str)
-        edge = self.state._node.decide_edge(keyword)
+        edge = self.to_state._node.decide_edge(keyword)
         if edge:
             self._step_edge(edge)
             return True
         else:
             return False
 
+    def iter_steps(self):
+        state = self.start_state
+        while state:
+            to_step = state.to_step
+            if to_step:
+                yield to_step
+            else:
+                break
+            state = to_step.to_state
+
     def __repr__(self):
-        progress=""
-        if self.step:
-            progress+=self.step.name
+        if self.is_complete:
+            marks = ", COMPLETE"
         else:
-            progress+="|"
-        progress+="["+self.state.name+"]"
-        if self.callstack:
-            where = "~".join(f.name for f in reversed(self.callstack))
-            where += "~"
-        where += self.thread_graph.name
-        return "<%s: %s, stack %s, %d states>" % (
+            marks = ", ~COMPLETE"
+        if self.to_state:
+            end = self.to_state.nodename
+        else:
+            end = self.to_step.edgename
+        return "<%s#%s: %s, %s-->%s, %d states, %d steps%s>" % (
                 self.__class__.__name__,
-                progress,
-                where,
-                len(self.runtime.states))
+                self.threadgraph_name,
+                self.component,
+                self.start_state.nodename,
+                end,
+                self.len_states,
+                self.len_steps,
+                marks)
+
+    def __str__(self):
+        ret = repr(self)+":"
+        state = self.start_state
+        while state:
+            ret += "\n  "+repr(state)
+            step = state.to_step
+            if step:
+                ret += "\n  "+repr(step)
+            else:
+                break
+            state = step.to_state
+        return ret

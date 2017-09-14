@@ -18,10 +18,7 @@ from functools import total_ordering
 import numpy as np
 from itertools import izip
 
-from ..workflow.entities.join import InnerjoinInterval
-from ..workflow.entities.join import InterfacejoinInterval
-from ..workflow.entities.join import NestedrequestInterval
-from ..workflow.entities.request import RequestInterval
+from ..workflow.entities.bases import IntervalBase
 
 
 def projection_time(from_tos):
@@ -48,9 +45,9 @@ def projection_time(from_tos):
 class StepContent(object):
     def __init__(self, interval, step, from_content):
         assert isinstance(step, Step)
-        assert interval.fromstep_name == step.fromstep_name
-        assert interval.state_name == step.state_name
-        assert interval.tostep_name == step.tostep_name
+        assert interval.from_edgename == step.from_edgename
+        assert interval.int_name == step.int_name
+        assert interval.to_edgename == step.to_edgename
 
         self.interval = interval
         self.step = step
@@ -77,9 +74,9 @@ class StepContent(object):
 
 
 class Step(object):
-    def __init__(self, state_name, tostep_name, prv_step):
-        self.state_name = state_name
-        self.tostep_name = tostep_name
+    def __init__(self, int_name, to_edgename, prv_step):
+        self.int_name = int_name
+        self.to_edgename = to_edgename
         self.contents = []
 
         self.nxt_steps = []
@@ -89,15 +86,15 @@ class Step(object):
             prv_step.nxt_steps.append(self)
 
     @property
-    def fromstep_name(self):
-        return self.prv_step and self.prv_step.tostep_name
+    def from_edgename(self):
+        return self.prv_step and self.prv_step.to_edgename
 
     @property
     def path(self):
         return "%s[%s]%s" % (
-                self.fromstep_name,
-                self.state_name,
-                self.tostep_name)
+                self.from_edgename,
+                self.int_name,
+                self.to_edgename)
 
     @property
     def len_ints(self):
@@ -159,22 +156,23 @@ class Workflow(object):
         for interval in intervals:
             if interval is None:
                 continue
+            assert isinstance(interval, IntervalBase)
             if not self._content_by_req:
                 if not self.start_step:
                     self.start_step = Step("START",
-                                           interval.fromstep_name,
+                                           interval.from_edgename,
                                            None)
                 from_content = None
                 from_step = self.start_step
             else:
                 from_content = self._content_by_req[interval.request]
                 from_step = from_content.step
-            assert from_step.tostep_name == interval.fromstep_name
-            step_key = (from_step, interval.tostep_name)
+            assert from_step.to_edgename == interval.from_edgename
+            step_key = (from_step, interval.to_edgename)
             step = steps_by_fromstep_tostepname.get(step_key)
             if not step:
-                step = Step(interval.state_name,
-                            interval.tostep_name,
+                step = Step(interval.int_name,
+                            interval.to_edgename,
                             from_step)
                 steps_by_fromstep_tostepname[step_key] = step
                 self.len_steps += 1

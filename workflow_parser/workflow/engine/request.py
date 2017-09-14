@@ -18,64 +18,50 @@ from collections import defaultdict
 from itertools import chain
 
 from ...utils import Report
-from ..entities.join import EmptyJoin
-from ..entities.join import InnerjoinInterval
-from ..entities.join import InterfaceInterval
-from ..entities.join import InterfacejoinInterval
-from ..entities.join import JoinIntervalBase
-from ..entities.join import NestedrequestInterval
+from ..entities.join import InnerjoinActivity
+from ..entities.join import RequestjoinActivity
+from ..entities.bases import ActivityBase
+from .schema import JoinInfo
 from ..entities.request import RequestInstance
-from ..entities.request import RequestInterval
 from ..entities.threadins import ThreadInstance
-from ..entities.threadins import ThreadInterval
+from ..entities.threadins import ThreadActivity
+from ..entities.join import InnerjoinActivity
+from ..entities.join import CrossjoinActivity
+from ..entities.join import EmptyjoinActivity
 from ..exc import StateError
 
 
 # step 3: group threads by request
-def group_threads(threadinss, report):
+def group_threads(threadinss, joininfo, report):
+    assert isinstance(joininfo, JoinInfo)
     assert isinstance(report, Report)
 
     print("Group threads...")
     seen_threadinss = set()
-    def group(threadins, t_set):
+    def group(threadins, threadins_group, requests):
         assert isinstance(threadins, ThreadInstance)
 
         if threadins in seen_threadinss:
-            return set()
+            return
         seen_threadinss.add(threadins)
-        t_set.add(threadins)
-        ret = set()
+        threadins_group.add(threadins)
         if threadins.request:
-            ret.add(threadins.request)
+            requests.add(threadins.request)
 
-        assert {InnerjoinInterval, InterfaceInterval, EmptyJoin} ==\
-               {InnerjoinInterval, InterfaceInterval, EmptyJoin} |\
-               threadins.joinedints_by_type.viewkeys()
-        assert {InnerjoinInterval, InterfaceInterval, EmptyJoin} ==\
-               {InnerjoinInterval, InterfaceInterval, EmptyJoin} |\
-               threadins.joinsints_by_type.viewkeys()
-        assert {InterfacejoinInterval, EmptyJoin} == \
-               {InterfacejoinInterval, EmptyJoin} |\
-               threadins.joinedinterfaceints_by_type.viewkeys()
-        assert {InterfacejoinInterval, EmptyJoin} == \
-               {InterfacejoinInterval, EmptyJoin} |\
-               threadins.joinsinterfaceints_by_type.viewkeys()
-
-        for joins_int in chain(
-                threadins.joinsints_by_type[InnerjoinInterval],
-                threadins.joinsints_by_type[InterfaceInterval]):
-            to_threadins = joins_int.to_threadins
+        for joins in joininfo.iter_innerjoins(threadins):
+            if isinstance(joins, RequestjoinActivity):
+                to_threadins = joins.to_pace_unnested.threadins
+            else:
+                to_threadins = joins.to_threadins
             assert to_threadins is not threadins
-            ret.update(group(to_threadins, t_set))
-        for joined_int in chain(
-                threadins.joinedints_by_type[InnerjoinInterval],
-                threadins.joinedints_by_type[InterfaceInterval]):
-            from_threadins = joined_int.from_threadins
+            group(to_threadins, threadins_group, requests)
+        for joined in joininfo.iter_innerjoined(threadins):
+            if isinstance(joined, RequestjoinActivity):
+                from_threadins = joined.from_pace_unnested.threadins
+            else:
+                from_threadins = joined.from_threadins
             assert from_threadins is not threadins
-            ret.update(group(from_threadins, t_set))
-
-        return ret
-    ##########################
+            group(from_threadins, threadins_group, requests)
 
     threadgroup_by_request = defaultdict(set)
     threadgroups_with_multiple_requests = []
@@ -83,22 +69,24 @@ def group_threads(threadinss, report):
     for threadins in threadinss:
         assert isinstance(threadins, ThreadInstance)
         if threadins not in seen_threadinss:
-            new_t_set = set()
-            requests = group(threadins, new_t_set)
+            threadins_group = set()
+            requests = set()
+            group(threadins, threadins_group, requests)
             len_req = len(requests)
             if len_req > 1:
-                threadgroups_with_multiple_requests.append((new_t_set, requests))
+                threadgroups_with_multiple_requests.append((threadins_group, requests))
             elif len_req == 1:
-                threadgroup_by_request[requests.pop()].update(new_t_set)
+                threadgroup_by_request[requests.pop()].update(threadins_group)
             else:
-                threadgroups_without_request.append(new_t_set)
+                threadgroups_without_request.append(threadins_group)
     print("----------------")
 
     components = set()
     hosts = set()
     targets = set()
     threads = set()
-    sum_dict = defaultdict(lambda: 0)
+    collected_threadinss = set()
+    sum_ = defaultdict(lambda: 0)
 
     def collect_group(tgroup):
         for tiss in tgroup:
@@ -108,50 +96,52 @@ def group_threads(threadinss, report):
                 hosts.add(tis.host)
                 targets.add(tis.target_obj)
                 threads.add(tis.thread_obj)
-                sum_dict['sum_tis'] += 1
-                sum_dict['sum_lines'] += len(tis.intervals)+1
-                sum_dict['sum_joins'] +=\
-                        len(tis.joinsints_by_type[InnerjoinInterval])
-                sum_dict['sum_joined'] +=\
-                        len(tis.joinedints_by_type[InnerjoinInterval])
-                sum_dict['sum_ijoins'] +=\
-                        len(tis.joinsints_by_type[InterfaceInterval])
-                sum_dict['sum_ijoined'] +=\
-                        len(tis.joinedints_by_type[InterfaceInterval])
-                sum_dict['sum_ljoin'] +=\
-                        len(tis.joinedinterfaceints_by_type[InterfacejoinInterval])
-                sum_dict['sum_rjoin'] +=\
-                        len(tis.joinsinterfaceints_by_type[InterfacejoinInterval])
+                collected_threadinss.add(tis)
+                sum_['lines'] += tis.len_activities-1
+                for join in joininfo.iter_innerjoins(tis):
+                    if isinstance(join, RequestjoinActivity):
+                        sum_['rjoins'] += 1
+                        if join.left_crossjoin:
+                            sum_['cjoin'] += 1
+                        if join.right_crossjoin:
+                            sum_['cjoin'] += 1
+                    else:
+                        sum_['joins'] += 1
+                for join in joininfo.iter_innerjoined(tis):
+                    if isinstance(join, RequestjoinActivity):
+                        sum_['rjoined'] += 1
+                    else:
+                        sum_['joined'] += 1
 
     collect_group(threadgroup_by_request.itervalues())
     collect_group(threadgroups_without_request)
 
     #### summary ####
     print("%d request groups" % (len(threadgroup_by_request)))
-    print("%d thread instances" % sum_dict['sum_tis'])
+    print("%d thread instances" % len(collected_threadinss))
     print()
 
     #### report #####
     report.step("group_t",
-                line=sum_dict['sum_lines'],
+                line=sum_['lines'],
                 component=len(components),
                 host=len(hosts),
                 target=len(targets),
                 thread=len(threads),
                 request=len(threadgroup_by_request)+len(threadgroups_without_request),
-                threadins=sum_dict['sum_tis'],
-                innerjoin=sum_dict['sum_joins'],
-                innerjoined=sum_dict['sum_joined'],
-                interfacejoin=sum_dict['sum_ijoins'],
-                interfacejoined=sum_dict['sum_ijoined'],
-                leftinterface=sum_dict['sum_ljoin'],
-                rightinterface=sum_dict['sum_rjoin'])
+                threadins=len(collected_threadinss),
+                innerjoin=sum_['joins'],
+                innerjoined=sum_['joined'],
+                interfacejoin=sum_['rjoins'],
+                interfacejoined=sum_['rjoined'],
+                leftinterface=sum_['cjoin'],
+                rightinterface=sum_['cjoin'])
 
     #### errors #####
-    if sum_dict['sum_tis'] != len(threadinss):
+    if len(collected_threadinss) != len(threadinss):
         print("! WARN !")
         print("%d thread instances, but previously built %d"
-                % (sum_dict['sum_tis'],
+                % (len(collected_threadinss),
                    len(threadinss)))
         print()
 
@@ -169,27 +159,28 @@ def group_threads(threadinss, report):
         print("%d thread groups have multiple requests" % (
                 len(threadgroups_with_multiple_requests)))
         for i_group, reqs in threadgroups_with_multiple_requests:
+            # TODO: can show whether there are multi request_types
             # from workflow_parser.draw_engine import DrawEngine
             # draw_engine.draw_debug_groups(reqs, i_group)
-            join_ints = set()
-            for ti in i_group:
-                join_ints.update(ti.joinsints_by_type[InnerjoinInterval])
-                join_ints.update(ti.joinsints_by_type[InterfaceInterval])
-                join_ints.update(ti.joinedints_by_type[InnerjoinInterval])
-                join_ints.update(ti.joinedints_by_type[InterfaceInterval])
-            join_ints_by_obj = defaultdict(list)
-            for join_int in join_ints:
-                join_ints_by_obj[join_int.join_obj].append(join_int)
-            print("#### debug group ####")
-            for join_obj, join_ints in join_ints_by_obj.iteritems():
-                print("%s:" % join_obj.name)
-                schemas = join_obj.schemas
-                for join_int in join_ints:
-                    j_str = ""
-                    for schema in schemas:
-                        j_str += "%s: %s, " % (schema, join_int.to_pace[schema[1]])
-                    print("  %s" % j_str)
-            print("#####################\n")
+            # join_ints = set()
+            # for ti in i_group:
+            #     join_ints.update(ti.joinsints_by_type[InnerjoinInterval])
+            #     join_ints.update(ti.joinsints_by_type[InterfaceInterval])
+            #     join_ints.update(ti.joinedints_by_type[InnerjoinInterval])
+            #     join_ints.update(ti.joinedints_by_type[InterfaceInterval])
+            # join_ints_by_obj = defaultdict(list)
+            # for join_int in join_ints:
+            #     join_ints_by_obj[join_int.join_obj].append(join_int)
+            # print("#### debug group ####")
+            # for join_obj, join_ints in join_ints_by_obj.iteritems():
+            #     print("%s:" % join_obj.name)
+            #     schemas = join_obj.schemas
+            #     for join_int in join_ints:
+            #         j_str = ""
+            #         for schema in schemas:
+            #             j_str += "%s: %s, " % (schema, join_int.to_pace[schema[1]])
+            #         print("  %s" % j_str)
+            # print("#####################\n")
             print("  %d thread instances contains %d requests" %
                     (len(i_group), len(reqs)))
         print()
@@ -203,10 +194,59 @@ def group_threads(threadinss, report):
     return ret
 
 
+def _build_mainpath(reqins):
+    assert isinstance(reqins, RequestInstance)
+    activity = reqins.end_activity
+    assert activity
+
+    pace = None
+    while True:
+        assert isinstance(activity, ActivityBase)
+        if isinstance(activity, EmptyjoinActivity):
+            assert pace
+            return ("Pace backward empty, empty join", pace.edgename)
+        if activity.is_main:
+            return ("Revisited", activity.activity_name)
+        activity.is_main = True
+        if pace:
+            pace.prv_main_activity = activity
+
+        pace = activity.from_pace
+        reqins.len_main_paces += 1
+        if pace is None:
+            if activity is not reqins.start_activity:
+                return ("Activity backward empty", activity.activity_name)
+            else:
+                break
+        else:
+            if pace.is_main:
+                return ("Revisited", pace.edgename)
+            pace.is_main = True
+            pace.nxt_main_activity = activity
+
+            prv_acts = pace.get_prv(InnerjoinActivity._act_type)
+            if len(prv_acts) > 1:
+                return ("Multiple backward joinacts", pace.edgename)
+            elif len(prv_acts) == 1:
+                activity = prv_acts[0]
+            else:
+                prv_acts = pace.get_prv(ThreadActivity._act_type)
+                if len(prv_acts) > 1:
+                    return ("Multiple backward threadacts", pace.edgename)
+                elif len(prv_acts) == 1:
+                    activity = prv_acts[0]
+                else:
+                    return ("Pace backward empty, no choices", pace.edgename)
+    return None
+
+
 class RequestBuilder(object):
-    def __init__(self, mastergraph, request, threadinss):
+    def __init__(self, request, joininfo, threadinss):
+        assert isinstance(joininfo, JoinInfo)
         self.threadinss = threadinss
-        self.requestins = RequestInstance(mastergraph, request, self)
+        self.requestins = RequestInstance(request, self)
+        self.joininfo = joininfo
+
         self.is_built = False
         # error report
         self.errors = {}
@@ -216,7 +256,6 @@ class RequestBuilder(object):
         self.e_extra_s_threadinss = set()
         self.e_extra_e_threadinss = set()
         self.e_stray_threadinss = set()
-        self.e_unjoins_paces_by_edge = defaultdict(set)
 
     def __nonzero__(self):
         if self.errors or not self.is_built:
@@ -227,29 +266,33 @@ class RequestBuilder(object):
     def build(self):
         assert not self.is_built
         requestins = self.requestins
+        joininfo = self.joininfo
 
         # init
         tis = set()
         for threadins in self.threadinss:
             assert isinstance(threadins, ThreadInstance)
             tis.add(threadins)
+            if threadins.request:
+                assert threadins.request == requestins.request
             threadins.requestins = requestins
-            threadins.request = requestins.request
+            # start_activity
             if threadins.is_request_start:
-                if requestins.start_interval is not None:
+                if requestins.start_activity is not None:
                     self.e_extra_s_threadinss.add(threadins)
                 else:
-                    requestins.start_interval = threadins.start_interval
+                    requestins.start_activity = threadins.start_activity
 
         # error: multiple start threads
         if self.e_extra_s_threadinss:
-            self.e_extra_s_threadinss.add(requestins.start_interval.threadins)
+            self.e_extra_s_threadinss.add(requestins.start_activity.threadins)
             error_str = "\n".join("%r" % ti for ti in self.e_extra_s_threadinss)
-            self.errors["Has multiple start intervals"] = error_str
+            self.errors["Has multiple start_activities"] = error_str
+            return None
 
         # error: no start thread
-        if requestins.start_interval is None:
-            self.errors["Contains no start interval"] = ""
+        if requestins.start_activity is None:
+            self.errors["Contains no start_activity"] = ""
             return None
 
         seen_tis = set()
@@ -261,29 +304,30 @@ class RequestBuilder(object):
 
             # threadinss
             requestins.threadinss.append(threadins)
-            requestins.thread_ints.update(threadins.intervals)
 
             # incomplete_threadinss
             if not threadins.is_complete:
                 self.e_incomplete_threadinss.add(threadins)
 
-            # end_interval
-            r_state = threadins.request_state
-            if r_state:
-                assert threadins.is_request_end is True
-                if requestins.end_interval:
+            # end_activity
+            if threadins.is_request_end:
+                r_state = threadins.request_state
+                assert r_state is not None
+                if requestins.end_activity:
                     self.e_extra_e_threadinss.add(threadins)
                 else:
-                    requestins.end_interval = threadins.end_interval
+                    requestins.end_activity = threadins.end_activity
 
-            # last_theadins
-            if requestins.last_interval is None \
-                    or requestins.last_interval.to_seconds < threadins.end_seconds:
-                requestins.last_interval = threadins.end_interval
+            # last_activity
+            if threadins.end_activity.from_seconds is not None:
+                if requestins.last_activity is None\
+                        or requestins.last_activity.from_seconds < \
+                        threadins.end_activity.from_seconds:
+                    requestins.last_activity = threadins.end_activity
 
-            # intervals_by_mark
-            for mark, intervals in threadins.intervals_by_mark.iteritems():
-                requestins.intervals_by_mark[mark].extend(intervals)
+            # activities_bymark
+            for mark, acts in threadins.activities_bymark.iteritems():
+                requestins.activities_bymark[mark].extend(acts)
 
             # request vars
             requestins.request_vars["thread"].add(threadins.target+":"+threadins.thread)
@@ -296,128 +340,68 @@ class RequestBuilder(object):
                 requestins.request_vars[key].update(vals)
 
             # len_paces
-            requestins.len_paces += len(threadins.intervals)+1
+            requestins.len_paces += threadins.len_activities-1
 
             # thread/target
             requestins.thread_objs.add(threadins.thread_obj)
             requestins.target_objs.add(threadins.target_obj)
 
-            # join_intervals
-            for joins_int in threadins.joinsints_by_type[EmptyJoin]:
-                requestins.joinints_by_type[EmptyJoin].add(joins_int)
-                unjoins_pace = joins_int.from_pace
-                self.e_unjoins_paces_by_edge[unjoins_pace.step._edge].add(unjoins_pace)
-            for joins_int in threadins.joinsints_by_type[InnerjoinInterval]:
-                requestins.joinints_by_type[InnerjoinInterval].add(joins_int)
-                _process(joins_int.to_threadins)
-            for joins_int in threadins.joinsints_by_type[InterfaceInterval]:
-                assert isinstance(joins_int, InterfaceInterval)
-                reqjoins = joins_int.joins_crossrequest_int
-                if isinstance(reqjoins, EmptyJoin):
-                    self.e_unjoins_paces_by_edge[joins_int.join_obj].add(joins_int)
-                joins_int.build_nestedrequestinterval()
-                requestins.thread_objs.add(
-                        joins_int.joins_crossrequest_int.to_threadobj)
-                requestins.thread_objs.add(
-                        joins_int.joined_crossrequest_int.from_threadobj)
-                requestins.joinints_by_type[InterfaceInterval].add(joins_int)
-                assert joins_int.joins_crossrequest_int
-                assert joins_int.nestedrequest_int
-                assert joins_int.joined_crossrequest_int
-                requestins.joinints_by_type[InterfacejoinInterval].add(
-                        joins_int.joins_crossrequest_int)
-                requestins.joinints_by_type[NestedrequestInterval].add(
-                        joins_int.nestedrequest_int)
-                requestins.joinints_by_type[InterfacejoinInterval].add(
-                        joins_int.joined_crossrequest_int)
-                _process(joins_int.to_threadins)
+            # join_activities
+            for join in joininfo.iter_emptyjoin(threadins, is_joins=True):
+                requestins.emptyjoins_activities.add(join)
+            for join in joininfo.iter_emptyjoin(threadins, is_joins=False):
+                requestins.emptyjoined_activities.add(join)
+            for join in joininfo.iter_innerjoins(threadins, is_request=False):
+                requestins.innerjoin_activities.add(join)
+                _process(join.to_threadins)
+            for join in joininfo.iter_innerjoins(threadins, is_request=True):
+                requestins.requestjoin_activities.add(join)
+                if join.is_nest:
+                    requestins.innerjoin_activities.add(join.left_crossjoin)
+                    requestins.innerjoin_activities.add(join.right_crossjoin)
+                _process(join.to_pace_unnested.threadins)
+            for join in joininfo.iter_crossjoin(threadins, is_left=True):
+                requestins.crossjoinl_activities.add(join)
+            for join in joininfo.iter_crossjoin(threadins, is_left=False):
+                requestins.crossjoinr_activities.add(join)
 
-            for joins_int in threadins.joinsinterfaceints_by_type[InterfacejoinInterval]:
-                requestins.joinsinterfaceints_by_type[InterfacejoinInterval].add(joins_int)
-            for joins_int in threadins.joinsinterfaceints_by_type[EmptyJoin]:
-                requestins.joinsinterfaceints_by_type[EmptyJoin].add(joins_int)
-                unjoins_pace = joins_int.from_pace
-                self.e_unjoins_paces_by_edge[unjoins_pace.step._edge].add(unjoins_pace)
+        _process(requestins.start_activity.threadins)
 
-            for joined_int in threadins.joinedinterfaceints_by_type[InterfacejoinInterval]:
-                requestins.joinedinterfaceints_by_type[InterfacejoinInterval].add(joined_int)
-            for joined_int in threadins.joinedinterfaceints_by_type[EmptyJoin]:
-                requestins.joinedinterfaceints_by_type[EmptyJoin].add(joined_int)
+        requestins.threadinss.sort(key=lambda ti: ti.start_activity.to_seconds)
 
-        _process(requestins.start_interval.threadins)
-
-        requestins.threadinss.sort(key=lambda ti: ti.start_seconds)
-
-        # error: incomplete threads
+        # error: incomplete threadinss
         if self.e_incomplete_threadinss:
             err_str = "\n".join("%r" % ti for it in self.e_incomplete_threadinss)
-            self.errors["Has incomplete threads"] = err_str
+            self.errors["Has incomplete threadinss"] = err_str
 
-        # error: multiple end threads
-        if self.e_extra_e_threadinss:
-            self.e_extra_e_threadinss.add(requestins.end_interval.threadins)
-            err_str = "\n".join("%r" % ti for ti in self.e_extra_e_threadinss)
-            self.errors["Has multiple end intervals"] = err_str
-
-        # error: no end thread
-        if not requestins.end_interval:
-            self.errors["Contains no end interval"] = ""
-        else:
-            int_extended = []
-            try:
-                last_int = None
-                for int_ in requestins.iter_mainpath(reverse=True):
-                    if isinstance(int_, ThreadInterval):
-                        if last_int is None:
-                            last_int = int_
-                    else:
-                        assert isinstance(int_, JoinIntervalBase)
-                        if last_int is not None:
-                            int_extended.append(RequestInterval(int_.to_pace,
-                                                                last_int.to_pace))
-                            last_int = None
-                        else:
-                            assert isinstance(int_, NestedrequestInterval) or\
-                                   isinstance(int_, InterfacejoinInterval)
-                        int_extended.append(int_)
-                int_extended.append(
-                        RequestInterval(requestins.start_interval.from_pace,
-                                        last_int.to_pace))
-            except StateError as e:
-                self.errors["Main route parse error"] = (int_, e)
-            else:
-                for tint in reversed(int_extended):
-                    if requestins.extended_ints:
-                        assert requestins.extended_ints[-1].to_pace is tint.from_pace
-                    else:
-                        assert tint.from_pace is requestins.start_interval.from_pace
-                    requestins.extended_ints.append(tint)
-                assert requestins.extended_ints[-1].to_pace is requestins.end_interval.to_pace
-
-        # error: stray thread instances
+        # warn: stray threadinss
         self.e_stray_threadinss = tis - seen_tis
         if self.e_stray_threadinss:
             err_str = "\n".join("%r" % ti for ti in self.e_stray_threadinss)
-            self.warns["Has stray threads"] = err_str
+            self.warns["Has stray threadinss"] = err_str
 
-        # error: unjoins paces
-        if self.e_unjoins_paces_by_edge:
-            self.warns["Has unjoins paces"] = "%d joins edges" % len(self.e_unjoins_paces_by_edge)
+        # error: multiple end threads
+        if self.e_extra_e_threadinss:
+            self.e_extra_e_threadinss.add(requestins.end_activity.threadins)
+            err_str = "\n".join("%r" % ti for ti in self.e_extra_e_threadinss)
+            self.errors["Has multiple end activities"] = err_str
 
-        if not self.errors and requestins.request is None:
-            RequestInstance._index_dict[requestins.request_type] += 1
-            requestins.request = "%s%d" % (requestins.request_type,
-                    RequestInstance._index_dict[requestins.request_type])
-            for threadins in requestins.threadinss:
-                assert threadins.request is None
-                threadins.request = requestins.request
+        # error: no end thread
+        if not requestins.end_activity:
+            self.errors["Contains no end activity"] = ""
+        else:
+            # parse main path!
+            err = _build_mainpath(requestins)
+            if err:
+                self.errors["Main route parse error"] = err
 
         self.is_built = True
         if not self.errors:
+            requestins.automate_name()
             return requestins
 
 
-def build_requests(threadgroup_by_request, mastergraph, report):
+def build_requests(threadgroup_by_request, joininfo, report):
     requestinss = {}
     # error report
     error_builders = []
@@ -431,11 +415,10 @@ def build_requests(threadgroup_by_request, mastergraph, report):
     extra_start_threadinss = set()
     extra_end_threadinss = set()
     stray_threadinss = set()
-    unjoinspaces_by_edge = defaultdict(set)
 
     print("Build requests...")
     for request, threads in threadgroup_by_request:
-        r_builder = RequestBuilder(mastergraph, request, threads)
+        r_builder = RequestBuilder(request, joininfo, threads)
         requestins = r_builder.build()
 
         if requestins:
@@ -451,8 +434,8 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             for error in r_builder.errors.keys():
                 builders_by_error[error].append(r_builder)
                 if error == "Main route parse error":
-                    e = r_builder.errors[error][1]
-                    main_route_error[e.message][e.where] += 1
+                    err = r_builder.errors[error]
+                    main_route_error[err[0]][err[1]] += 1
 
         if r_builder.e_incomplete_threadinss:
             incomplete_threadinss.update(r_builder.e_incomplete_threadinss)
@@ -462,9 +445,6 @@ def build_requests(threadgroup_by_request, mastergraph, report):
             extra_end_threadinss.update(r_builder.e_extra_e_threadinss)
         if r_builder.e_stray_threadinss:
             stray_threadinss.update(r_builder.e_stray_threadinss)
-        if r_builder.e_unjoins_paces_by_edge:
-            for edge, paces in r_builder.e_unjoins_paces_by_edge.iteritems():
-                unjoinspaces_by_edge[edge].update(paces)
     print("-----------------")
 
     #### collect ####
@@ -475,14 +455,13 @@ def build_requests(threadgroup_by_request, mastergraph, report):
     thread_objs = set()
     threadinss = set()
     requests_vars = defaultdict(set)
-    innerjoin_intervals = set()
-    interface_intervals = set()
-    linterfaces = set()
-    rinterfaces = set()
-    joinints_by_remotetype = defaultdict(set)
 
-    thread_intervals = set()
-    extended_intervals = set()
+    innerjoins = set()
+    requestjoins = set()
+    lcrossjoins = set()
+    rcrossjoins = set()
+    join_byremotetype = defaultdict(set)
+
     for requestins in requestinss.itervalues():
         assert isinstance(requestins, RequestInstance)
         cnt_lines += requestins.len_paces
@@ -495,25 +474,21 @@ def build_requests(threadgroup_by_request, mastergraph, report):
         for k, vs in requestins.request_vars.iteritems():
             requests_vars[k].update(vs)
 
-        innerjoin_intervals.update(requestins.joinints_by_type[InnerjoinInterval])
-        interface_intervals.update(requestins.joinints_by_type[InterfaceInterval])
-        linterfaces.update(requestins.joinedinterfaceints_by_type[InterfacejoinInterval])
-        rinterfaces.update(requestins.joinsinterfaceints_by_type[InterfacejoinInterval])
-        for j_ins in chain(requestins.joinints_by_type[InnerjoinInterval],
-                           requestins.joinints_by_type[InterfaceInterval],
-                           requestins.joinedinterfaceints_by_type[InterfacejoinInterval],
-                           requestins.joinsinterfaceints_by_type[InterfacejoinInterval]):
-            joinints_by_remotetype[j_ins.remote_type].add(j_ins)
-        thread_intervals.update(requestins.thread_ints)
-        extended_intervals.update(requestins.extended_ints)
+        innerjoins.update(requestins.innerjoin_activities)
+        requestjoins.update(requestins.requestjoin_activities)
+        lcrossjoins.update(requestins.crossjoinl_activities)
+        rcrossjoins.update(requestins.crossjoinr_activities)
+
+    for join in chain(innerjoins, requestjoins, lcrossjoins, rcrossjoins):
+        join_byremotetype[join.remote_type].add(join)
 
     #### summary ####
     print("%d valid request instances with %d thread instances"
             % (len(requestinss),
                len(threadinss)))
-    print("%d relations:" % len(innerjoin_intervals))
-    for j_type, j_inss in joinints_by_remotetype.iteritems():
-        print("  %d %s relations" % (len(j_inss), j_type))
+    print("%d relations:" % (len(innerjoins)+len(requestjoins)))
+    for j_type, join in join_byremotetype.iteritems():
+        print("  %d %s relations" % (len(join), j_type))
 
     print("%d vars:" % len(requests_vars))
     for k, vs in requests_vars.iteritems():
@@ -529,12 +504,12 @@ def build_requests(threadgroup_by_request, mastergraph, report):
                 thread=len(thread_objs),
                 request=len(requestinss),
                 threadins=len(threadinss),
-                innerjoin=len(innerjoin_intervals),
-                innerjoined=len(innerjoin_intervals),
-                interfacejoin=len(interface_intervals),
-                interfacejoined=len(interface_intervals),
-                leftinterface=len(linterfaces),
-                rightinterface=len(rinterfaces))
+                innerjoin=len(innerjoins),
+                innerjoined=len(innerjoins),
+                interfacejoin=len(requestjoins),
+                interfacejoined=len(requestjoins),
+                leftinterface=len(lcrossjoins)+len(rcrossjoins),
+                rightinterface=len(rcrossjoins)+len(lcrossjoins))
 
     #### errors #####
     if len(requestinss) != len(threadgroup_by_request):
@@ -542,12 +517,6 @@ def build_requests(threadgroup_by_request, mastergraph, report):
         print("%d request instances from %d request groups"
                 % (len(requestinss),
                    len(threadgroup_by_request)))
-        print()
-
-    if unjoinspaces_by_edge:
-        print("! WARN !")
-        for edge, paces in unjoinspaces_by_edge.iteritems():
-            print("%s: %d unjoins paces" % (edge.name, len(paces)))
         print()
 
     if error_builders:

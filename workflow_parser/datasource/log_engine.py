@@ -174,43 +174,23 @@ class LogEngine(object):
             for logline in logfile.yield_logs(self.plugin):
                 assert isinstance(logline, LogLine)
                 assert logline.logfile is logfile
-                assert isinstance(logline.thread, str)
+                assert logline.target == target_obj.target
 
                 if logline.request is not None:
                     requests_detected.add(logline.request)
 
-                # get Thread object
-                thread = logline.thread
-                thread_obj = target_obj.thread_objs.get(thread)
-                if thread_obj is None:
-                    # build Thread object
-                    thread_obj = Thread(index_thread, target_obj, thread)
-                    target_obj.thread_objs[thread] = thread_obj
-                    target_obj.threadobjs_list.append(thread_obj)
-                    index_thread += 1
-                target = logline.target
-                assert target is thread_obj.target
+                target_obj.append_line(
+                        thread=logline.thread,
+                        lino=logline.lino,
+                        time=logline.time,
+                        seconds=logline.seconds,
+                        keyword=logline.keyword,
+                        request=logline.request,
+                        vs=logline._vars,
+                        line=logline.line,
+                        entity=logline)
 
-                # build Line object
-                prv_thread_line = thread_obj.line_objs[-1]\
-                        if thread_obj.line_objs else None
-                prv_target_line = target_obj.line_objs[-1]\
-                        if target_obj.line_objs else None
-                line_obj = Line(logline.time,
-                                logline.seconds,
-                                logline.keyword,
-                                logline.request,
-                                thread_obj,
-                                logline._vars,
-                                logline,
-                                prv_thread_line,
-                                prv_target_line)
-
-                # append to target_obj
-                thread_obj.line_objs.append(line_obj)
-                target_obj.line_objs.append(line_obj)
-
-            if target_obj.line_objs:
+            if target_obj.len_lineobjs:
                 assert target_obj.target not in target_objs
                 target_objs[target_obj.target] = target_obj
                 targetobjs_by_component[target_obj.component].append(target_obj)
@@ -218,7 +198,7 @@ class LogEngine(object):
         print("----------------")
 
         #### summary ####
-        total_lines = sum(len(to.line_objs) for to in
+        total_lines = sum(to.len_lineobjs for to in
                 target_objs.itervalues())
         total_requests = len(requests_detected)
         total_threads = sum(len(to.thread_objs) for to in
@@ -228,7 +208,7 @@ class LogEngine(object):
             total_requests,
             total_threads))
 
-        total_thread_lines = sum(len(th.line_objs)
+        total_thread_lines = sum(th.len_lineobjs
                 for to in target_objs.itervalues()
                 for th in to.thread_objs.itervalues())
         assert total_thread_lines == total_lines
@@ -236,7 +216,7 @@ class LogEngine(object):
         for comp, target_objs_ in targetobjs_by_component.iteritems():
             hosts_ = set()
             component_threads = sum(len(to.thread_objs) for to in target_objs_)
-            component_loglines = sum(len(to.line_objs) for to in target_objs_)
+            component_loglines = sum(to.len_lineobjs for to in target_objs_)
 
             min_target_threads, max_target_threads = sys.maxint, 0
             min_target_loglines, max_target_loglines = sys.maxint, 0
@@ -245,9 +225,9 @@ class LogEngine(object):
                 min_target_threads = min(min_target_threads, len(target_obj.thread_objs))
                 max_target_threads = max(max_target_threads, len(target_obj.thread_objs))
                 min_target_loglines = min(min_target_loglines,
-                        len(target_obj.line_objs))
+                        target_obj.len_lineobjs)
                 max_target_loglines = max(max_target_loglines,
-                        len(target_obj.line_objs))
+                        target_obj.len_lineobjs)
 
             print("  %s: %d hosts, %d targets, %d threads, %d loglines"
                     % (comp, len(hosts_), len(target_objs_),

@@ -19,7 +19,6 @@ from itertools import chain
 import pandas as pd
 
 from ..workflow.entities.request import RequestInstance
-from ..workflow.entities.request import RequestInterval
 from .automated_suite import general_purpose_analysis
 
 
@@ -29,7 +28,7 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
     for requestins in requestinss.itervalues():
         if first_req is None:
             first_req = requestins
-        elif first_req.start_seconds > requestins.start_seconds:
+        elif first_req.from_seconds > requestins.from_seconds:
             first_req = requestins
 
         if last_req is None:
@@ -37,8 +36,8 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
         elif last_req.last_seconds < requestins.last_seconds:
             last_req = requestins
 
-    start_s = first_req.start_seconds
-    start_t = first_req.start_time
+    start_s = first_req.from_seconds
+    start_t = first_req.from_time
     end_s = last_req.last_seconds
     end_t = last_req.last_time
     print("lapse: %.4f, (%.4f -> %.4f), (%s -> %s)" % (
@@ -115,20 +114,20 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "host"))
 
     join_intervals_df = _convert_to_dataframe(
-            chain(chain.from_iterable(req.join_ints for req in requestinss.itervalues())),
+            chain(chain.from_iterable(req.iter_joins() for req in requestinss.itervalues())),
             None,
             ("request",
              "request_type",
-             "state_name",
+             "int_name",
              "lapse",
              "path",
-             "is_main",
-             ("int_type", lambda i: i.__class__.__name__),
              "from_seconds",
              "to_seconds",
              "from_time",
              "to_time",
-             #join_int
+
+             "is_main",
+             ("int_type", lambda i: i.__class__.__name__),
              "remote_type",
              "from_target",
              "to_target",
@@ -140,49 +139,55 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_thread"))
 
     td_intervals_df = _convert_to_dataframe(
-            chain.from_iterable(req.thread_ints for req in requestinss.itervalues()),
+            chain.from_iterable(req.iter_threadints() for req in requestinss.itervalues()),
             None,
             ("request",
              "request_type",
-             "state_name",
+             "int_name",
              "lapse",
              "path",
-             "is_main",
-             ("int_type", lambda i: i.__class__.__name__),
              "from_seconds",
              "to_seconds",
              "from_time",
              "to_time",
-             #thread_int
+
+             "is_main",
+             ("int_type", lambda i: i.__class__.__name__),
              "target",
              "host",
              "component",
              "thread"))
 
     extendedints_df = _convert_to_dataframe(
-            chain.from_iterable(req.extended_ints for req in requestinss.itervalues()),
+            chain.from_iterable(req.iter_mainints(extended=True) for req in requestinss.itervalues()),
             None,
             ("request",
              "request_type",
+             "int_name",
+             "lapse",
+             "path",
              "from_seconds",
              "to_seconds",
-             "lapse",
-             "state_name",
-             "path"))
+             "from_time",
+             "to_time"))
 
     request_df = _convert_to_dataframe(
             requestinss.itervalues(),
             "request",
             ("request_type",
-             "request_state",
+             "int_name",
              "lapse",
-             "start_seconds",
-             "end_seconds",
+             "path",
+             "from_seconds",
+             "to_seconds",
+             "from_time",
+             "to_time",
+
+             "request_state",
              "last_seconds",
-             "start_time",
-             "end_time",
              "last_time",
              "len_paces",
+             "len_main_paces",
              ("len_threads", lambda r: len(r.thread_objs)),
              ("len_threadinss", lambda r: len(r.threadinss)),
              ("len_targets", lambda r: len(r.target_objs)),

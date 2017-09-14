@@ -15,208 +15,261 @@
 from collections import defaultdict
 from itertools import chain
 
-from ...graph import Master
-from ..exc import StateError
-from .join import EmptyJoin
-from .join import InnerjoinInterval
-from .join import InterfacejoinInterval
-from .join import InterfaceInterval
-from .join import JoinIntervalBase
-from .join import NestedrequestInterval
-from .threadins import ThreadInterval
-from .threadins import ThreadIntervalBase
+from .bases import ActivityBase
+from .bases import IntervalBase
+from .bases import Pace
+from .bases import RequestinsBase
+from .join import JoinActivityBase
+from .join import InnerjoinActivity
+from .join import RequestjoinActivity
+from .join import CrossjoinActivity
+from .threadins import ThreadActivity
 
 
-class RequestInterval(ThreadInterval):
+class ExtendedInterval(IntervalBase):
     def __init__(self, from_pace, to_pace):
+        assert isinstance(from_pace, Pace)
+        assert isinstance(to_pace, Pace)
         assert from_pace.threadins is to_pace.threadins
-        super(ThreadIntervalBase, self).__init__(
-                from_pace, to_pace, from_pace.threadins.component)
+        super(ExtendedInterval, self).__init__()
+        self.from_pace = from_pace
+        self.to_pace = to_pace
 
     @property
-    def path(self):
-        ret = super(RequestInterval, self).path
-        if self.is_request_end:
-            ret = "-"+ret
-        if self.is_request_start:
-            ret = "+"+ret
-        return ret
+    def int_name(self):
+        return str(self.component)
+
+    @property
+    def component(self):
+        return self.from_pace.component
+
+    @property
+    def threadins(self):
+        return self.from_pace.threadins
+
+    @property
+    def requestins(self):
+        return self.from_pace.requestins
+
+    def __repr_intlabels__(self):
+        labels = super(ExtendedInterval, self).__repr_intlabels__()
+        labels += "!EX"
+        return labels
 
 
-class RequestInstance(object):
+class RequestInstance(RequestinsBase):
     _index_dict = defaultdict(lambda: 0)
 
-    def __init__(self, mastergraph, request, builder):
-        assert isinstance(mastergraph, Master)
-
-        self.request = request
-        self.mastergraph = mastergraph
+    def __init__(self, request, builder):
+        super(RequestInstance, self).__init__(request)
         self.request_vars = defaultdict(set)
-        self.len_paces = 0
+        self.threadinss = []
         self.thread_objs = set()
         self.target_objs = set()
 
-        self.threadinss = []
+        self.len_paces = 0
+        self.len_main_paces = 0
 
-        # interval
-        self.start_interval = None
-        self.end_interval = None
-        self.last_interval = None
-        self.thread_ints = set()
-        self.intervals_by_mark = defaultdict(list)
+        self._start_activity = None
+        self._end_activity = None
+        self.last_activity = None
+        self.activities_bymark = defaultdict(list)
 
-        self.joinints_by_type = defaultdict(set)
-        self.joinedinterfaceints_by_type = defaultdict(set)
-        self.joinsinterfaceints_by_type = defaultdict(set)
-
-        self.extended_ints = []
+        self.innerjoin_activities = set()
+        self.requestjoin_activities = set()
+        self.crossjoinl_activities = set()
+        self.crossjoinr_activities = set()
+        self.emptyjoins_activities = set()
+        self.emptyjoined_activities = set()
 
         self._builder = builder
 
     @property
-    def join_ints(self):
-        return chain(self.joinints_by_type[InnerjoinInterval],
-                     self.joinints_by_type[InterfacejoinInterval],
-                     self.joinints_by_type[NestedrequestInterval])
+    def start_activity(self):
+        return self._start_activity
+
+    @start_activity.setter
+    def start_activity(self, act):
+        assert isinstance(act, ThreadActivity)
+        assert act.to_pace
+        assert act.is_request_start
+        self.from_pace = act.to_pace
+        self._start_activity = act
+
+    @property
+    def end_activity(self):
+        return self._end_activity
+
+    @end_activity.setter
+    def end_activity(self, act):
+        assert isinstance(act, ThreadActivity)
+        assert act.from_pace
+        assert act.is_request_end
+        self.to_pace = act.from_pace
+        self._end_activity = act
 
     @property
     def request_type(self):
-        ret = self.start_interval.from_pace.request_type
+        ret = self.start_activity.request_type
+        assert ret
+        return ret
+
+    @property
+    def request_state(self):
+        ret = self.end_activity.request_state
         assert ret
         return ret
 
     @property
     def components(self):
-        return set(t.component for t in self.target_objs)
+        return self.request_vars["component"]
 
     @property
     def hosts(self):
-        return set(t.host for t in self.target_objs)
-
-    @property
-    def request_state(self):
-        if not self.end_interval:
-            return "NO END INTERVAL"
-        return self.end_interval.request_state
-
-    @property
-    def start_seconds(self):
-        if not self.start_interval:
-            return -1
-        return self.start_interval.from_seconds
-
-    @property
-    def end_seconds(self):
-        if not self.end_interval:
-            return -1
-        return self.end_interval.to_seconds
+        return self.request_vars["host"]
 
     @property
     def last_seconds(self):
-        if not self.last_interval:
-            return -1
-        return self.last_interval.to_seconds
-
-    @property
-    def start_time(self):
-        return self.start_interval.from_time
-
-    @property
-    def end_time(self):
-        return self.end_interval.to_time
+        return self.last_activity.from_seconds
 
     @property
     def last_time(self):
-        return self.last_interval.to_time
-
-    @property
-    def lapse(self):
-        return self.end_seconds - self.start_seconds
+        return self.last_activity.from_time
 
     @property
     def cnt_nested(self):
-        return len(self.joinedinterfaceints_by_type[InterfacejoinInterval])
+        assert len(self.crossjoinl_activities) == len(self.crossjoinr_activities)
+        return len(self.crossjoinl_activities)
 
-    def __str__(self):
-        return "RIns %s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
-               "%d hosts, %d targets, %d threads, %d threadinss"\
-               % (self.request,
-                  self.lapse,
-                  self.start_seconds,
-                  self.end_seconds,
-                  self.request_state,
-                  self.len_paces,
-                  len(self.hosts),
-                  len(self.target_objs),
-                  len(self.thread_objs),
-                  len(self.threadinss))
+    def __repr_marks__(self):
+        marks = ""
+        if self.requestjoin_activities:
+            marks += ", %d reqs" % len(self.requestjoin_activities)
+        if self.crossjoinr_activities or self.crossjoinl_activities:
+            marks += ", (%d %d) cross" % (len(self.crossjoinl_activities),
+                                          len(self.crossjoinr_activities))
+        if self.emptyjoins_activities:
+            marks += ", %d emptyjoins" % len(self.emptyjoins_activities)
+        if self.emptyjoined_activities:
+            marks += ", %d emptyjoined" % len(self.emptyjoined_activities)
+        if self.activities_bymark:
+            marks += ", %d marks" % len(self.activities_bymark)
+        if not self._builder.is_built:
+            marks =+ ", ~BUILD"
+        return marks
 
     def __repr__(self):
-        return "<RIns#%s: lapse:%.3f[%.3f,%.3f], @%s, %d paces, "\
-               "%d hosts, %d threads>" % (self.request,
-                                          self.lapse,
-                                          self.start_seconds,
-                                          self.end_seconds,
-                                          self.request_state,
-                                          self.len_paces,
-                                          len(self.hosts),
-                                          len(self.threadinss))
+        return "<RIns#%s: %s@%s, %d(main %d) paces, %d hosts, %d(%d) threads, "\
+               "%d vars, %d inner, [%.3f-%.3f(%.3f)]%s>" % (
+                self.request,
+                self.request_type,
+                self.request_state,
+                self.len_paces,
+                self.len_main_paces,
+                len(self.hosts),
+                len(self.thread_objs),
+                len(self.threadinss),
+                len(self.request_vars),
+                len(self.innerjoin_activities),
+                self.from_seconds,
+                self.to_seconds,
+                self.last_seconds,
+                self.__repr_marks__())
 
-    def iter_mainpath(self, reverse=False):
-        assert isinstance(reverse, bool)
-        if reverse:
-            interval = self.end_interval
-            while interval:
-                interval.is_main = True
-                yield interval
+    def __str__(self):
+        ret = repr(self)
+        ret += "\n VARS:"
+        for k, v in self.request_vars.iteritems():
+            ret += "\n  %s: %s" % (k, ",".join(str(v_) for v_ in v))
+        ret += "\n THREADINSS:"
+        for tis in self.threadinss:
+            ret += "\n  %r" % tis
+        if self.innerjoin_activities:
+            ret += "\n INNER:"
+            for j in self.innerjoin_activities:
+                ret += "\n  %r" % j
+        if self.requestjoin_activities:
+            ret += "\n REQUEST:"
+            for j in self.requestjoin_activities:
+                ret += "\n  %r" % j
+        if self.crossjoinl_activities:
+            ret += "\n CROSSL:"
+            for j in self.crossjoinl_activities:
+                ret += "\n  %r" % j
+        if self.crossjoinr_activities:
+            ret += "\n CROSSR:"
+            for j in self.crossjoinr_activities:
+                ret += "\n  %r" % j
+        if self.emptyjoins_activities:
+            ret += "\n EMPTYJOINS:"
+            for j in self.emptyjoins_activities:
+                ret += "\n  %r" % j
+        if self.emptyjoined_activities:
+            ret += "\n EMPTYJOINED:"
+            for j in self.emptyjoined_activities:
+                ret += "\n  %r" % j
+        ret += "\n\n### MAIN ###:"
+        ret += "\n%r" %  self.start_activity.threadins
+        activity = self.start_activity
+        while activity:
+            assert isinstance(activity, ActivityBase)
+            assert activity.is_main
+            if isinstance(activity, RequestjoinActivity):
+                if not activity.is_nest:
+                    ret += "\n%r" % activity.to_threadins
+                mark = "~"
+            elif isinstance(activity, InnerjoinActivity):
+                ret += "\n%r" % activity.to_threadins
+                mark = "-"
+            elif isinstance(activity, CrossjoinActivity):
+                if not activity.is_left:
+                    ret += "\n%r" % activity.to_threadins
+                mark = "~"
+            else:
+                mark = "|"
+            ret += "\n%s %s" % (mark, activity.__repr_to__())
+            if activity.to_pace:
+                activity = activity.to_pace.nxt_main_activity
+            else:
+                break
+        ret += "\n"
+        return ret
 
-                next_i = None
-                if isinstance(interval, ThreadInterval):
-                    if isinstance(interval.prv_int, ThreadInterval):
-                        if interval.joined_int:
-                            next_i = interval.joined_int
-                        else:
-                            next_i = interval.prv_int
-                    else:
-                        next_i = interval.joined_int
-                else:
-                    assert isinstance(interval, JoinIntervalBase)
-                    next_i = interval.joined_int
+    def automate_name(self):
+        if self._request is None:
+            assert self.request_type is not None
+            self._index_dict[self.request_type] += 1
+            self.request = "%s%d" % (self.request_type, self._index_dict[self.request_type])
 
-                if isinstance(next_i, InterfaceInterval):
-                    next_i.is_main = True
-                    next_i = next_i.joined_crossrequest_int
+    def iter_joins(self):
+        for join in chain(self.innerjoin_activities,
+                          self.requestjoin_activities):
+            assert join.is_interval
+            yield join
 
-                if (next_i is None and not interval.is_request_start) or\
-                        isinstance(next_i, EmptyJoin):
-                    e = StateError("The path backward is empty")
-                    e.where = interval.state_name
-                    raise e
-                interval = next_i
+    def iter_mainints(self, extended=False):
+        activity = self.start_activity.to_pace.nxt_main_activity
+
+        if not extended:
+            while activity.is_interval:
+                yield activity
+                activity = activity.to_pace.nxt_main_activity
         else:
-            interval = self.start_interval
-            while interval:
-                assert interval.is_main
-                yield interval
-
-                next_i = None
-                if isinstance(interval, ThreadInterval):
-                    if isinstance(interval.nxt_int, ThreadInterval) and\
-                            interval.nxt_int.is_main:
-                        assert not interval.joins_int or not interval.joins_int.is_main
-                        next_i = interval.nxt_int
-                    elif interval.joins_int and interval.joins_int.is_main:
-                        next_i = interval.joins_int
-                    else:
-                        next_i = None
+            from_pace = activity.from_pace
+            while activity.is_interval:
+                if isinstance(activity, JoinActivityBase):
+                    if from_pace is not activity.from_pace:
+                        yield ExtendedInterval(from_pace, activity.from_pace)
+                    yield activity
+                    from_pace = activity.to_pace
                 else:
-                    assert isinstance(interval, JoinIntervalBase)
-                    assert interval.joins_int and interval.joins_int.is_main
-                    next_i = interval.joins_int
+                    assert isinstance(activity, ThreadActivity)
+                activity = activity.to_pace.nxt_main_activity
+            if from_pace is not activity.from_pace:
+                yield ExtendedInterval(from_pace, activity.from_pace)
+        assert activity is self.end_activity
 
-                if isinstance(next_i, InterfaceInterval):
-                    next_i = next_i.joins_crossrequest_int
-
-                if next_i is None:
-                    assert interval.is_request_end
-                interval = next_i
+    def iter_threadints(self):
+        for tis in self.threadinss:
+            for int_ in tis.iter_ints():
+                yield int_

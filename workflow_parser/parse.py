@@ -16,13 +16,13 @@ from __future__ import print_function
 
 import argparse
 
-# from .analyst import Report
-# from .analyst.draw_engine import DrawEngine
-# from .analyst.statistics_engine import do_statistics
-# from .datasource.log_engine import LogEngine
-# from .workflow.engine import StateEngine
-# from .clockmaster import adjust_clock
-# from .utils import Report as ParserReport
+from .analyst.report import Report
+from .analyst.draw_engine import DrawEngine
+from .analyst.statistics_engine import do_statistics
+from .datasource.log_engine import LogEngine
+from .workflow.engine import proceed
+from .clockmaster import adjust_clock
+from .utils import Report as ParserReport
 
 
 def main1(driver):
@@ -50,36 +50,32 @@ def main1(driver):
     master = driver.graph
     print(master)
 
-    # report_i = ParserReport()
+    report_i = ParserReport()
 
-    # try:
-    #     # build logs
-    #     log_engine = LogEngine(driver.services, driver, report_i)
-    #     targetobjs = log_engine.proceed(args.folder)
+    try:
+        # build logs
+        log_engine = LogEngine(driver.services, driver, report_i)
+        targetobjs = log_engine.proceed(args.folder)
 
-    #     # build states
-    #     state_engine = StateEngine(master, report_i)
-    #     requestinss = state_engine.proceed(targetobjs)
-    # except Exception:
-    #     print("\n%r\n" % report_i)
-    #     raise
-    # print("%r" % report_i)
-    # print()
+        # build states
+        requestinss = proceed(targetobjs, master, report_i)
+    except Exception:
+        print("\n%r\n" % report_i)
+        raise
+    print("%r" % report_i)
+    print()
 
-    # # correct clocks
-    # adjust_clock(requestinss)
+    # correct clocks
+    adjust_clock(requestinss)
 
-    # # statistics
-    # folders = args.folder.split("/")
-    # report = Report(folders[-1] or folders[-2])
-    # draw_engine = None
-    # if not args.brief:
-    #     draw_engine = DrawEngine(args.outfolder)
-    #     report.set_outfile(args.outfolder+"/report.csv", True)
-    # do_statistics(master, requestinss, draw_engine, report)
-
-
-
+    # statistics
+    folders = args.folder.split("/")
+    report = Report(folders[-1] or folders[-2])
+    draw_engine = None
+    if not args.brief:
+        draw_engine = DrawEngine(args.outfolder)
+        report.set_outfile(args.outfolder+"/report.csv", True)
+    do_statistics(master, requestinss, draw_engine, report)
 
     # build statistics
     # s_engine = Engine(master_graph, instances, log_collector)
