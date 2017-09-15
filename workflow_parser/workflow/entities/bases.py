@@ -25,6 +25,7 @@ from ...graph.token import Step
 from ..exc import StateError
 
 
+@total_ordering
 class IntervalBase(object):
     __metaclass__ = ABCMeta
 
@@ -193,6 +194,13 @@ class IntervalBase(object):
         else:
             ret += "]"
         return ret
+
+    __eq__ = lambda self, other:\
+            self.from_pace == other.to_pace and\
+            self.to_pace == other.to_pace
+    __lt__ = lambda self, other:\
+            (self.from_seconds, self.to_seconds) <\
+            (other.from_seconds, other.to_seconds)
 
 
 class RequestinsBase(IntervalBase):

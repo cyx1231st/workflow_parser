@@ -14,11 +14,16 @@
 
 from __future__ import print_function
 
+from collections import defaultdict
 from functools import total_ordering
 import numpy as np
+from itertools import chain
 from itertools import izip
 
 from ..workflow.entities.bases import IntervalBase
+from ..workflow.entities.threadins import ThreadActivity
+from ..workflow.entities.join import JoinActivityBase
+from ..workflow.entities.request import ExtendedInterval
 
 
 def projection_time(from_tos):
@@ -42,52 +47,21 @@ def projection_time(from_tos):
     return total
 
 
-class StepContent(object):
-    def __init__(self, interval, step, from_content):
-        assert isinstance(step, Step)
-        assert interval.from_edgename == step.from_edgename
-        assert interval.int_name == step.int_name
-        assert interval.to_edgename == step.to_edgename
-
-        self.interval = interval
-        self.step = step
-
-        self.prv_content = from_content
-        self.nxt_content = None
-
-        step.contents.append(self)
-        if from_content:
-            assert isinstance(from_content, StepContent)
-            from_content.nxt_content = self
-
-    @property
-    def from_seconds(self):
-        return self.interval.from_seconds
-
-    @property
-    def to_seconds(self):
-        return self.interval.to_seconds
-
-    @property
-    def lapse(self):
-        return self.to_seconds - self.from_seconds
-
-
-class Step(object):
-    def __init__(self, int_name, to_edgename, prv_step):
+@total_ordering
+class IntGroup(object):
+    def __init__(self, int_name, from_edgename, to_edgename, weight, desc):
         self.int_name = int_name
+        self.from_edgename = from_edgename
         self.to_edgename = to_edgename
-        self.contents = []
+        self.vis_weight = weight
+        self.desc = desc
+        self.intervals = []
 
-        self.nxt_steps = []
-        self.prv_step = prv_step
+        self._nxt_groups = set()
+        self._prv_groups = set()
 
-        if prv_step:
-            prv_step.nxt_steps.append(self)
-
-    @property
-    def from_edgename(self):
-        return self.prv_step and self.prv_step.to_edgename
+        self.links = None
+        self.linked = None
 
     @property
     def path(self):
@@ -98,19 +72,19 @@ class Step(object):
 
     @property
     def len_ints(self):
-        return len(self.contents)
+        return len(self.intervals)
 
     @property
     def from_seconds(self):
-        if not self.contents:
+        if not self.intervals:
             return 0
-        return min(c.from_seconds for c in self.contents)
+        return min(c.from_seconds for c in self.intervals)
 
     @property
     def to_seconds(self):
-        if not self.contents:
+        if not self.intervals:
             return 0
-        return max(c.to_seconds for c in self.contents)
+        return max(c.to_seconds for c in self.intervals)
 
     @property
     def lapse(self):
@@ -118,122 +92,253 @@ class Step(object):
 
     @property
     def cumulated_seconds(self):
-        if not self.contents:
+        if not self.intervals:
             return 0
-        return sum([c.lapse for c in self.contents])
+        return sum([c.lapse for c in self.intervals])
 
     @property
     def projection_seconds(self):
-        if not self.contents:
+        if not self.intervals:
             return 0
-        from_tos = [(c.from_seconds, c.to_seconds) for c in self.contents]
+        from_tos = [(c.from_seconds, c.to_seconds) for c in self.intervals]
         return projection_time(from_tos)
 
+    @property
+    def is_inlink(self):
+        if self.links or self.linked:
+            return True
+        else:
+            return False
+
     def __repr__(self):
-        return "<Step#%s: %d contents, %d nxt_steps" % (
+        return "<IntGroup#%s: %d intervals, %d nxt_groups" % (
                 self.path,
-                len(self.contents),
-                len(self.nxt_steps))
+                len(self.intervals),
+                len(self._nxt_groups))
+
+    __eq__ = lambda self, other: len(self.intervals) == len(other.intervals)
+    __lt__ = lambda self, other: len(self.intervals) > len(other.intervals)
+
+    def append_interval(self, interval):
+        assert isinstance(interval, IntervalBase)
+        assert interval.path == self.path
+        self.intervals.append(interval)
+
+    def append_group(self, group):
+        assert isinstance(group, IntGroup)
+        assert group.from_edgename == self.to_edgename
+        self._nxt_groups.add(group)
+        group._prv_groups.add(self)
+
+    def prepare_sort(self):
+        assert not self.linked
+
+        if self.links:
+            prv_groups = chain(self._prv_groups, self.links._prv_groups)
+            nxt_groups = chain(self._nxt_groups, self.links._nxt_groups)
+        else:
+            prv_groups = self._prv_groups
+            nxt_groups = self._nxt_groups
+
+        self._topo_in = set()
+        for g in prv_groups:
+            if g.linked:
+                self._topo_in.add(g.linked)
+            else:
+                self._topo_in.add(g)
+
+        self._topo_out = set()
+        for g in nxt_groups:
+            if g.linked:
+                self._topo_out.add(g.linked)
+            else:
+                self._topo_out.add(g)
+
+    def try_merge(self, group):
+        assert isinstance(group, IntGroup)
+        assert not self.is_inlink
+        assert not group.is_inlink
+        assert self.path == group.path
+        self.links = group
+        group.linked = self
+
+    def abort_merge(self):
+        self.links.linked = None
+        self.links = None
+
+    def apply_merge(self):
+        assert self.links
+
+        self.intervals.extend(self.links.intervals)
+        for nxt_group in self.links._nxt_groups:
+            nxt_group._prv_groups.remove(self.links)
+            nxt_group._prv_groups.add(self)
+        for prv_group in self.links._prv_groups:
+            prv_group._nxt_groups.remove(self.links)
+            prv_group._nxt_groups.add(self)
+        self._nxt_groups.update(self.links._nxt_groups)
+        self._prv_groups.update(self.links._prv_groups)
+
+        self.links = None
+
+    def iter_nxtgroups(self):
+        for g in sorted(self._nxt_groups):
+            yield g
 
 
 class Workflow(object):
     def __init__(self, name):
-        self.start_step = None
-        self.len_steps = 0
-        self.len_contents = 0
         self.name = name
+        self.start_group = None
+        self.groups = set()
+        self.len_intervals = 0
         self.reqs = []
 
-        self._content_by_req = {}
+        # for build
+        self._group_byreq = {}
+
+        # for reduce
+        self.paths = {}
 
     @property
     def len_reqs(self):
         return len(self.reqs)
 
     def build(self, intervals):
-        steps_by_fromstep_tostepname = {}
-        newcontent_by_req = {}
+        group_by_fromgroup_toedgename = {}
+        newgroup_byreq = {}
         for interval in intervals:
             if interval is None:
                 continue
             assert isinstance(interval, IntervalBase)
-            if not self._content_by_req:
-                if not self.start_step:
-                    self.start_step = Step("START",
-                                           interval.from_edgename,
-                                           None)
-                from_content = None
-                from_step = self.start_step
+            assert interval.is_interval
+            assert interval.request
+
+            if not self._group_byreq:
+                if not self.start_group:
+                    self.start_group = IntGroup("START",
+                                                None,
+                                                interval.from_edgename,
+                                                None,
+                                                "None")
+                from_group = self.start_group
             else:
-                from_content = self._content_by_req[interval.request]
-                from_step = from_content.step
-            assert from_step.to_edgename == interval.from_edgename
-            step_key = (from_step, interval.to_edgename)
-            step = steps_by_fromstep_tostepname.get(step_key)
-            if not step:
-                step = Step(interval.int_name,
-                            interval.to_edgename,
-                            from_step)
-                steps_by_fromstep_tostepname[step_key] = step
-                self.len_steps += 1
-            content = StepContent(interval, step, from_content)
-            self.len_contents += 1
-            newcontent_by_req[interval.request] = content
+                from_group = self._group_byreq[interval.request]
+            group_key = (from_group, interval.to_edgename)
+            group = group_by_fromgroup_toedgename.get(group_key)
+            if not group:
+                if isinstance(interval, ThreadActivity):
+                    weight = interval.state.vis_weight
+                elif isinstance(interval, JoinActivityBase):
+                    weight = interval.join_obj.vis_weight
+                elif isinstance(interval, ExtendedInterval):
+                    weight = interval.component.vis_weight
+                else:
+                    raise RuntimeError("Illegal interval %r" % interval)
+                desc = "%s -> %s" % (
+                        interval.from_keyword,
+                        interval.to_keyword)
+
+                group = IntGroup(interval.int_name,
+                                 interval.from_edgename,
+                                 interval.to_edgename,
+                                 weight,
+                                 desc)
+                from_group.append_group(group)
+                group_by_fromgroup_toedgename[group_key] = group
+                self.groups.add(group)
+                self.paths[group.path] = group.vis_weight
+            group.append_interval(interval)
+            self.len_intervals += 1
+            newgroup_byreq[interval.request] = group
         if not self.reqs:
-            self.reqs = newcontent_by_req.keys()
-        self._content_by_req = newcontent_by_req
+            self.reqs = newgroup_byreq.keys()
+        self._group_byreq = newgroup_byreq
+
+    # NOTE: Depth first
+    def sort_topologically(self):
+        ret = []
+        self.start_group.prepare_sort()
+        for group in self.groups:
+            group.prepare_sort()
+
+        def _walk(group):
+            for nxt_group in sorted(group._topo_out):
+                nxt_group._topo_in.remove(group)
+                if not nxt_group._topo_in:
+                    ret.append(nxt_group)
+                    _walk(nxt_group)
+
+        _walk(self.start_group)
+        if len(ret) == len(self.groups):
+            return ret
+        else:
+            return None
+
+    def reduce(self):
+        print("Workflow: built %d groups" % len(self.groups))
+        #1 sort states
+        path_weights = sorted(self.paths.iteritems(),
+                              key=lambda s:s[1],
+                              reverse=True)
+        for path, _ in path_weights:
+            #2 sort groups of the same path
+            groups = self.sort_topologically()
+            assert groups
+
+            groups = [group for group in groups if group.path == path]
+            while groups:
+                group = groups[0]
+                groups = groups[1:]
+                nxt_groups = []
+                for to_merge in groups:
+                    #3 try merge group pairs
+                    group.try_merge(to_merge)
+                    self.groups.remove(to_merge)
+                    if self.sort_topologically() is not None:
+                        group.apply_merge()
+                    else:
+                        group.abort_merge()
+                        self.groups.add(to_merge)
+                        nxt_groups.append(to_merge)
+                groups = nxt_groups
+        print("Workflow: reduced to %d groups" % len(self.groups))
+
+    def ready(self):
+        for group in self.groups:
+            assert not group.is_inlink
+            group.intervals.sort()
 
     def __repr__(self):
-        return "<Workflow %s: %d steps, %d reqs, %d contents>" % (
+        return "<Workflow %s: %d groups, %d reqs, %d intervals>" % (
                 self.name,
-                self.len_steps,
-                len(self._content_by_req),
-                self.len_contents)
+                len(self.groups),
+                len(self.reqs),
+                self.len_intervals)
 
     def __str__(self):
-        ret = "Workflow %s" % self.name
+        ret = repr(self)
 
         lines = []
         attrs = []
-        def __str_step__(step, pad):
-            if step is None:
-                return
-            assert isinstance(step, Step)
-            step.contents.sort(key=lambda c: (c.from_seconds, c.to_seconds))
-            lines.append("%s%s" % (pad, step.path))
-            len_ints = step.len_ints
-            proj = step.projection_seconds
-            added = step.cumulated_seconds
-            lapse = step.lapse
+        for group in self.sort_topologically():
+            assert isinstance(group, IntGroup)
+            lines.append(group.path)
+            len_ints = group.len_ints
+            proj = group.projection_seconds
+            added = group.cumulated_seconds
+            lapse = group.lapse
             avg = len_ints and added/len_ints
             ratio = len_ints and proj/len_ints
-            attrs.append((len_ints, proj, added, lapse, avg, ratio))
-            if len(step.nxt_steps) > 1:
-                pad += "'"
-                step.nxt_steps.sort(key=lambda s: len(s.contents),
-                                    reverse=True)
-            else:
-                pad += " "
-            for nxt_s in step.nxt_steps:
-                __str_step__(nxt_s, pad)
-
-        step = self.start_step
-        if len(step.nxt_steps) > 1:
-            pad = "'"
-            step.nxt_steps.sort(key=lambda s: len(s.contents),
-                                reverse=True)
-        else:
-            pad = " "
-        for nxt_s in step.nxt_steps:
-            __str_step__(nxt_s, pad)
+            attrs.append((len_ints, proj, added, lapse, avg, ratio, group.desc))
 
         len_line = max(len(l) for l in lines)
         ret += "\n"+" "*len_line + "|   cnt,"+\
-                "project_s,cumulat_s,  lapse_s,   avg_ms, ratio_ms"
+                "project_s,cumulat_s,  lapse_s,   avg_MS, ratio_MS"
         format_str = "\n%-" + str(len_line) + "s|" + "%6s,"\
-                + "%9.5f,"*5
-        for line, (len_ints, proj, added, lapse, avg, ratio)\
+                + "%9.5f,"*5 + " %s"
+        for line, (len_ints, proj, added, lapse, avg, ratio, desc)\
                 in izip(lines, attrs):
             ret += format_str % (
-                    line, len_ints, proj, added, lapse, avg*1000, ratio*1000)
+                    line, len_ints, proj, added, lapse, avg*1000, ratio*1000, desc)
         return ret

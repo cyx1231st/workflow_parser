@@ -159,7 +159,7 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "thread"))
 
     extendedints_df = _convert_to_dataframe(
-            chain.from_iterable(req.iter_mainints(extended=True) for req in requestinss.itervalues()),
+            chain.from_iterable(req.iter_mainints() for req in requestinss.itervalues()),
             None,
             ("request",
              "request_type",
@@ -169,7 +169,9 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "from_seconds",
              "to_seconds",
              "from_time",
-             "to_time"))
+             "to_time",
+             "from_keyword",
+             "to_keyword"))
 
     request_df = _convert_to_dataframe(
             requestinss.itervalues(),

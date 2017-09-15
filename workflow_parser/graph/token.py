@@ -117,6 +117,10 @@ class State(object):
             return self._node.request_state
         return None
 
+    @property
+    def vis_weight(self):
+        return self._node.vis_weight
+
     def __repr__(self):
         marks = ""
         if self.is_thread_start:

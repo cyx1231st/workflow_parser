@@ -550,11 +550,11 @@ class DrawEngine(object):
                                     **annot_kw)
 
                     # draw end point
-                    if int_.is_request_end:
+                    if int_.nxt_thread_activity.is_request_end:
                         t_marker = 4
                         color = "k"
                         t_markersize=markersize
-                    elif int_.is_thread_end:
+                    elif int_.nxt_thread_activity.is_thread_end:
                         t_marker = "3"
                         color="k"
                         t_markersize=markersize
@@ -568,7 +568,7 @@ class DrawEngine(object):
                              markersize=t_markersize)
 
                     # annotate end step
-                    if int_.is_thread_end:
+                    if int_.nxt_thread_activity.is_thread_end:
                         ax.annotate("%s" % int_.to_edgename,
                                      (to_x, plot_y),
                                      (to_x+annot_off_x, plot_y),
@@ -611,24 +611,22 @@ class DrawEngine(object):
 
         # 1. get main stacked axis list
         main_stacked_results = []
-        def _walk_workflow(step):
-            int_name = step.int_name
-            color = getcolor_byint(step.contents[0].interval,
-                                   ignore_lr=True)
-            main_stacked_results.append((
-                int_name,
-                color,
-                [(c.from_seconds, c.to_seconds) for c in step.contents]))
-            for nxt_s in step.nxt_steps:
-                _walk_workflow(nxt_s)
 
         main_stacked_results.append((
             "BLANK",
             "#eeeeee",
-            [(0, c.from_seconds) for c in chain.from_iterable(s.contents
-                                 for s in workflow.start_step.nxt_steps)]))
-        for step in workflow.start_step.nxt_steps:
-            _walk_workflow(step)
+            [(0, c.from_seconds)
+                for c in chain.from_iterable(s.intervals
+                for s in workflow.start_group.iter_nxtgroups())]))
+
+        for group in workflow.sort_topologically():
+            int_name = group.int_name
+            color = getcolor_byint(group.intervals[0], ignore_lr=True)
+            main_stacked_results.append((
+                int_name,
+                color,
+                [(c.from_seconds, c.to_seconds)
+                    for c in group.intervals]))
 
         # 2. calc main_x_list from main_stacked_results
         types, colors, main_x_list, main_ys_list =\
@@ -703,12 +701,12 @@ class DrawEngine(object):
                         "#eeeeee",
                         paddings))
 
-                contents = [(i.from_seconds, i.to_seconds)
+                intervals = [(i.from_seconds, i.to_seconds)
                             for i in intlist]
                 padded_intlists.append((
                         "occupied",
                         getcolor_byint(intlist[0], ignore_lr=True),
-                        contents))
+                        intervals))
 
                 len_req = len(intlist)
                 prv_seconds = sorted([i.to_seconds for i in intlist])
@@ -859,7 +857,7 @@ class DrawEngine(object):
         for ti in threadinss:
             ti_color = ti.component.color
             # draw start point
-            if ti.is_request_start:
+            if ti.prv_thread_activity.is_request_start:
                 t_marker=node_markersize
                 color = "k"
             else:
@@ -920,11 +918,11 @@ class DrawEngine(object):
                                  **annot_kw)
 
                 # draw end point
-                if int_.is_request_end:
+                if int_.nxt_thread_activity.is_request_end:
                     t_marker = 4
                     color = "k"
                     t_markersize=markersize
-                elif int_.is_thread_end:
+                elif int_.nxt_thread_activity.is_thread_end:
                     t_marker = "3"
                     color="k"
                     t_markersize=markersize
@@ -938,7 +936,7 @@ class DrawEngine(object):
                          markersize=t_markersize)
 
                 # draw thread end
-                if int_.is_thread_end:
+                if int_.nxt_thread_activity.is_thread_end:
                     ax.annotate("%s" % int_.to_edgename,
                                  (to_x, to_y),
                                  (to_x, to_y+annot_off_y),

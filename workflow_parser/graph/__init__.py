@@ -114,6 +114,7 @@ class NodeBase(object):
         self.graph = graph
         self.edges = OrderedSet()
         self.marks = OrderedSet()
+        self.vis_weight = 0
 
     @property
     def is_start(self):

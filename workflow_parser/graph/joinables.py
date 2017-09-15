@@ -44,6 +44,7 @@ class JoinBase(object):
         self.to_item = to_item
         self.is_remote = is_remote
         self.schemas = OrderedSet()
+        self.vis_weight = -1
 
         for schema in schemas:
             if isinstance(schema, str):

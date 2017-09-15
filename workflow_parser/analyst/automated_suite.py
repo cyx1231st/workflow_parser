@@ -70,6 +70,7 @@ def general_purpose_analysis(master_graph,
     assert isinstance(start_end, dict)
     assert isinstance(join_intervals_df, pd.DataFrame)
     assert isinstance(td_intervals_df, pd.DataFrame)
+    # NOTE: not extended now
     assert isinstance(extendedints_df, pd.DataFrame)
     assert isinstance(request_df, pd.DataFrame)
     assert isinstance(targets_df, pd.DataFrame)
@@ -209,33 +210,41 @@ def general_purpose_analysis(master_graph,
     #####  printed statistics  #####
     report_i = Report("Intervals")
 
+    intsbypath_df = extendedints_df.groupby("path")
+    desc_bypath = {}
+    for p_type, e_df in intsbypath_df:
+        if len(e_df):
+            desc = "%s -> %s" % (
+                    e_df["from_keyword"].iloc[0],
+                    e_df["to_keyword"].iloc[0])
+            desc_bypath[p_type] = desc
+
     addedup_total = extendedints_df["lapse"].sum()
     report_i.register("Addedup total", "%.5f %.2f(rate)" % (
         addedup_total, addedup_total/lapse_total))
-    addedup_df = extendedints_df\
-                 .groupby("path")["lapse"]\
+    addedup_df = intsbypath_df["lapse"]\
                  .sum()\
                  .sort_values(ascending=False)
     addedup_by_ptype = {}
     for name, lapse in addedup_df.iteritems():
         addedup_by_ptype[name] = lapse
-        report_i.register("added %s" % name, "%.5f %.3f%%" % (
-            lapse, lapse/addedup_total*100))
+        report_i.register("added %s" % name, "%.5f %.3f%% %s" %
+            (lapse, lapse/addedup_total*100, desc_bypath[name]))
 
     report_i.register("Average", None)
-    average_df = extendedints_df\
-                 .groupby("path")["lapse"]\
+    average_df = intsbypath_df["lapse"]\
                  .mean()\
                  .sort_values(ascending=False)
     average_by_ptype = {}
     for name, lapse in average_df.iteritems():
         average_by_ptype[name] = lapse
-        report_i.register("avg %s" % name, "%.5f" % lapse)
+        report_i.register(
+                "avg %s" % name, "%.5f %s" % (
+                    lapse, desc_bypath[name]))
 
     report_i.register("Projection", None)
-    extendedints_by_type = extendedints_df.groupby("path")
     projection_result = []
-    for p_type, e_df in extendedints_by_type:
+    for p_type, e_df in intsbypath_df:
         from_tos = [(r[1]["from_seconds"],
                      r[1]["to_seconds"])
                     for r in e_df.iterrows()]
@@ -245,19 +254,20 @@ def general_purpose_analysis(master_graph,
     projection_result.sort(reverse=True)
     for proj_ratio, proj_t, p_type in projection_result:
         report_i.register("proj %s" % p_type,
-                          "%.5f %.2f" % (proj_t, proj_ratio))
+                          "%.5f %.2f %s" % (proj_t, proj_ratio, desc_bypath[p_type]))
 
     report_i.export()
 
     workflow_byrtype = {}
     for r_type in r_types:
         _requestinss = requestinss_byrtype.get(r_type, [])
-        requestins_iters = [r.iter_mainints(extended=True) for r in _requestinss]
+        requestins_iters = [r.iter_mainints() for r in _requestinss]
         workflow = Workflow(r_type)
         for intervals in izip_longest(*requestins_iters):
             workflow.build(intervals)
+        workflow.reduce()
+        workflow.ready()
         workflow_byrtype[r_type] = workflow
-        print()
         print("%s" % workflow)
 
     #####  visualization  #####

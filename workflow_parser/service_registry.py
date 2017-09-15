@@ -19,6 +19,7 @@ class Component(object):
         self.name = component
         self.service = service
         self.color = None
+        self.vis_weight = 0
 
     def __str__(self):
         return self.name
