@@ -149,13 +149,13 @@ class CephWritefull(DriverBase):
                                        "tracked_op_seq"])
 
         # main osd send reply
-        j6 = e5.join_one(e15, True, ["tid",
+        j8 = e5.join_one(e15, True, ["tid",
                                      "msg_op",
                                      ("target_t", "target"),
                                      ("target", "target_s")])
 
         # client unlock ioctx
-        j7 = e16.join_one(e11, False, ["tid",
+        j9 = e16.join_one(e11, False, ["tid",
                                        ("target_s", "target_t")])
 
 
