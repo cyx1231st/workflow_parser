@@ -63,6 +63,15 @@ class JoinBase(object):
         assert ("thread", "thread") not in self.schemas
 
     @property
+    def str_schema(self):
+        def _parse(k, v):
+            if k==v:
+                return k
+            else:
+                return k+":"+v
+        return ",".join(_parse(k,v) for k,v in self.schemas)
+
+    @property
     def from_name(self):
         return self.from_item._jm_name
 
@@ -89,12 +98,12 @@ class JoinBase(object):
             return ", LOCAL"
 
     def __repr__(self):
-        return "<%s#%s: %s->%s, %d schemas%s>" % (
+        return "<%s#%s: %s->%s, [%s]%s>" % (
                 self.__class__.__name__,
                 self.name,
                 self.from_name,
                 self.to_name,
-                len(self.schemas),
+                self.str_schema,
                 self.__repr_marks__())
 
     def __str__(self):

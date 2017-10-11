@@ -26,6 +26,7 @@ from ..exc import StateError
 
 
 debug = True
+debug_more = True
 
 
 ONE = "ONE"
@@ -109,7 +110,7 @@ class JoiningProject(object):
             cnt_success, cnt_fail))
 
 
-@total_ordering
+# NOTE: no total_ordering because it will be grouped
 class JoinItem(object):
     def __init__(self, strategy, seconds, env, item, join_objs):
         assert strategy in JoinTypes
@@ -151,10 +152,6 @@ class JoinItem(object):
             for jo, peer in self._peers.iteritems():
                 if peer is None:
                     yield [jo]
-
-    # total ordering
-    __eq__ = lambda self, other: self.seconds == other.seconds
-    __lt__ = lambda self, other: self.seconds < other.seconds
 
     def set_peer(self, join_obj, peer):
         assert isinstance(join_obj, JoinBase)
@@ -259,15 +256,16 @@ class PandasIndexer(IndexerBase):
               "(%d -> %d): "%(len(self.from_items), len(self.to_items))+
               repr(self.join_obj))
 
+        str_schema = self.join_obj.str_schema
+        columns = ["seconds", "_item", str_schema]
         # index from_items, count ignored
-        self.from_items.sort()
-        columns = [schema for schema, _ in self.schemas]
-        columns.extend(["seconds", "_item"])
+        self.from_items.sort(key=lambda i:i.seconds)
         def generate_from_rows():
             for item in self.from_items:
                 if item.is_joinable(self.join_obj):
-                    yield tuple(chain((item.env[schema] for schema, _ in self.schemas),
-                                      [item.seconds, item]))
+                    yield (item.seconds, item,
+                           ",".join(str(item.env[schema])
+                               for schema, _ in self.schemas))
                 else:
                     self.from_cnt_ignored += 1
         from_indexer = pd.DataFrame(
@@ -276,17 +274,13 @@ class PandasIndexer(IndexerBase):
                 columns=columns)
 
         # index to_items, count ignored
-        self.to_items.sort()
-        columns = [schema for _, schema in self.schemas]
-        columns.extend(["seconds", "_item"])
-        rows = (tuple(chain((item.env[schema] for _, schema in self.schemas),
-                            [item.seconds, item]))
-                    for item in self.to_items)
+        self.to_items.sort(key=lambda i:i.seconds)
         def generate_to_rows():
             for item in self.to_items:
                 if item.is_joinable(self.join_obj):
-                    yield tuple(chain((item.env[schema] for _, schema in self.schemas),
-                                      [item.seconds, item]))
+                    yield (item.seconds, item,
+                           ",".join(str(item.env[schema])
+                               for _, schema in self.schemas))
                 else:
                     self.to_cnt_ignored += 1
         to_indexer = pd.DataFrame(
@@ -297,38 +291,12 @@ class PandasIndexer(IndexerBase):
         # join by schemas
         join_result = pd.merge(
                 from_indexer, to_indexer,
-                left_on=[schema for schema, _ in self.schemas],
-                right_on=[schema for _, schema in self.schemas],
+                on=[str_schema],
                 suffixes=("_from", "_to"),
                 how="outer")
-
-        # evaluate nomatch
-        if debug:
-            from_nomatch = join_result[join_result["_item_to"].isnull()]["_item_from"]
-            to_nomatch = join_result[join_result["_item_from"].isnull()]["_item_to"]
-            self.from_cnt_nomatch = len(from_nomatch)
-            self.to_cnt_nomatch = len(to_nomatch)
-
-        # matches
         matches = join_result[(join_result["_item_from"].notnull()) &
                               (join_result["_item_to"].notnull())]
-
-        # evaluate multiple matches
         matches_byto = matches.groupby("_item_to")
-        if debug:
-            for _, to_matches in matches_byto:
-                len_m = len(to_matches)
-                self.to_cntmax_permatch = max(self.to_cntmax_permatch, len_m)
-                if len_m > 1:
-                    self.to_occur_matches += 1
-                    self.to_total_matches += len_m
-            matches_byfrom = matches.groupby("_item_from")
-            for _, from_matches in matches_byfrom:
-                len_m = len(from_matches)
-                self.from_cntmax_permatch = max(self.from_cntmax_permatch, len_m)
-                if len_m > 1:
-                    self.from_occur_matches += 1
-                    self.from_total_matches += len_m
 
         # match items, evaluate offsets
         matches_byto_list = []
@@ -337,7 +305,7 @@ class PandasIndexer(IndexerBase):
                                       [item for item in to_matches["_item_from"]]))
         matches_byto_list.sort(key=lambda item:item[0])
         for to_item, to_matches in matches_byto_list:
-            to_matches.sort()
+            to_matches.sort(key=lambda i:i.seconds)
             for match in to_matches:
                 if match.is_joinable(self.join_obj):
                     match.set_peer(self.join_obj, to_item)
@@ -352,14 +320,64 @@ class PandasIndexer(IndexerBase):
                     yield self.join_obj, match.item, to_item.item
                     break
 
-        # evaluate novalidmatches
         if debug:
+            # evaluate nomatch
+            from_nomatch = join_result[join_result["_item_to"].isnull()]["_item_from"]
+            to_nomatch = join_result[join_result["_item_from"].isnull()]["_item_to"]
+            self.from_cnt_nomatch = len(from_nomatch)
+            self.to_cnt_nomatch = len(to_nomatch)
+
+            # evaluate multiple matches
+            for _, to_matches in matches_byto:
+                len_m = len(to_matches)
+                self.to_cntmax_permatch = max(self.to_cntmax_permatch, len_m)
+                if len_m > 1:
+                    import pdb; pdb.set_trace()
+                    self.to_occur_matches += 1
+                    self.to_total_matches += len_m
+            matches_byfrom = matches.groupby("_item_from")
+            for _, from_matches in matches_byfrom:
+                len_m = len(from_matches)
+                self.from_cntmax_permatch = max(self.from_cntmax_permatch, len_m)
+                if len_m > 1:
+                    self.from_occur_matches += 1
+                    self.from_total_matches += len_m
+            # evaluate novalidmatches
             for from_item, _ in matches_byfrom:
                 if from_item._peers[self.join_obj] is None:
                     self.from_cnt_novalidmatch += 1
             for to_item, _ in matches_byto:
                 if to_item._peers[self.join_obj] is None:
                     self.to_cnt_novalidmatch += 1
+            if debug_more:
+                # print diagnose details
+                matches_byschema = matches.groupby(str_schema)
+                to_print = []
+                for s_content, lines in matches_byschema:
+                    if len(lines) > 1:
+                        for line in lines:
+                            to_print.append((line["seconds_from"],
+                                             line[str_schema],
+                                             line["_item_from"],
+                                             line["_item_to"]))
+                to_print.sort(key=lambda l:l[0])
+                for l in to_print:
+                    if l[2]._peers[self.join_obj] is not l[3]:
+                        label="!"
+                    else:
+                        label=""
+                    if l[2]._peers[self.join_obj] is None:
+                        from_label="!"
+                    else:
+                        from_label=""
+                    if l[3]._peers[self.join_obj] is None:
+                        to_label="!"
+                    else:
+                        to_label=""
+                    print("  %s%s: %s`%s`%s -> %s`%s`%s" % (
+                        label, l[1],
+                        l[2].seconds, l[2].keyword, from_label,
+                        l[3].seconds, l[3].keyword, to_label))
 
         self.report()
 

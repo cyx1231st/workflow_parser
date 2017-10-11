@@ -176,10 +176,15 @@ class IntervalBase(object):
     def __repr_from__(self):
         ret = "[%s %s" % (self.int_name, self.__repr_intlabels__())
         if self._from_pace:
-            ret += "<-(%.3f,%s`%s`)]" % (
+            context = ",".join(str(k)+"="+str(v)
+                    for k,v in self._from_pace.line_context.iteritems())
+            if context:
+                context = " " + context
+            ret += "<-(%.3f,%s`%s`%s)]" % (
                     self.from_seconds,
                     self.from_edgename,
-                    self.from_keyword)
+                    self.from_keyword,
+                    context)
         else:
             ret += "]"
         return ret
@@ -187,10 +192,15 @@ class IntervalBase(object):
     def __repr_to__(self):
         ret = "[%s %s" % (self.int_name, self.__repr_intlabels__())
         if self._to_pace:
-            ret += "->(%.3f,%s`%s`)]" % (
+            context = ",".join(str(k)+"="+str(v)
+                    for k,v in self._to_pace.line_context.iteritems())
+            if context:
+                context = " " + context
+            ret += "->(%.3f,%s`%s`%s)]" % (
                     self.to_seconds,
                     self.to_edgename,
-                    self.to_keyword)
+                    self.to_keyword,
+                    context)
         else:
             ret += "]"
         return ret
@@ -416,18 +426,26 @@ class Pace(LineStateBase, object):
         return self.line_obj.keys_
 
     @property
+    def line_context(self):
+        ret = {}
+        for k in self.line_keys:
+            ret[k] = self[k]
+        return ret
+
+    # TODO: bug here
+    @property
     def _ls_state(self):
-        if self.is_thread_start and self.is_thread_end:
-            return "*"
-        elif self.is_thread_start:
-            return "+"
-        elif self.is_thread_end:
-            return "-"
+        # if self.is_thread_start and self.is_thread_end:
+        #     return "*"
+        # elif self.is_thread_start:
+        #     return "+"
+        # elif self.is_thread_end:
+        #     return "-"
+        # else:
+        if self.prv_main_activity or self.nxt_main_activity:
+            return "!"
         else:
-            if self.prv_main_activity or self.nxt_main_activity:
-                return "!"
-            else:
-                return "|"
+            return "|"
 
     @property
     def _ls_request(self):

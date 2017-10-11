@@ -191,6 +191,10 @@ def group_threads(threadinss, joininfo, report):
         ret.append((req, tgroup))
     for tgroup in threadgroups_without_request:
         ret.append((None, tgroup))
+    print("OUT: %d group with req, %d group without req" % (
+        len(threadgroup_by_request), len(threadgroups_without_request)))
+    print()
+
     return ret
 
 
@@ -371,7 +375,7 @@ class RequestBuilder(object):
 
         # error: incomplete threadinss
         if self.e_incomplete_threadinss:
-            err_str = "\n".join("%r" % ti for it in self.e_incomplete_threadinss)
+            err_str = "\n".join("%r" % it for it in self.e_incomplete_threadinss)
             self.errors["Has incomplete threadinss"] = err_str
 
         # warn: stray threadinss
