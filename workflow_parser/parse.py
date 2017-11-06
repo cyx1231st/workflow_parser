@@ -15,11 +15,12 @@
 from __future__ import print_function
 
 import argparse
+import os
 
 from .analyst.report import Report
 from .analyst.draw_engine import DrawEngine
 from .analyst.statistics_engine import do_statistics
-from .datasource.log_engine import LogEngine
+from .datasource.log_engine import proceed as l_proceed
 from .workflow.engine import proceed
 from .clockmaster import adjust_clock
 from .utils import Report as ParserReport
@@ -38,7 +39,7 @@ def main1(driver):
                         help="Don't export report and draw figures.")
     parser.add_argument('--outfolder',
                         help="Folder to put figures.",
-                        default="/root/ceph_workdir/runtime/out/")
+                        default="/root/container/out/")
     # parser.add_argument('--csv-print-header', action="store_true",
     #                     help="Write a row into the CSV file for the headers.")
     # parser.add_argument('--outfile',
@@ -54,8 +55,7 @@ def main1(driver):
 
     try:
         # build logs
-        log_engine = LogEngine(driver.services, driver, report_i)
-        targetobjs = log_engine.proceed(args.folder)
+        targetobjs = l_proceed(args.folder, driver.services, driver, report_i)
 
         # build states
         requestinss = proceed(targetobjs, master, report_i)
@@ -73,8 +73,11 @@ def main1(driver):
     report = Report(folders[-1] or folders[-2])
     draw_engine = None
     if not args.brief:
-        draw_engine = DrawEngine(args.outfolder)
-        report.set_outfile(args.outfolder+"/report.csv", True)
+        outfolder = args.folder+"/out/"
+        if not os.path.exists(outfolder):
+            os.makedirs(outfolder)
+        draw_engine = DrawEngine(outfolder)
+        report.set_outfile(outfolder+"/report.csv", True)
     do_statistics(master, requestinss, draw_engine, report)
 
     # build statistics

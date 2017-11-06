@@ -332,7 +332,6 @@ class PandasIndexer(IndexerBase):
                 len_m = len(to_matches)
                 self.to_cntmax_permatch = max(self.to_cntmax_permatch, len_m)
                 if len_m > 1:
-                    import pdb; pdb.set_trace()
                     self.to_occur_matches += 1
                     self.to_total_matches += len_m
             matches_byfrom = matches.groupby("_item_from")
@@ -355,7 +354,7 @@ class PandasIndexer(IndexerBase):
                 to_print = []
                 for s_content, lines in matches_byschema:
                     if len(lines) > 1:
-                        for line in lines:
+                        for index, line in lines.iterrows():
                             to_print.append((line["seconds_from"],
                                              line[str_schema],
                                              line["_item_from"],
@@ -376,8 +375,8 @@ class PandasIndexer(IndexerBase):
                         to_label=""
                     print("  %s%s: %s`%s`%s -> %s`%s`%s" % (
                         label, l[1],
-                        l[2].seconds, l[2].keyword, from_label,
-                        l[3].seconds, l[3].keyword, to_label))
+                        l[2].seconds, l[2].item.keyword, from_label,
+                        l[3].seconds, l[3].item.keyword, to_label))
 
         self.report()
 

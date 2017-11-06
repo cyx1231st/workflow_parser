@@ -14,248 +14,304 @@
 
 from __future__ import print_function
 
+from abc import ABCMeta
+from abc import abstractmethod
 from collections import defaultdict
 import os
 from os import path
 import sys
 
+from .. import reserved_vars as rv
+from ..service_registry import Component
 from ..service_registry import ServiceRegistry
-from ..utils import Report
-from . import Target
-from . import Thread
 from . import Line
+from . import Source
 from .exc import LogError
-from .log_entities import LogFile
-from .log_entities import LogLine
 
 
-class LogEngine(object):
-    def __init__(self, sr, plugin, report):
+class DriverPlugin(object):
+    __metaclass__ = ABCMeta
+
+    def __init__(self, extensions=None):
+        if extensions is None:
+            self._extensions = ["log"]
+        else:
+            self._extensions = extensions
+
+    def _purge_dict_empty_values(self, var_dict):
+        for k in var_dict.keys():
+            if var_dict[k] in {None, ""}:
+                var_dict.pop(k)
+
+    def do_filter_logfile(self, f_dir, f_name):
+        assert isinstance(f_dir, str)
+        assert isinstance(f_name, str)
+        assert f_name in f_dir
+
+        # skip non-file
+        if not path.isfile(f_dir):
+            return False, None
+
+        # check file extension
+        ext_match = False
+        for ext in self._extensions:
+            if f_name.endswith("." + ext):
+                ext_match = True
+        if not ext_match:
+            return False, None
+
+        try:
+            var_dict = {}
+            ret = self.filter_logfile(f_dir, f_name, var_dict)
+            assert isinstance(ret, bool)
+            if ret:
+                # NOTE
+                # print("(LogDriver) loaded: %s" % f_dir)
+                assert all(isinstance(k, str) for k in var_dict.keys())
+                self._purge_dict_empty_values(var_dict)
+                return True, var_dict
+            else:
+                # skip
+                return False, None
+        except Exception as e:
+            raise LogError(
+                "(LogDriver) `filter_logfile` error when f_name=%s"
+                % f_name, e)
+
+    def do_filter_logline(self, line, lino, where):
+        assert isinstance(line, str)
+        assert isinstance(lino, int)
+        assert isinstance(where, str)
+
+        try:
+            var_dict = {}
+            ret = self.filter_logline(line, var_dict)
+            assert all(isinstance(k, str) for k in var_dict.keys())
+            self._purge_dict_empty_values(var_dict)
+            assert isinstance(ret, bool)
+            return ret, var_dict
+        except Exception as e:
+            raise LogError("(LogDriver) `filter_logline` error at %s@%d %s"
+                % (where, lino, line), e)
+
+    @abstractmethod
+    def filter_logfile(self, f_dir, f_name, var_dict):
+        pass
+
+    @abstractmethod
+    def filter_logline(self, line):
+        pass
+
+
+class FileDatasource(object):
+    def __init__(self, name, f_dir, vs, sr, plugin):
         assert isinstance(sr, ServiceRegistry)
-        assert isinstance(report, Report)
+        assert isinstance(plugin, DriverPlugin)
 
         self.sr = sr
         self.plugin = plugin
-        self.report = report
+        self.name = name
+        self.f_dir = f_dir
+        self.total_lines = 0
 
-    # step1: load related log files
-    def _loadfiles(self, log_folder):
+        self.source = Source(name, f_dir, vs)
+
+        self.requests = set()
+
+    @property
+    def total_lineobjs(self):
+        return self.source.len_lineobjs
+
+    # def _buffer_lines(self, lines):
+    #     buffer_lines = Heap(key=lambda a: a.seconds)
+
+    #     prv_line = [None]
+    #     def _flush_line(flush=None):
+    #         while buffer_lines:
+    #             if flush and buffer_lines.distance < flush:
+    #                 break
+    #             line = buffer_lines.pop()
+    #             if prv_line[0] is not None:
+    #                 prv_line[0].nxt_logline = line
+    #                 line.prv_logline = prv_line[0]
+    #                 assert prv_line[0] <= line
+    #             yield line
+    #             prv_line[0] = line
+
+    #     for line in lines:
+    #         assert isinstance(line, LogLine)
+    #         buffer_lines.push(line)
+    #         for line in _flush_line(1):
+    #             yield line
+    #     for line in _flush_line():
+    #         yield line
+
+    def yield_lineobjs(self, targets_byname):
+        targets_byhint = {}
+
+        with open(self.f_dir, 'r') as reader:
+            for line in reader:
+                self.total_lines += 1
+                lino = self.total_lines
+
+                if_proceed, vs = self.plugin.do_filter_logline(
+                        line, lino, self.name)
+                if if_proceed:
+                    # convert component
+                    component = vs.get(rv.COMPONENT)
+                    if component is not None:
+                        c_obj = self.sr.f_to_component(component)
+                        if not c_obj:
+                            raise LogError(
+                                    "Error in %s@%d %s: unrecognized component %s"
+                                    % (self.name, lino, line, component))
+                        else:
+                            vs[rv.COMPONENT] = c_obj
+                    # collect requests
+                    request = vs.get(rv.REQUEST)
+                    if request is not None:
+                        self.requests.add(request)
+
+                    lineobj = self.source.append_line(
+                            lino, line, vs, targets_byname, targets_byhint)
+                    yield lineobj
+
+        # check
+        for target in targets_byhint.itervalues():
+            if target.target is None:
+                raise LogError("Invalid target: %s" % target)
+            assert target.target in targets_byname
+            assert target is targets_byname[target.target]
+
+    @classmethod
+    def create_byfolder(cls, log_folder, sr, plugin):
         assert isinstance(log_folder, str)
-        logfiles = []
+        assert isinstance(plugin, DriverPlugin)
 
+        datasources = []
         # current_path = path.dirname(os.path.realpath(__file__))
-        print("Load targets...")
         current_path = os.getcwd()
         log_folder = path.join(current_path, log_folder)
         for f_name in os.listdir(log_folder):
             f_dir = path.join(log_folder, f_name)
-            logfile = LogFile.create(f_name, f_dir, self.sr, self.plugin)
-            if logfile is not None:
-                logfiles.append(logfile)
-        print("---------------")
+            if_proceed, vs = plugin.do_filter_logfile(f_dir, f_name)
+            if if_proceed:
+                # convert component
+                component = vs.get(rv.COMPONENT)
+                if component is not None:
+                    c_obj = self.sr.f_to_component(component)
+                    if not c_obj:
+                        raise LogError(
+                                "Error in %s: unrecognized component %s"
+                                % (f_name, component))
+                    else:
+                        vs[rv.COMPONENT] = c_obj
+                ds = cls(f_name.rsplit(".", 1)[0], f_dir, vs, sr, plugin)
+                datasources.append(ds)
 
-        #### summary ####
-        total_files = len(logfiles)
-        print("%d files" % total_files)
-        print()
+        return log_folder, datasources
 
-        #### report #####
-        self.report.step("load_t", target=total_files)
+# step1: load related log files
+def loadsources(log_folder, sr, plugin):
+    print("Load data sources...")
+    log_folder, datasources = FileDatasource.create_byfolder(
+        log_folder, sr, plugin)
+    print("---------------")
 
-        return logfiles
+    #### summary ####
+    print("%d datasources from %s" % (len(datasources), log_folder))
+    print()
 
-    # step2: read lines from log files
-    def _readfiles(self, logfiles_in):
-        logfiles_by_errortype = defaultdict(list)
-        logfiles_by_warntype = defaultdict(list)
+    return datasources
 
-        logfiles = []
-        logfiles_by_host = defaultdict(list)
-        logfiles_by_component = defaultdict(list)
-        hosts_by_component = defaultdict(list)
+# step2: read sources
+def readsources(datasources, sr, report):
+    targets_byname = {}
+    targets_byhost = defaultdict(list)
+    targets_bycomponent = defaultdict(list)
+    threads = set()
 
-        print("Read targets...")
-        for logfile in logfiles_in:
-            assert isinstance(logfile, LogFile)
+    print("Read data sources...")
+    for datasource in datasources:
+        for line_obj in datasource.yield_lineobjs(targets_byname):
+            pass
+    for targetobj in targets_byname.itervalues():
+        if not isinstance(targetobj.target, str) or not targetobj.target:
+            raise LogError("%s has invalid target: %s" % (
+                    targetobj, target.target))
+        if not isinstance(targetobj.host, str) or not targetobj.host:
+            raise LogError("%s has invalid host: %s" % (
+                    targetobj, target.host))
+        if not isinstance(targetobj.component, Component):
+            raise LogError("%s has invalid component: %s" % (
+                    targetobj, target.component))
+        targets_byhost[targetobj.host].append(targetobj)
+        targets_bycomponent[targetobj.component].append(targetobj)
+        threads.update(targetobj.thread_objs)
+    print("---------------")
 
-            logfile.read(self.plugin)
-            # ready line vars: time, seconds, keyword
-            # ready target vars: component, host, target
+    #### summary ####
+    total_targets = len(targets_byname)
+    total_hosts = len(targets_byhost)
+    total_components = len(targets_bycomponent)
+    print("%d targets, %d hosts" %
+            (total_targets,
+             total_hosts))
 
-            if logfile.errors:
-                for k in logfile.errors.iterkeys():
-                    logfiles_by_errortype[k].append(logfile)
-            elif logfile.warns:
-                for k in logfile.warns.iterkeys():
-                    logfiles_by_warntype[k].append(logfile)
-            else:
-                logfiles.append(logfile)
-                logfiles_by_host[logfile.host].append(logfile)
-                logfiles_by_component[logfile.component].append(logfile)
-                hosts_by_component[logfile.component].append(logfile.host)
-        print("---------------")
+    total_lines = sum(datasource.total_lines for datasource in datasources)
+    total_lineobjs = sum(datasource.total_lineobjs
+            for datasource in datasources)
+    print("%.2f%% valid: %d lines -> %d lineobjs"
+            % (float(total_lineobjs)/total_lines*100,
+               total_lines,
+               total_lineobjs))
 
-        #### summary ####
-        total_files = len(logfiles)
-        total_hosts = len(logfiles_by_host)
-        total_components = len(hosts_by_component)
-        print("%d targets, %d hosts" %
-                (total_files,
-                 total_hosts))
-        for comp in self.sr.sr_components:
-            files = logfiles_by_component.get(comp, [])
-            if not files:
-                raise LogError("ERROR! miss component %s" % comp)
-            else:
-                hosts = hosts_by_component[comp]
-                print("  %s: %d targets, %d hosts"
-                      % (comp, len(files), len(hosts)))
-
-        total_lines = sum(file.total_lines for file in logfiles)
-        total_loglines = sum(len(file) for file in logfiles)
-        total_lines_in = sum(file.total_lines for file in logfiles_in)
-        total_loglines_in = sum(len(file) for file in logfiles_in)
-
-        threads = set()
-        requests = set()
-        for file in logfiles:
-            threads.update(file.threads)
-            requests.update(file.requests)
-
-        print("%d loglines:" % total_loglines)
-        print("  %.2f%%: %d lines (valid files)"
-                % (float(total_loglines)/total_lines*100,
-                   total_lines))
-        print("  %.2f%%: %d lines (all files)"
-                % (float(total_loglines)/total_lines_in*100,
-                   total_lines_in))
-        print()
-
-        #### report #####
-        self.report.lines[0] = total_lines_in
-        self.report.step("read_t", line=total_loglines,
-                                   component=total_components,
-                                   host=total_hosts,
-                                   target=total_files,
-                                   thread=len(threads),
-                                   request=len(requests))
-
-        #### errors #####
-        if logfiles_by_warntype:
-            print("! WARN !")
-            for e_type, _logfiles in logfiles_by_warntype.iteritems():
-                print("%d files: %s" % (len(_logfiles), e_type))
-            print()
-
-        if logfiles_by_errortype:
-            print("!! ERROR !!")
-            for e_type, _logfiles in logfiles_by_errortype.iteritems():
-                print("%d files: %s" % (len(_logfiles), e_type))
-            print()
-
-        return logfiles
-
-    # step3: prepare Target, Thread and Line objects
-    def _preparethreads(self, logfiles_in):
-        hosts = set()
-        target_objs = {}
-        targetobjs_by_component = defaultdict(list)
-        requests_detected = set()
-
-        print("Prepare threads...")
-        for logfile in logfiles_in:
-            # build Target object
-            target_obj = Target(logfile.target,
-                                logfile.component,
-                                logfile.host,
-                                logfile)
-
-            index_thread = 0
-            for logline in logfile.yield_logs(self.plugin):
-                assert isinstance(logline, LogLine)
-                assert logline.logfile is logfile
-                assert logline.target == target_obj.target
-
-                if logline.request is not None:
-                    requests_detected.add(logline.request)
-
-                target_obj.append_line(
-                        thread=logline.thread,
-                        lino=logline.lino,
-                        time=logline.time,
-                        seconds=logline.seconds,
-                        keyword=logline.keyword,
-                        request=logline.request,
-                        vs=logline._vars,
-                        line=logline.line,
-                        entity=logline)
-
-            if target_obj.len_lineobjs:
-                assert target_obj.target not in target_objs
-                target_objs[target_obj.target] = target_obj
-                targetobjs_by_component[target_obj.component].append(target_obj)
-                hosts.add(target_obj.host)
-        print("----------------")
-
-        #### summary ####
-        total_lines = sum(to.len_lineobjs for to in
-                target_objs.itervalues())
-        total_requests = len(requests_detected)
-        total_threads = sum(len(to.thread_objs) for to in
-                target_objs.itervalues())
-        print("%d lines, %d requests, %d threads" % (
-            total_lines,
-            total_requests,
-            total_threads))
-
-        total_thread_lines = sum(th.len_lineobjs
-                for to in target_objs.itervalues()
-                for th in to.thread_objs.itervalues())
-        assert total_thread_lines == total_lines
-
-        for comp, target_objs_ in targetobjs_by_component.iteritems():
-            hosts_ = set()
-            component_threads = sum(len(to.thread_objs) for to in target_objs_)
-            component_loglines = sum(to.len_lineobjs for to in target_objs_)
-
+    for comp in sr.sr_components:
+        targets = targets_bycomponent.get(comp, [])
+        if not targets:
+            raise LogError("ERROR! miss component %s" % comp)
+        else:
+            component_threads = sum(len(target.thread_objs) for target in targets)
+            component_lines = sum(target.len_lineobjs for target in targets)
             min_target_threads, max_target_threads = sys.maxint, 0
-            min_target_loglines, max_target_loglines = sys.maxint, 0
-            for target_obj in target_objs_:
+            min_target_lineobjs, max_target_lineobjs = sys.maxint, 0
+            hosts_ = set()
+            for target_obj in targets:
                 hosts_.add(target_obj.host)
                 min_target_threads = min(min_target_threads, len(target_obj.thread_objs))
                 max_target_threads = max(max_target_threads, len(target_obj.thread_objs))
-                min_target_loglines = min(min_target_loglines,
+                min_target_lineobjs = min(min_target_lineobjs,
                         target_obj.len_lineobjs)
-                max_target_loglines = max(max_target_loglines,
+                max_target_lineobjs = max(max_target_lineobjs,
                         target_obj.len_lineobjs)
 
-            print("  %s: %d hosts, %d targets, %d threads, %d loglines"
-                    % (comp, len(hosts_), len(target_objs_),
-                       component_threads, component_loglines))
+            print("  %s: %d hosts, %d targets, %d threads, %d lines"
+                  % (comp, len(hosts_), len(targets),
+                     component_threads,
+                     component_lines))
             print("    per-target: %.3f[%d, %d] threads, %.3f[%d, %d] loglines"
-                    % (component_threads/float(len(target_objs_)),
+                    % (component_threads/float(len(targets)),
                        min_target_threads,
                        max_target_threads,
-                       component_loglines/float(len(target_objs_)),
-                       min_target_loglines,
-                       max_target_loglines))
-        print()
+                       component_lines/float(len(targets)),
+                       min_target_lineobjs,
+                       max_target_lineobjs))
+    print()
 
-        #### report #####
-        self.report.step("prepare", line=total_lines,
-                                    component=len(targetobjs_by_component),
-                                    host=len(hosts),
-                                    target=len(target_objs),
-                                    thread=total_threads,
-                                    request=total_requests)
+    #### report #####
+    requests = set()
+    for ds in datasources:
+        requests.update(ds.requests)
+    report.step("read", line=total_lineobjs,
+                        component=total_components,
+                        host=total_hosts,
+                        target=total_targets,
+                        thread=len(threads),
+                        request=len(requests))
+    return targets_byname
 
-        #### errors #####
-        self.plugin.do_report()
+def proceed(logfolder, sr, plugin, report):
+    datasources = loadsources(logfolder, sr, plugin)
+    targetobjs = readsources(datasources, sr, report)
 
-        return target_objs
-
-    def proceed(self, logfolder):
-        logfiles = self._loadfiles(logfolder)
-        logfiles = self._readfiles(logfiles)
-        targetobjs = self._preparethreads(logfiles)
-        return targetobjs
+    return targetobjs

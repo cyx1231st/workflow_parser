@@ -1,5 +1,7 @@
 orderedset
 oslo.config
 numpy
+scipy
 matplotlib
 seaborn
+pandas

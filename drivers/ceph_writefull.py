@@ -314,9 +314,6 @@ class CephWritefull(DriverBase):
         var_dict[rv.THREAD] = thread
         return True
 
-    def preprocess_logline(self, logline):
-        return True
-
 
 if __name__ == "__main__":
     driver = CephWritefull(sr)

@@ -19,6 +19,7 @@ import numbers
 
 from .. import reserved_vars as rv
 from ..service_registry import Component
+from .exc import LogError
 
 
 class LineStateBase(object):
@@ -42,48 +43,47 @@ class Line(object):
     _str_lines_nxtlim = 10
     _str_lines_prvlim = 10
 
-    def __init__(self, lino,
+    def __init__(self, source_obj,
+                       lino,
+                       line,
+                       vs,
+                       thread_obj,
                        time,
                        seconds,
                        keyword,
-                       request,
-                       thread_obj,
-                       vs,
-                       line,
-                       entity):
+                       request=None):
+        assert isinstance(source_obj, Source)
+        assert isinstance(lino, int)
+        assert isinstance(line, str)
+        assert isinstance(vs, dict)
+        assert not rv.ALL_VARS & vs.viewkeys()
+        assert isinstance(thread_obj, Thread)
         assert isinstance(time, str)
         assert isinstance(seconds, numbers.Real)
         assert isinstance(keyword, str)
-        assert isinstance(thread_obj, Thread)
-        assert isinstance(line, str)
-        assert entity is not None
-        assert entity._assigned is None
+        if request is not None:
+            assert isinstance(request, str)
 
-        assert isinstance(vs, dict)
-        assert not rv.ALL_VARS & vs.viewkeys()
-
+        self.source_obj = source_obj
         self.lino = lino
+        self.line = line.strip()
+        self._schema_vars = vs
+        self.thread_obj = thread_obj
+        self._line_state = None
+
         self.time = time
         self._seconds = seconds
         self.keyword = keyword
         self.request = request
 
-        self.line = line
-        self.thread_obj = thread_obj
-        self._schema_vars = vs
-        self._built_from = entity
-        self._line_state = None
-
+        self.prv_source_line = None
+        self.nxt_source_line = None
         self.prv_thread_line = None
         self.nxt_thread_line = None
-        self.prv_target_line = None
-        self.nxt_target_line = None
-
-        entity._assigned = self
 
     @property
     def name(self):
-        return "%s~%s" % (self.target, self.lino)
+        return "%s~%s" % (self.source_obj.name, self.lino)
 
     @property
     def seconds(self):
@@ -308,14 +308,18 @@ class Thread(object):
     def _append_line(self, **kwds):
         line_obj = Line(thread_obj=self,
                         **kwds)
+
         if self.start_lineobj is None:
             self.start_lineobj = line_obj
+            assert self.last_lineobj is None
+            assert self.len_lineobjs == 0
         else:
-            assert line_obj.lino > self.last_lineobj.lino
+            assert self.last_lineobj.lino < line_obj.lino
             self.last_lineobj.nxt_thread_line = line_obj
             line_obj.prv_thread_line = self.last_lineobj
         self.last_lineobj = line_obj
         self.len_lineobjs += 1
+
         return line_obj
 
     def iter_lineobjs(self):
@@ -326,25 +330,15 @@ class Thread(object):
 
 
 class Target(object):
-    _str_lines_lim = 10
-
-    def __init__(self, target, component, host, entity):
-        assert isinstance(target, str)
-        assert isinstance(component, Component)
-        assert isinstance(host, str)
-
-        self.target = target
-        self.component = component
-        self.host = host
+    def __init__(self):
+        self.target = None
+        self.component = None
+        self.host = None
 
         self._offset = 0
         self.thread_objs = {}
-
-        self.start_lineobj = None
-        self.last_lineobj = None
         self.len_lineobjs = 0
 
-        self._built_from = entity
         self._index_thread = 0
 
     @property
@@ -357,42 +351,43 @@ class Target(object):
         self._offset = val
 
     def __repr__(self):
-        return "<%s#%s: comp=%s, host=%s, off=%d, %d lines, %d threads, built-from %s>" % (
+        return "<%s#%s: comp=%s, host=%s, off=%d, %d threads>" % (
                self.__class__.__name__,
                self.target,
                self.component,
                self.host,
                self._offset,
-               self.len_lineobjs,
-               len(self.thread_objs),
-               self._built_from.name)
+               len(self.thread_objs))
 
-    def __str__(self):
-        ret = repr(self)
-        lim = self._str_lines_lim
-        ret += "\n---- end -----"
-
-        line = self.last_lineobj
-        while line is not None:
-            ret += "\n%s" % line.__repr_target__()
-            lim -= 1
-            if lim <= 0:
-                break
-            line = line.prv_target_line
-
-        if line is None:
-            pass
-        elif line is self.start_lineobj:
-            ret += "\n%s" % line.__repr_target__()
-        else:
-            ret += "\n ......"
-            ret += "\n%s" % self.start_lineobj.__repr_target__()
-        ret += "\n---- start ---"
-
-        return ret
-
-    def append_line(self, thread, **kwds):
-        assert isinstance(thread, str)
+    def _append_line(self, thread,
+                    target=None, component=None, host=None,
+                    **kwds):
+        if not isinstance(thread, str):
+            raise LogError("thread %s is not string!" % thread)
+        if target is not None:
+            if not isinstance(target, str):
+                raise LogError("target %s is not string!" % target)
+            elif self.target is None:
+                self.target = target
+            elif self.target != target:
+                raise LogError("cannot overwrite target: %s -> %s!" %(
+                    self.target, target))
+        if host is not None:
+            if not isinstance(host, str):
+                raise LogError("host %s is not string!" % host)
+            elif self.host is None:
+                self.host = host
+            elif self.host != host:
+                raise LogError("cannot overwrite host: %s -> %s!" %(
+                    self.host, host))
+        if component is not None:
+            if not isinstance(component, Component):
+                raise LogError("componet %s is not Component!" % component)
+            elif self.component is None:
+                self.component = component
+            elif self.component is not component:
+                raise LogError("cannot overwrite component %s -> %s!" %(
+                    self.component, component))
 
         thread_obj = self.thread_objs.get(thread)
         if thread_obj is None:
@@ -401,11 +396,163 @@ class Target(object):
             self.thread_objs[thread] = thread_obj
 
         line_obj = thread_obj._append_line(**kwds)
+        self.len_lineobjs += 1
+        return line_obj
+
+
+# granularity: target, host
+class Source(object):
+    _str_lines_lim = 10
+
+    def __init__(self, name, f_dir, vs):
+        assert isinstance(name, str)
+        assert isinstance(f_dir, str)
+        assert isinstance(vs, dict)
+
+        err_keys = {rv.REQUEST,
+                    rv.SECONDS,
+                    rv.KEYWORD,
+                    rv.TIME} & vs.viewkeys()
+        if err_keys:
+            raise LogError("Cannot set keys %s in Source!" % err_keys)
+
+        self.name = name
+        self.where = f_dir
+
+        self.start_lineobj = None
+        self.last_lineobj = None
+        self.len_lineobjs = 0
+
+        self.vars_ = vs
+
+    def __repr__(self):
+        marks = ""
+        if self.vars_:
+            marks += ", var("
+            marks += ",".join("%s:%s" for k,v in self.vars_.iteritems())
+            marks += ")"
+
+        return "<%s#%s: %d lines, from %s, %s>" % (
+               self.__class__.__name__,
+               self.name,
+               self.len_lineobjs,
+               self.where,
+               marks)
+
+    def __str__(self):
+        ret = repr(self)
+        lim = self._str_lines_lim
+        ret += "\n---- end ----"
+
+        line = self.last_lineobj
+        while line is not None:
+            ret += "\n%r" % line
+            lim -= 1
+            if lim <= 0:
+                break
+            line = line.prv_source_line
+
+        if line is None:
+            pass
+        elif line is self.start_lineobj:
+            ret += "\n%r" % self.start_lineobj
+        else:
+            ret += "\n ......"
+            ret += "\n%r" % self.start_lineobj
+        ret += "\n---- start ---"
+
+        return ret
+
+    def append_line(self, lino, line, vs, targets_byname, targets_byhint):
+        assert isinstance(lino, int)
+        assert isinstance(line, str)
+        assert isinstance(vs, dict)
+        assert isinstance(targets_byname, dict)
+        assert isinstance(targets_byhint, dict)
+
+        #1. no conflcit of line vars and source vars
+        dup_keys = vs.viewkeys() & self.vars_.viewkeys()
+        for k in dup_keys:
+            if vs[k] != self.vars_[k]:
+                raise LogError(
+                        "Error in %s@%d %s: line var %s conflict with"
+                        "source var, %s vs %s!" % (
+                            self.name, lino, line,
+                            k, vs[k], self.vars_[k]))
+        vs.update(self.vars_)
+
+        #2. split reserved vars
+        resv = {}
+        vars_ = {}
+        target_hint = None
+        for k,v in vs.iteritems():
+            if k in rv.ALL_VARS:
+                resv[k] = v
+            elif k == rv.TARGET_HINT:
+                target_hint = v
+                assert isinstance(target_hint, str)
+            else:
+                vars_[k] = v
+
+        #3. check required line vars
+        required = {rv.THREAD, rv.KEYWORD, rv.TIME, rv.SECONDS} - resv.viewkeys()
+        if required:
+            raise LogError(
+                    "Error in %s@%d %s: cannot identify vars %s!" % (
+                        self.name, lino, line, required))
+
+        #4. get/create target_obj
+        target = resv.get(rv.TARGET)
+        if not target_hint and not target:
+            raise LogError(
+                    "Error in %s@%d %s: nor %s or %s is available!" % (
+                        self.name, lino, line,
+                        rv.TARGET_HINT, rv.TARGET))
+        elif target_hint and target:
+            target_obj = targets_byhint.get(target_hint)
+            if target_obj is None:
+                assert targets_byname.get(target) is None
+                target_obj = Target()
+                targets_byhint[target_hint] = target_obj
+                targets_byname[target] = target_obj
+            else:
+                target_obj_ = targets_byname.get(target)
+                if target_obj_:
+                    assert target_obj_ is target_obj
+                else:
+                    targets_byname[target] = target_obj
+        elif target_hint:
+            target_obj = targets_byhint.get(target_hint)
+            if target_obj is None:
+                target_obj = Target()
+                targets_byhint[target_hint] = target_obj
+        else:
+            target_obj = targets_byname.get(target)
+            if target_obj is None:
+                target_obj = Target()
+                targets_byname[target] = target_obj
+
+        #5. create line_obj
+        try:
+            line_obj = target_obj._append_line(
+                    source_obj=self,
+                    lino=lino,
+                    line=line,
+                    vs=vars_,
+                    **resv)
+        except LogError as e:
+            raise LogError("Error in %s@%d %s!" % (self.name, lino, line), e)
+
+        #6. link line_obj
         if self.start_lineobj is None:
             self.start_lineobj = line_obj
+            assert self.last_lineobj is None
+            assert self.len_lineobjs == 0
         else:
-            self.last_lineobj.nxt_target_line = line_obj
-            line_obj.prv_target_line = self.last_lineobj
+            assert self.last_lineobj.lino < line_obj.lino
+            self.last_lineobj.nxt_source_line = line_obj
+            line_obj.prv_source_line = self.last_lineobj
         self.last_lineobj = line_obj
         self.len_lineobjs += 1
+
         return line_obj

@@ -44,22 +44,19 @@ class CephWritefull(DriverBase):
 #### request write_full ####
         # thread client issue writefull
         e  , n1  = graph.build_thread(client,
-                               1, "IoCtx writefull start", "writefull")
+                               1, "IoCtx aio writefull start", "aiowritefull")
         e  , n2  =  n1.build(  2, "objecter calculate start")
         e  , n3  =  n2.build(  3, "objecter calculate finish")
         e10, n4  =  n3.build(  4, "objecter send_op start")
         e  , n5  =  n4.build(  5, "objecter send_op finish")
-        e  , n6  =  n5.build(  6, "IoCtx lock start")
-        e11, n7  =  n6.build(  7, "IoCtx lock finish")
-        e  , n8  =  n7.build(  8, "IoCtx writefull finish")
-        n8.set_state("SUCCESS")
+        e  , n6  =  n5.build(  6, "IoCtx aio writefull finish")
 
         # thread client receive message
         e15, n10 = graph.build_thread(client,
                               10, "messenger fast_dispatch start")
-        e16, n11 = n10.build( 11, "objecter unlock start")
-        e  , n12 = n11.build( 12, "objecter unlock finish")
-        e  , n13 = n12.build( 13, "messenger fast_dispatch finish")
+        e  , n11 = n10.build( 11, "objecter complete")
+        e  , n12 = n11.build( 12, "messenger fast_dispatch finish")
+        n12.set_state("SUCCESS")
 
         # thread osd recieive message
         e20, n15 = graph.build_thread(osd,
@@ -153,10 +150,6 @@ class CephWritefull(DriverBase):
                                      "msg_op",
                                      ("target_t", "target"),
                                      ("target", "target_s")])
-
-        # client unlock ioctx
-        j9 = e16.join_one(e11, False, ["tid",
-                                       ("target_s", "target_t")])
 
 
     def filter_logfile(self, f_dir, f_name, var_dict):

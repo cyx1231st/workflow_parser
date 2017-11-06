@@ -24,12 +24,18 @@ from .automated_suite import general_purpose_analysis
 
 def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
     first_req = None
+    end_req = None
     last_req = None
     for requestins in requestinss.itervalues():
         if first_req is None:
             first_req = requestins
         elif first_req.from_seconds > requestins.from_seconds:
             first_req = requestins
+
+        if end_req is None:
+            end_req = requestins
+        elif end_req.to_seconds < requestins.to_seconds:
+            end_req = requestins
 
         if last_req is None:
             last_req = requestins
@@ -38,26 +44,33 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
 
     start_s = first_req.from_seconds
     start_t = first_req.from_time
-    end_s = last_req.last_seconds
-    end_t = last_req.last_time
-    print("lapse: %.4f, (%.4f -> %.4f), (%s -> %s)" % (
+    end_s = end_req.to_seconds
+    end_t = end_req.to_time
+    last_s = last_req.last_seconds
+    last_t = last_req.last_time
+    print("lapse: %.4f, (%.4f -> %.4f,%.4f), (%s -> %s,%s)" % (
             end_s - start_s,
             start_s,
             end_s,
+            last_s,
             start_t,
-            end_t))
+            end_t,
+            last_t))
 
     if do_reset:
         for tg in targetobjs_by_target.itervalues():
             tg.offset -= start_s
         end_s = end_s - start_s
+        last_s = last_s - start_s
         start_s = 0
-        print("zero: %.4f -> %.4f" % (start_s, end_s))
+        print("zero: %.4f -> %.4f,%.4f" % (start_s, end_s, last_s))
 
     return {"seconds": {"start": start_s,
-                        "end":   end_s},
+                        "end":   end_s,
+                        "last":  last_s},
             "time":    {"start": start_t,
-                        "end":   end_t}}
+                        "end":   end_t,
+                        "last":  last_t}}
 
 
 def _convert_to_dataframe(objs, index, columns):

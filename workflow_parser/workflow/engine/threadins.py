@@ -26,132 +26,186 @@ from ..entities.threadins import ThreadInstance
 from .schema import SchemaEngine
 
 
-class Error(object):
-    def __init__(self, keyword):
-        assert isinstance(keyword, str)
-        self.keyword = keyword
-        self.before_error = defaultdict(list)
+# class Error(object):
+#     def __init__(self, keyword):
+#         assert isinstance(keyword, str)
+#         self.keyword = keyword
+#         self.before_error = defaultdict(list)
 
-    def append(self, line_obj):
-        assert isinstance(line_obj, Line)
-        assert line_obj.keyword == self.keyword
+#     def append(self, line_obj):
+#         assert isinstance(line_obj, Line)
+#         assert line_obj.keyword == self.keyword
 
-        before = line_obj.prv_thread_line
-        if not before:
-            self.before_error["START"].append(line_obj)
-        else:
-            pace = before._line_state
-            # prev line_obj must be parsed if prv exists
-            assert pace
-            assert isinstance(pace, Pace)
-            self.before_error[pace.edgename].append(line_obj)
+#         before = line_obj.prv_thread_line
+#         if not before:
+#             self.before_error["START"].append(line_obj)
+#         else:
+#             pace = before._line_state
+#             # prev line_obj must be parsed if prv exists
+#             assert pace
+#             assert isinstance(pace, Pace)
+#             self.before_error[pace.edgename].append(line_obj)
 
-    def report(self, blanks=0):
-        s_blank = " "*blanks
-        key_list = [(len(self.before_error[k]), k)
-                for k in self.before_error.keys()]
-        key_list.sort()
-        for num, key in key_list:
-            print("%s%s: %s" % (s_blank, key, num))
+#     def report(self, blanks=0):
+#         s_blank = " "*blanks
+#         key_list = [(len(self.before_error[k]), k)
+#                 for k in self.before_error.keys()]
+#         key_list.sort()
+#         for num, key in key_list:
+#             print("%s%s: %s" % (s_blank, key, num))
 
 
 class Errors(object):
     def __init__(self):
-        self.start_errors = {}
-        self.incomplete_errors = {}
-        self.workflow_incomplete = {}
-        self.len_start_errors = 0
-        self.len_incomplete_errors = 0
-        self.len_incomplete_success = 0
+        #edge/node info -> error_keyword
+        #    -> (first line_obj, errors, affected)
+        self.errors = defaultdict(dict)
 
-        self.is_success = False
+        # self.start_errors = {}
+        # self.incomplete_errors = {}
+        # self.workflow_incomplete = {}
+        # self.len_start_errors = 0
+        # self.len_incomplete_errors = 0
+        # self.len_incomplete_success = 0
 
-    def success(self):
-        self.is_success = True
+        # self.is_success = False
 
-    @staticmethod
-    def _append(errors_, line_obj):
-        keyword = line_obj.keyword
-        err = errors_.get(keyword)
-        if not err:
-            err = Error(keyword)
-            errors_[keyword] = err
-        err.append(line_obj)
+    # def success(self):
+    #     self.is_success = True
 
-    def append_incomplete_failed(self, line_obj):
-        assert isinstance(line_obj, Line)
-        if self.is_success:
-            # line_obj must not be the first one
-            assert line_obj.prv_thread_line
-            assert line_obj.prv_thread_line._line_state
-
-            self._append(self.incomplete_errors, line_obj)
-            self.is_success = False
-        self.len_incomplete_errors += 1
-
-    def append_start_failed(self, line_obj):
-        assert isinstance(line_obj, Line)
-        if self.is_success:
-            self._append(self.start_errors, line_obj)
-            self.is_success = False
-        self.len_start_errors += 1
-
-    def append_incomplete_success(self, line_obj):
-        assert isinstance(line_obj, Line)
-        self._append(self.workflow_incomplete, line_obj)
-        self.len_incomplete_success += 1
+    def append_failure(self, last_threadins, error_lineobj, affected=False):
+        assert isinstance(error_lineobj, Line)
+        if last_threadins:
+            assert isinstance(last_threadins, ThreadInstance)
+            last_state = last_threadins.end_activity.state
+            position = "%s`%s`->%s%s follows:"\
+                    % (last_state.from_step.edgename,
+                       last_state.from_step.keyword,
+                       last_state.nodename,
+                       "(end)" if last_state.is_thread_end else "")
+        else:
+            position = "Thread start:"
+        error_key = error_lineobj.keyword
+        entry = self.errors[position].get(error_key)
+        if not entry:
+            assert affected is False
+            entry = [error_lineobj, 0, 0]
+            self.errors[position][error_key] = entry
+        if affected:
+            entry[2] += 1
+        else:
+            entry[1] += 1
+            entry[2] += 1
 
     def report(self):
-        if self.start_errors:
+        if self.errors:
             print("! ERROR !")
-            print("Threadgraph start errors: %d" % self.len_start_errors)
-            keys = sorted(self.start_errors.keys())
-            for key in keys:
-                print("  %s:" % key)
-                self.start_errors[key].report(4)
+            print("Threadins compiling errors:")
+            for k in sorted(self.errors.keys()):
+                print("  %s" % k)
+                value = self.errors[k]
+                for k1 in sorted(value.keys()):
+                    entry = value[k1]
+                    print("    `%s`: %d errors, %d affected, first is %s"
+                            % (k1,
+                               entry[1],
+                               entry[2],
+                               entry[0].name))
             print()
 
-        if self.incomplete_errors:
-            print("! ERROR !")
-            print("Threadgraph incomplete errors: %s" %
-                    self.len_incomplete_errors)
-            keys = sorted(self.incomplete_errors.keys())
-            for key in keys:
-                print("  %s:" % key)
-                self.incomplete_errors[key].report(4)
-            print()
+    # @staticmethod
+    # def _append(errors_, line_obj):
+    #     keyword = line_obj.keyword
+    #     err = errors_.get(keyword)
+    #     if not err:
+    #         err = Error(keyword)
+    #         errors_[keyword] = err
+    #     err.append(line_obj)
 
-        if self.workflow_incomplete:
-            print("! WARN !")
-            print("Thread workflow incomplete: %s" %
-                    self.len_incomplete_success)
-            keys = sorted(self.workflow_incomplete.keys())
-            for key in keys:
-                print("  %s:" % key)
-                self.workflow_incomplete[key].report(4)
-            print()
+    # def append_incomplete_failed(self, line_obj):
+    #     assert isinstance(line_obj, Line)
+    #     if self.is_success:
+    #         # line_obj must not be the first one
+    #         assert line_obj.prv_thread_line
+    #         assert line_obj.prv_thread_line._line_state
 
-    @staticmethod
-    def _debug(errors_, key_err, key_prv):
-        found_err = []
-        for key in errors_.keys():
-            if key_err in key:
-                found_err.append(errors_[key])
+    #         self._append(self.incomplete_errors, line_obj)
+    #         self.is_success = False
+    #     self.len_incomplete_errors += 1
 
-        ret = []
-        for err in found_err:
-            for key in err.before_error.keys():
-                if key_prv in key:
-                    ret.append(err.before_error[key][0])
-        return ret
+    # def append_start_failed(self, line_obj):
+    #     assert isinstance(line_obj, Line)
+    #     if self.is_success:
+    #         self._append(self.start_errors, line_obj)
+    #         self.is_success = False
+    #     self.len_start_errors += 1
+
+    # def append_incomplete_success(self, line_obj):
+    #     assert isinstance(line_obj, Line)
+    #     self._append(self.workflow_incomplete, line_obj)
+    #     self.len_incomplete_success += 1
+
+    # def report(self):
+    #     def _report(errors_, len_errors, title, level="ERROR"):
+    #         if errors_:
+    #             print("! %s !" % level)
+    #             print("%s: %d(all included)" % (title, len_errors))
+    #             keys = sorted(errors_.keys())
+    #             for key in keys:
+    #                 print("  %s:" % key)
+    #                 self.errors_[key].report(4)
+    #             print()
+    #     _report(self.start_errors, self.len_start_errors, "Thread start cannot match")
+    #     if self.start_errors:
+    #         print("! ERROR !")
+    #         print("Threadgraph start errors: %d" % self.len_start_errors)
+    #         keys = sorted(self.start_errors.keys())
+    #         for key in keys:
+    #             print("  %s:" % key)
+    #             self.start_errors[key].report(4)
+    #         print()
+
+    #     if self.incomplete_errors:
+    #         print("! ERROR !")
+    #         print("Threadgraph incomplete errors: %s" %
+    #                 self.len_incomplete_errors)
+    #         keys = sorted(self.incomplete_errors.keys())
+    #         for key in keys:
+    #             print("  %s:" % key)
+    #             self.incomplete_errors[key].report(4)
+    #         print()
+
+    #     if self.workflow_incomplete:
+    #         print("! WARN !")
+    #         print("Thread workflow incomplete: %s" %
+    #                 self.len_incomplete_success)
+    #         keys = sorted(self.workflow_incomplete.keys())
+    #         for key in keys:
+    #             print("  %s:" % key)
+    #             self.workflow_incomplete[key].report(4)
+    #         print()
+
+    # @staticmethod
+    # def _debug(errors_, key_err, key_prv):
+    #     found_err = []
+    #     for key in errors_.keys():
+    #         if key_err in key:
+    #             found_err.append(errors_[key])
+
+    #     ret = []
+    #     for err in found_err:
+    #         for key in err.before_error.keys():
+    #             if key_prv in key:
+    #                 ret.append(err.before_error[key][0])
+    #     return ret
 
 
-    def debug(self, key_err, key_prv):
-        lines = self._debug(self.incomplete_errors, key_err, key_prv)
-        if lines:
-            print("Incomplete errors: %d" % len(lines))
-            for line in lines:
-                line.debug()
+    # def debug(self, key_err, key_prv):
+    #     lines = self._debug(self.incomplete_errors, key_err, key_prv)
+    #     if lines:
+    #         print("Incomplete errors: %d" % len(lines))
+    #         for line in lines:
+    #             line.debug()
 
 
 errors = Errors()
@@ -173,6 +227,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
             assert isinstance(thread_obj, Thread)
             threadins = None
             thread_valid_lineobjs = 0
+            last_error = None
 
             for line_obj in thread_obj.iter_lineobjs():
                 assert isinstance(line_obj, Line)
@@ -182,30 +237,48 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
                     pace = threadins.do_step(line_obj)
                     if pace is not None:
                         # success: threadins proceed
-                        errors.success()
+                        last_error = None
+                        # errors.success()
                     else:
                         nxt_threadins, pace = ThreadInstance.new(
                                 mastergraph, line_obj, thread_obj)
                         if not threadins.is_complete:
                             if nxt_threadins is None:
                                 # failed: renew failed, threadins incomplete
-                                errors.append_incomplete_failed(line_obj)
+                                # errors.append_incomplete_failed(line_obj)
+                                if last_error:
+                                    errors.append_failure(
+                                            last_error[0], last_error[1], True)
+                                else:
+                                    errors.append_failure(threadins, line_obj)
+                                    last_error = (threadins, line_obj)
                                 if not cnf_threadparse_proceed_at_failure:
                                     threadins = None
                             else:
                                 # ~success: threadins renewed, but incomplete
-                                errors.append_incomplete_success(line_obj)
+                                # errors.append_incomplete_success(line_obj)
+                                errors.append_failure(threadins, line_obj)
+                                last_error = None
                                 threadins.set_finish()
                                 threadins = nxt_threadins
                         else:
                             if nxt_threadins is None:
                                 # failed: renew failed, threadins complete
-                                errors.append_start_failed(line_obj)
+                                # errors.append_start_failed(line_obj)
+                                if last_error:
+                                    errors.append_failure(
+                                            last_error[0],
+                                            last_error[1],
+                                            True)
+                                else:
+                                    errors.append_failure(threadins, line_obj)
+                                    last_error = (threadins, line_obj)
                                 if not cnf_threadparse_proceed_at_failure:
                                     threadins = None
                             else:
                                 # success: threadins renewed
-                                errors.success()
+                                # errors.success()
+                                last_error = None
                                 threadins.set_finish()
                                 threadins = nxt_threadins
                 else:
@@ -213,10 +286,20 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
                             mastergraph, line_obj, thread_obj)
                     if threadins is None:
                         # failed: new failed
-                        errors.append_start_failed(line_obj)
+                        # errors.append_start_failed(line_obj)
+                        if last_error:
+                            errors.append_failure(
+                                    last_error[0],
+                                    last_error[1],
+                                    True)
+                        else:
+                            errors.append_failure(
+                                    None, line_obj)
+                            last_error = (None, line_obj)
                     else:
                         # success: new success
-                        errors.success()
+                        # errors.success()
+                        last_error = None
 
                 if pace is None:
                     thread_obj.dangling_lineobjs.append(line_obj)

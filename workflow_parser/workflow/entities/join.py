@@ -39,7 +39,9 @@ class JoinActivityBase(ActivityBase):
 
         if not self.is_remote:
             assert self.from_targetobj is self.to_targetobj
-        assert self.from_threadobj is not self.to_threadobj
+
+        # it can be in the same thread
+        # assert self.from_threadobj is not self.to_threadobj
 
     @property
     def jo_name(self):

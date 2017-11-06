@@ -376,9 +376,11 @@ class DrawEngine(object):
 
         if start_end is None:
             start_end = {"seconds": {"start": requestins.from_seconds,
-                                     "end": requestins.last_seconds},
+                                     "end": requestins.to_seconds,
+                                     "last": requestins.last_seconds},
                          "time":    {"start": requestins.from_time,
-                                     "end": requestins.last_time}}
+                                     "end": requestins.to_time,
+                                     "last": requestins.last_time}}
 
         self.draw_intervalvisual(requestins.threadinss,
                                  requestins.iter_joins(),
@@ -390,9 +392,9 @@ class DrawEngine(object):
                             plot_main=False, title=None):
         # prepare requests
         start = start_end["seconds"]["start"]
-        last = start_end["seconds"]["end"]
+        last = start_end["seconds"]["last"]
         start_t = start_end["time"]["start"]
-        last_t = start_end["time"]["end"]
+        last_t = start_end["time"]["last"]
         all_lapse = last - start
 
         threadinss = list(threadinss)
@@ -605,9 +607,9 @@ class DrawEngine(object):
         assert isinstance(workflow, Workflow)
 
         start_s = start_end["seconds"]["start"]
-        end_s = start_end["seconds"]["end"]
+        last_s = start_end["seconds"]["last"]
         start_t = start_end["time"]["start"]
-        end_t = start_end["time"]["end"]
+        last_t = start_end["time"]["last"]
 
         # 1. get main stacked axis list
         main_stacked_results = []
@@ -639,13 +641,13 @@ class DrawEngine(object):
                 figsize=(30, 6)) as fig:
             ax = fig.add_subplot(1 ,1, 1)
             ax.set_xlabel("lapse (seconds)")
-            ax.set_xlim(0, end_s*1.05)
+            ax.set_xlim(0, last_s*1.05)
             ax.set_ylim(0, y_max)
             ax.set_ylabel("MAIN")
 
             ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
-            ax.annotate(end_t, xy=(end_s, 0), xytext=(end_s, 0))
-            ax.plot([0, end_s], [0, 0], 'r*')
+            ax.annotate(last_t, xy=(last_s, 0), xytext=(last_s, 0))
+            ax.plot([0, last_s], [0, 0], 'r*')
 
             ax.stackplot(main_x_list, *main_ys_list, colors=colors,
                          edgecolor="black", linewidth=.1)
@@ -653,9 +655,9 @@ class DrawEngine(object):
 
     def draw_profiling(self, start_end, reqinss, name):
         start_s = start_end["seconds"]["start"]
-        end_s = start_end["seconds"]["end"]
+        last_s = start_end["seconds"]["last"]
         start_t = start_end["time"]["start"]
-        end_t = start_end["time"]["end"]
+        last_t = start_end["time"]["last"]
         y_max = len(reqinss)
 
         # 1. collect entity interval lists
@@ -694,7 +696,7 @@ class DrawEngine(object):
                 from_secs = sorted(int_.from_seconds
                         for int_ in intlist)
                 paddings.extend(zip(prv_seconds, from_secs))
-                paddings.extend((prv_seconds[i], end_s)
+                paddings.extend((prv_seconds[i], last_s)
                         for i in range(len(intlist), len(prv_seconds)))
                 padded_intlists.append((
                         "blank",
@@ -735,12 +737,12 @@ class DrawEngine(object):
                 ax.set_ylabel(p_name)
                 ax.stackplot(main_x_list, *main_ys_list, colors=colors,
                              edgecolor="black", linewidth=.1)
-                ax.set_xlim(0, end_s*1.05)
+                ax.set_xlim(0, last_s*1.05)
                 ax.set_ylim(0, y_max)
 
             ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
-            ax.annotate(end_t, xy=(end_s, 0), xytext=(end_s, 0))
-            ax.plot([0, end_s], [0, 0], 'r*')
+            ax.annotate(last_t, xy=(last_s, 0), xytext=(last_s, 0))
+            ax.plot([0, last_s], [0, 0], 'r*')
             ax.set_xlabel("lapse (seconds)")
 
     #### others ####

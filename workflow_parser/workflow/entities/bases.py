@@ -502,22 +502,22 @@ class Pace(LineStateBase, object):
         return mark_str
 
     def __repr__(self):
-        return "<P %.3f %s [%s %s] %s, `%s`, %d vars%s>" % (
+        return "<P %.3f %s [%s %s] %s, `%s`, %s%s>" % (
                 self.seconds,
                 self.path_step,
                 self.target,
                 self.thread,
                 self.request,
                 self.keyword,
-                len(self.line_keys),
+                self.line_context,
                 self.__repr_marks__())
 
     def __repr_thread__(self):
-        return "%.3f %s, `%s`, %d vars%s" % (
+        return "%.3f %s, `%s`, %s%s" % (
                 self.seconds,
                 self.path_step,
                 self.keyword,
-                len(self.line_keys),
+                self.line_context,
                 self.__repr_marks__())
 
     def append_nxt(self, activity, template=None):
