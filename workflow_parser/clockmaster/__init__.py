@@ -40,7 +40,7 @@ def adjust_clock(requestinss):
     violated_joinints = set()
     causal_engine = CausalEngine()
     for relation in remote_relations:
-        assert isinstance(relation, JoinIntervalBase)
+        assert isinstance(relation, JoinActivityBase)
         causal_engine.register(relation.from_host,
                                relation.to_host,
                                relation.from_seconds,

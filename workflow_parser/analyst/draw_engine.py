@@ -298,7 +298,7 @@ class DrawEngine(object):
             s = "width"
             sh = True
 
-        kwargs = dict(split="True",
+        kwargs = dict(split=False,
                       inner="box",
                       scale=s,
                       scale_hue=sh,

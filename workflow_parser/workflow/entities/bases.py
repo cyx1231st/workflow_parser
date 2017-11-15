@@ -104,6 +104,10 @@ class IntervalBase(object):
             return self._to_pace.keyword
         raise RuntimeError("Interval %s has no to_pace" % self.int_name)
 
+    @property
+    def is_violated(self):
+        return self.from_seconds > self.to_seconds
+
     ### abstracts
     @abstractproperty
     def int_name(self):

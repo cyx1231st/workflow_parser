@@ -261,10 +261,13 @@ def readsources(datasources, sr, report):
     total_lines = sum(datasource.total_lines for datasource in datasources)
     total_lineobjs = sum(datasource.total_lineobjs
             for datasource in datasources)
-    print("%.2f%% valid: %d lines -> %d lineobjs"
-            % (float(total_lineobjs)/total_lines*100,
-               total_lines,
-               total_lineobjs))
+    if not total_lines:
+        print("0 valid lines")
+    else:
+        print("%.2f%% valid: %d lines -> %d lineobjs"
+                % (float(total_lineobjs)/total_lines*100,
+                   total_lines,
+                   total_lineobjs))
 
     for comp in sr.sr_components:
         targets = targets_bycomponent.get(comp, [])

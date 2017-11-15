@@ -213,5 +213,5 @@ class CephWritefull(DriverBase):
 
 
 if __name__ == "__main__":
-    driver = CephWritefull(sr)
+    driver = CephWritefull(sr, extensions=["ctraces"])
     driver.cmdrun()

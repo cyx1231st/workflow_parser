@@ -25,7 +25,8 @@ from .service_registry import ServiceRegistry
 class DriverBase(DriverPlugin):
     __metaclass__ = ABCMeta
 
-    def __init__(self, services, name=None):
+    def __init__(self, services, name=None,
+            **kwgs):
         assert isinstance(services, ServiceRegistry)
 
         if name is None:
@@ -37,7 +38,7 @@ class DriverBase(DriverPlugin):
         self.graph = Master(self.name)
 
         self.build_graph(self.graph)
-        super(DriverBase, self).__init__()
+        super(DriverBase, self).__init__(**kwgs)
 
     def cmdrun(self):
         main1(self)
