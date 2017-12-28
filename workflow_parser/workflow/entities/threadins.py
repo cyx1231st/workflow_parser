@@ -269,7 +269,7 @@ class ThreadInstance(ThreadinsBase):
                     ",".join("%s=%s" % (k,v) for k,v in self.thread_vars.iteritems())
         if self.thread_vars_dup:
             ret_str += "\n DUP: "+\
-                    ",".join("%s(%s)" % (k," ".join(v))
+                    ",".join("%s(%s)" % (k,",".join(str(i_) for i_ in v))
                             for k,v in self.thread_vars_dup.iteritems())
 
         activity = self.start_activity

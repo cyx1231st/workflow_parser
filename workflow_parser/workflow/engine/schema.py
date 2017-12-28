@@ -50,7 +50,10 @@ class JoinInfo(object):
         self.len_crossr = 0
 
     def add_join(self, join):
-        if isinstance(join, InnerjoinActivity):
+        if join.from_threadins is join.to_threadins:
+            # case thread joins itself, it is not a join
+            pass
+        elif isinstance(join, InnerjoinActivity):
             if isinstance(join, RequestjoinActivity):
                 self.requestjoins_bytis[join.from_threadins].append(join)
                 self.requestjoined_bytis[join.to_threadins].append(join)
@@ -202,6 +205,9 @@ class SchemaEngine(object):
                         item=join,
                         join_objs=jo.joined_objs)
             elif isinstance(jo, InnerJoin):
+                if from_ is to_:
+                    # case thread_instance joins itself
+                    continue
                 join = InnerjoinActivity(jo, from_, to_)
             else:
                 raise StateError("SchemaEngine, invalid jo type: %s" %

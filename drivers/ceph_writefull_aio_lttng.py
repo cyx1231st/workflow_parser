@@ -29,7 +29,6 @@ client.color = "#54c0e8"
 
 class CephWritefull(DriverBase):
     def build_graph(self, graph):
-# TODO build_thread by function
 #### functions ####
         # function message send osd
         e1 , n1 , f_sendosd = graph.build_func(
@@ -40,6 +39,33 @@ class CephWritefull(DriverBase):
         e5 , n1 , f_sendcli = graph.build_func(
                                1, "posd_sendcli_entry", "sdcli")
         e  , _   =  n1.build_endf("posd_sendcli_exit")
+
+        # function main commit
+        e30, n1 , f_mcommit = graph.build_func(
+                               1, "rosd_opcommit_entry", "mcommit")
+        e6 , _   =  n1.build_endf("rosd_opcommit_exit")
+        _  , n2  =  n1.build(  2, f_sendcli)
+        _  , _   =  n2.build_endf(e6)
+
+        # function main apply
+        e35, n1 , f_mapply = graph.build_func(
+                               1, "rosd_opapply_entry", "mapply")
+        e7 , _   =  n1.build_endf("rosd_opapply_exit")
+        _  , n2  =  n1.build(  2, f_sendcli)
+        _  , _   =  n2.build_endf(e7)
+
+        # function replica commit
+        e40, n1 , f_rcommit = graph.build_func(
+                               1, "rosd_repopcommit_entry", "rcommit")
+        _  , n2  =  n1.build(  2, f_sendosd)
+        e  , _   =  n2.build_endf("rosd_repopcommit_exit")
+
+        # function replica apply
+        e45, n1 , f_rapply = graph.build_func(
+                               1, "rosd_repopapply_entry", "rapply")
+        e8 , _   =  n1.build_endf("rosd_repopapply_exit")
+        _  , n2  =  n1.build(  2, f_sendosd)
+        _  , _   =  n2.build_endf(e8)
 
 #### request write_full ####
         # thread client issue writefull
@@ -74,13 +100,17 @@ class CephWritefull(DriverBase):
         _  , _   = n22.build(n22, f_sendosd)
         e  , n23 = n22.build( 23, "rosd_issueop_exit")
         e26, n24 = n23.build( 24, "rosd_qtrans_entry")
-        e  , n25 = n24.build( 25, "rosd_qtrans_exit")
+        e50, n25 = n24.build( 25, "rosd_qtrans_exit")
+        _  , n60 = n24.build( 60, f_mapply)
+        _  , _   = n60.build(n25, e50)
         e  , n26 = n25.build( 26, "posd_doop_exit")
         e27, n27 = n26.build( 27, "osd_dequeueop_exit")
         # replica osd do_repop
         e  , n30 = n20.build( 30, "rosd_dorepop_entry")
         e28, n31 = n30.build( 31, "rosd_qtrans_entry")
-        e  , n32 = n31.build( 32, "rosd_qtrans_exit")
+        e51, n32 = n31.build( 32, "rosd_qtrans_exit")
+        _  , n61 = n31.build( 61, f_rapply)
+        _  , _   = n61.build(n32, e51)
         e  , n33 = n32.build( 33, "rosd_dorepop_exit")
         _  , _   = n33.build(n27, e27)
         # main osd do_repop_reply
@@ -91,31 +121,20 @@ class CephWritefull(DriverBase):
         _  , _   = n36.build(n27, e27)
 
         # thread main osd commit
-        e30, n40 = graph.build_thread(osd,
-                              40, "rosd_opcommit_entry")
-        e31, n41 = n40.build( 41, "rosd_opcommit_exit")
-        _  , n42 = n40.build( 42, f_sendcli)
-        _  , _   = n42.build(n41, e31)
+        _  , n40 = graph.build_thread(osd,
+                              40, f_mcommit)
 
         # thread main osd apply
-        e35, n45 = graph.build_thread(osd,
-                              45, "rosd_opapply_entry")
-        e36, n46 = n45.build( 46, "rosd_opapply_exit")
-        _  , n47 = n45.build( 47, f_sendcli)
-        _  , _   = n47.build(n46, e36)
+        _  , n45 = graph.build_thread(osd,
+                              45, f_mapply)
 
         # thread replica osd on commit
-        e40, n50 = graph.build_thread(osd,
-                              50, "rosd_repopcommit_entry")
-        _  , n51 = n50.build( 51, f_sendosd)
-        e  , n52 = n51.build( 52, "rosd_repopcommit_exit")
+        _  , n50 = graph.build_thread(osd,
+                              50, f_rcommit)
 
         # thread replica osd on applied
-        e45, n55 = graph.build_thread(osd,
-                              55, "rosd_repopapply_entry")
-        e46, n56 = n55.build( 56, "rosd_repopapply_exit")
-        _  , n57 = n55.build( 57, f_sendosd)
-        _  , _   = n57.build(n56, e46)
+        _  , n55 = graph.build_thread(osd,
+                              55, f_rapply)
 
         # client send osd
         j1 = e10.join_one(e20, True, ["tid",
@@ -202,12 +221,14 @@ class CephWritefull(DriverBase):
                 raise RuntimeError("Cannot evaluate %s" % dict_str)
             return ret
 
-        lines = line.split("}, ", 1)
+        lines = line.split(" }, { ")
         # dict_ = _convert(lines[0].strip()[1:])
         # var_dict[rv.THREAD] = str(dict_["cpu_id"])
-        dict1_ = _convert(lines[1].strip()[1:-1])
+        dict1_ = _convert(lines[1])
         var_dict.update(dict1_)
-        var_dict[rv.THREAD] = str(var_dict["thread_"])
+        dict2_ = _convert(lines[2].strip()[:-1])
+        var_dict.update(dict2_)
+        var_dict[rv.THREAD] = str(var_dict["pthread_id"])
 
         return True
 

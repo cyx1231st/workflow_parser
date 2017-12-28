@@ -57,17 +57,17 @@ def _node_build(from_node, tonode_or_id, payload_or_edge):
                         "NodeBuild failed, node doesn't match: edge %s's node %s"
                         "!= input node %s!" % (
                             edge.name, edge.node.index, to_node.index))
-        else:
-            if not isinstance(tonode_or_id, int):
-                raise RuntimeError(
-                        "NodeBuild failed, wrong to_id type: %s!" %
-                        tonode_or_id.__class__)
+        elif isinstance(tonode_or_id, int):
             to_node = edge.node
             if to_node.index != tonode_or_id:
                 raise RuntimeError(
                         "NodeBuild failed: node doesn't match: edge %s's node_id %s"
                         "!= input node_id %s!" % (
                             edge.name, edge.node.index, tonode_or_id))
+        else:
+            raise RuntimeError(
+                    "NodeBuild failed, wrong to_id type: %s!" %
+                    tonode_or_id.__class__)
     else:
         payload = payload_or_edge
         if isinstance(tonode_or_id, NodeBase):
@@ -75,13 +75,13 @@ def _node_build(from_node, tonode_or_id, payload_or_edge):
             othergraph = to_node.graph
             _validate_othergraph()
             edge = othergraph.create_edge_withnode(to_node, payload)
-        else:
-            if not isinstance(tonode_or_id, int):
-                raise RuntimeError(
-                        "NodeBuild failed, wrong to_id type: %s!" %
-                        tonode_or_id.__class__)
+        elif isinstance(tonode_or_id, int):
             edge, to_node = graph.create_edge_withnid(tonode_or_id, payload)
             ret_tonode = to_node
+        else:
+            raise RuntimeError(
+                    "NodeBuild failed, wrong to_id type: %s!" %
+                    tonode_or_id.__class__)
         ret_edge = edge
 
     if othergraph and graph is not othergraph:
@@ -472,8 +472,15 @@ class FnNode(NodeBase):
         super(FnNode,self).__init__(name, index, graph)
 
     def build_endf(self, payload_or_edge):
-        assert self.graph.end_node
-        self.graph.end_nodes.discard(self)
+        if isinstance(payload_or_edge, EdgeBase):
+            edge = payload_or_edge
+            if edge.node is not self.graph.end_node:
+                raise RuntimeError(
+                        "Edge %s to_node is not end_node"
+                        % edge)
+        else:
+            assert self.graph.end_node
+            self.graph.end_nodes.discard(self)
         return self.build(self.graph.end_node, payload_or_edge)
 
 
