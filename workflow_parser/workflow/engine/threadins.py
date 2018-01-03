@@ -221,7 +221,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
     thread_objs = []
 
     print("Build thread instances...")
-    for target_obj in target_objs.itervalues():
+    for target_obj in target_objs:
         assert isinstance(target_obj, Target)
         for thread_obj in target_obj.thread_objs.itervalues():
             assert isinstance(thread_obj, Thread)

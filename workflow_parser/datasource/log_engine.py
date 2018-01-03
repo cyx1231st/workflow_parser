@@ -147,8 +147,6 @@ class FileDatasource(object):
     #         yield line
 
     def yield_lineobjs(self, targets_byname):
-        targets_byhint = {}
-
         with open(self.f_dir, 'r') as reader:
             for line in reader:
                 self.total_lines += 1
@@ -173,15 +171,8 @@ class FileDatasource(object):
                         self.requests.add(request)
 
                     lineobj = self.source.append_line(
-                            lino, line, vs, targets_byname, targets_byhint)
+                            lino, line, vs, targets_byname)
                     yield lineobj
-
-        # check
-        for target in targets_byhint.itervalues():
-            if target.target is None:
-                raise LogError("Invalid target: %s" % target)
-            assert target.target in targets_byname
-            assert target is targets_byname[target.target]
 
     @classmethod
     def create_byfolder(cls, log_folder, sr, plugin):

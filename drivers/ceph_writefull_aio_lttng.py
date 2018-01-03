@@ -70,12 +70,12 @@ class CephWritefull(DriverBase):
 #### request write_full ####
         # thread client issue writefull
         e  , n1  = graph.build_thread(client,
-                               1, "ioctx_aiowritefull_entry", "aiowritefull")
+                               1, "ioctx_radoswrite_entry", "radoswrite")
         e  , n2  =  n1.build(  2, "objecter_calculate_entry")
         e  , n3  =  n2.build(  3, "objecter_calculate_exit")
         e10, n4  =  n3.build(  4, "objecter_sendop_entry")
         e  , n5  =  n4.build(  5, "objecter_sendop_exit")
-        e  , n6  =  n5.build(  6, "ioctx_aiowritefull_exit")
+        e  , n6  =  n5.build(  6, "ioctx_radoswrite_exit")
 
         # thread client receive message
         e15, n10 = graph.build_thread(client,
@@ -103,7 +103,7 @@ class CephWritefull(DriverBase):
         e50, n25 = n24.build( 25, "rosd_qtrans_exit")
         _  , n60 = n24.build( 60, f_mapply)
         _  , _   = n60.build(n25, e50)
-        e  , n26 = n25.build( 26, "posd_doop_exit")
+        e52, n26 = n25.build( 26, "posd_doop_exit")
         e27, n27 = n26.build( 27, "osd_dequeueop_exit")
         # replica osd do_repop
         e  , n30 = n20.build( 30, "rosd_dorepop_entry")
@@ -119,6 +119,8 @@ class CephWritefull(DriverBase):
         _  , n37 = n35.build( 37, f_sendcli)
         _  , _   = n37.build(n36, e29)
         _  , _   = n36.build(n27, e27)
+        # direct exit
+        _  , _   = n21.build(n26, e52)
 
         # thread main osd commit
         _  , n40 = graph.build_thread(osd,
@@ -139,10 +141,10 @@ class CephWritefull(DriverBase):
         # client send osd
         j1 = e10.join_one(e20, True, ["tid",
                                       "msg_op",
-                                      ("target_t", "target"),
-                                      ("target", "target_s")])
+                                      ("target_t", "target_a"),
+                                      ("target_a", "target_s")])
         # osd enqueue op
-        j2 = e21.join_one(e25, False, ["op_seq",
+        j2 = e21.join_any(e25, False, ["op_seq",
                                        "msg_op",
                                        "tid",
                                        "pgid"])
@@ -150,8 +152,8 @@ class CephWritefull(DriverBase):
         # main osd send sub_op to replica osd
         j3 = e1.join_one(e20, True, ["tid",
                                      "msg_op",
-                                     ("target_t", "target"),
-                                     ("target", "target_s")])
+                                     ("target_t", "target_a"),
+                                     ("target_a", "target_s")])
 
         # main osd queue transactions
         j4 = e26.join_all(e30, False, ["tid",
@@ -167,8 +169,8 @@ class CephWritefull(DriverBase):
         # main osd send reply
         j8 = e5.join_one(e15, True, ["tid",
                                      "msg_op",
-                                     ("target_t", "target"),
-                                     ("target", "target_s")])
+                                     ("target_t", "target_a"),
+                                     ("target_a", "target_s")])
 
 
     def filter_logfile(self, f_dir, f_name, var_dict):
@@ -179,9 +181,10 @@ class CephWritefull(DriverBase):
             return True
 
     def filter_logline(self, line, var_dict):
-        if " writefull:" not in line:
+        if " radoswrite:" not in line:
             return False
 
+        # time, seconds
         lines = line.split(" ", 1)
         line = lines[1]
         time = lines[0][1:-1]
@@ -190,6 +193,7 @@ class CephWritefull(DriverBase):
         seconds = int(_time_s[0]) * 3600 + int(_time_s[1]) * 60 + float(_time_s[2])
         var_dict[rv.SECONDS] = seconds
 
+        # component, target
         lines = line.split(" ", 2)
         line = lines[2]
         _comp = lines[1].split(":")
@@ -198,12 +202,15 @@ class CephWritefull(DriverBase):
             comp = osd
         elif comp == "python":
             comp = client
+        elif comp == "fio":
+            comp = client
         else:
             raise RuntimeError("Unknown component: %s" % comp)
         var_dict[rv.COMPONENT] = comp
-        target_hint = _comp[1] + ":" + _comp[2]
-        var_dict[rv.TARGET_HINT] = target_hint
+        target_alias = _comp[1] + ":" + _comp[2]
+        var_dict[rv.TARGET] = target_alias
 
+        # keyword
         lines = line.split(" ", 1)
         line = lines[1]
         var_dict[rv.KEYWORD] = lines[0].split(":", 1)[1][:-1]
@@ -216,11 +223,17 @@ class CephWritefull(DriverBase):
                     items = dict_str.split(",")
                     for item in items:
                         k, v = item.strip().split("=", 1)
-                        ret[k.strip()] = eval(v.strip())
+                        k = k.strip()
+                        # NOTE: target is reinterpreted to target_a because one fio
+                        # client can have multiple targets
+                        if k == "target":
+                            k = "target_a"
+                        ret[k] = eval(v.strip())
             except Exception:
                 raise RuntimeError("Cannot evaluate %s" % dict_str)
             return ret
 
+        # thread
         lines = line.split(" }, { ")
         # dict_ = _convert(lines[0].strip()[1:])
         # var_dict[rv.THREAD] = str(dict_["cpu_id"])

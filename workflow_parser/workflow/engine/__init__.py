@@ -21,13 +21,14 @@ from .request import group_threads
 __all__ = ["proceed"]
 
 
-def proceed(target_objs, mastergraph, report):
+def proceed(target_byname, mastergraph, report):
+    target_objs = set(t for t in target_byname.itervalues())
     schema_engine = SchemaEngine(mastergraph)
     threadinss = build_thread_instances(target_objs,
                                         mastergraph,
                                         schema_engine,
                                         report)
-    joininfo = schema_engine.proceed(report)
+    joininfo = schema_engine.proceed(report, target_byname)
     threadgroup_by_request = group_threads(threadinss, joininfo, report)
     requestinss = build_requests(threadgroup_by_request, joininfo, report)
     return requestinss

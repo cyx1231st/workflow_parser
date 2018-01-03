@@ -331,7 +331,9 @@ class Thread(object):
 
 class Target(object):
     def __init__(self):
-        self.target = None
+        # NOTE: target may be not logical target name, but target_names is.
+        self._target_alias = None
+        self.target_names = set()
         self.component = None
         self.host = None
 
@@ -350,7 +352,12 @@ class Target(object):
         assert isinstance(val, numbers.Real)
         self._offset = val
 
+    @property
+    def target(self):
+        return self._target_alias
+
     def __repr__(self):
+        str_target = self.target
         return "<%s#%s: comp=%s, host=%s, off=%d, %d threads>" % (
                self.__class__.__name__,
                self.target,
@@ -359,19 +366,27 @@ class Target(object):
                self._offset,
                len(self.thread_objs))
 
-    def _append_line(self, thread,
-                    target=None, component=None, host=None,
+    def _append_line(self, thread, target_alias, target,
+                     component=None, host=None,
                     **kwds):
         if not isinstance(thread, str):
             raise LogError("thread %s is not string!" % thread)
-        if target is not None:
-            if not isinstance(target, str):
-                raise LogError("target %s is not string!" % target)
-            elif self.target is None:
-                self.target = target
-            elif self.target != target:
-                raise LogError("cannot overwrite target: %s -> %s!" %(
-                    self.target, target))
+
+        if not isinstance(target_alias, str):
+            raise LogError("target_alias %s is not string!" % target_alias)
+        if self._target_alias is None:
+            self._target_alias = target_alias
+        elif self._target_alias != target_alias:
+            raise LogError("cannot overwrite target_alias: %s -> %s!" %(
+                self._target_alias, target_alias))
+
+        if target is None:
+            pass
+        elif isinstance(target, str):
+            self.target_names.add(target)
+        else:
+            raise LogError("target %s is not string!" % target)
+
         if host is not None:
             if not isinstance(host, str):
                 raise LogError("host %s is not string!" % host)
@@ -423,6 +438,9 @@ class Source(object):
         self.last_lineobj = None
         self.len_lineobjs = 0
 
+        self.targets_byalias = {}
+        self.if_alias_required = None
+
         self.vars_ = vs
 
     def __repr__(self):
@@ -463,14 +481,14 @@ class Source(object):
 
         return ret
 
-    def append_line(self, lino, line, vs, targets_byname, targets_byhint):
+    def append_line(self, lino, line, vs, targets_byname):
         assert isinstance(lino, int)
         assert isinstance(line, str)
         assert isinstance(vs, dict)
         assert isinstance(targets_byname, dict)
-        assert isinstance(targets_byhint, dict)
 
         #1. no conflcit of line vars and source vars
+        # e.g. host/target defined in filename
         dup_keys = vs.viewkeys() & self.vars_.viewkeys()
         for k in dup_keys:
             if vs[k] != self.vars_[k]:
@@ -484,13 +502,11 @@ class Source(object):
         #2. split reserved vars
         resv = {}
         vars_ = {}
-        target_hint = None
         for k,v in vs.iteritems():
             if k in rv.ALL_VARS:
                 resv[k] = v
-            elif k == rv.TARGET_HINT:
-                target_hint = v
-                assert isinstance(target_hint, str)
+            elif k == rv.TARGET_ALIAS:
+                resv[k] = v
             else:
                 vars_[k] = v
 
@@ -501,49 +517,68 @@ class Source(object):
                     "Error in %s@%d %s: cannot identify vars %s!" % (
                         self.name, lino, line, required))
 
-        #4. get/create target_obj
-        target = resv.get(rv.TARGET)
-        if not target_hint and not target:
-            raise LogError(
-                    "Error in %s@%d %s: nor %s or %s is available!" % (
-                        self.name, lino, line,
-                        rv.TARGET_HINT, rv.TARGET))
-        elif target_hint and target:
-            target_obj = targets_byhint.get(target_hint)
-            if target_obj is None:
-                assert targets_byname.get(target) is None
-                target_obj = Target()
-                targets_byhint[target_hint] = target_obj
-                targets_byname[target] = target_obj
-            else:
-                target_obj_ = targets_byname.get(target)
-                if target_obj_:
-                    assert target_obj_ is target_obj
-                else:
-                    targets_byname[target] = target_obj
-        elif target_hint:
-            target_obj = targets_byhint.get(target_hint)
-            if target_obj is None:
-                target_obj = Target()
-                targets_byhint[target_hint] = target_obj
-        else:
-            target_obj = targets_byname.get(target)
-            if target_obj is None:
-                target_obj = Target()
-                targets_byname[target] = target_obj
+        #4 process target_alias required
+        target_alias = None
+        target = None
+        if rv.TARGET_ALIAS in resv:
+            target_alias = resv.pop(rv.TARGET_ALIAS)
+        if rv.TARGET in resv:
+            target = resv.pop(rv.TARGET)
 
-        #5. create line_obj
+        if self.if_alias_required is None:
+            if target_alias is None:
+                self.if_alias_required = False
+            else:
+                self.if_alias_required = True
+        if self.if_alias_required:
+            if not isinstance(target_alias, str):
+                raise LogError(
+                    "Error in %s@%d %s: %s required, but got %s!" % (
+                        self.name, lino, line,
+                        rv.TARGET_ALIAS, target_alias))
+        else:
+            if target_alias:
+                raise LogError(
+                    "Error in %s@%d %s: %s not needed, but got %s!" % (
+                        self.name, lino, line,
+                        rv.TARGET_ALIAS, target_alias))
+            if not isinstance(target, str):
+                raise LogError(
+                    "Error in %s@%d %s: %s required, but got %s!" % (
+                        self.name, lino, line,
+                        rv.TARGET, target))
+            target_alias = target
+
+        #5 get/create target_obj
+        target_obj = self.targets_byalias.get(target_alias)
+        if target_obj is None:
+            target_obj = Target()
+            self.targets_byalias[target_alias] = target_obj
+        if target:
+            target_obj_ = targets_byname.get(target)
+            if target_obj_ is None:
+                targets_byname[target] = target_obj
+            elif target_obj is not target_obj_:
+                raise LogError(
+                        "Error in %s@%d %s: target %s conflict, "
+                        "found both in %s and %s" % (
+                            self.name, lino, line,
+                            target, target_alias, target_obj_._target_alias))
+
+        #6. create line_obj
         try:
             line_obj = target_obj._append_line(
                     source_obj=self,
                     lino=lino,
                     line=line,
                     vs=vars_,
+                    target=target,
+                    target_alias=target_alias,
                     **resv)
         except LogError as e:
             raise LogError("Error in %s@%d %s!" % (self.name, lino, line), e)
 
-        #6. link line_obj
+        #7. link line_obj
         if self.start_lineobj is None:
             self.start_lineobj = line_obj
             assert self.last_lineobj is None

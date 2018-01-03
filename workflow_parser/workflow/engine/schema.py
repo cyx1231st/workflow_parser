@@ -50,11 +50,11 @@ class JoinInfo(object):
         self.len_crossr = 0
 
     def add_join(self, join):
-        if join.from_threadins is join.to_threadins:
-            # case thread joins itself, it is not a join
-            pass
-        elif isinstance(join, InnerjoinActivity):
-            if isinstance(join, RequestjoinActivity):
+        if isinstance(join, InnerjoinActivity):
+            if join.from_threadins is join.to_threadins:
+                # case thread joins itself, it is not a join
+                pass
+            elif isinstance(join, RequestjoinActivity):
                 self.requestjoins_bytis[join.from_threadins].append(join)
                 self.requestjoined_bytis[join.to_threadins].append(join)
                 self.len_requests += 1
@@ -171,7 +171,7 @@ class SchemaEngine(object):
                     item=pace,
                     join_objs=joinable._jm_callee_jedobjs)
 
-    def proceed(self, report):
+    def proceed(self, report, target_byname):
         assert isinstance(report, Report)
         print("Join paces...")
         print("-------------")
@@ -183,7 +183,7 @@ class SchemaEngine(object):
 
         joininfo = JoinInfo()
 
-        for jo, from_, to_ in self.innerj_proj.yield_results():
+        for jo, from_, to_ in self.innerj_proj.yield_results(target_byname):
             if from_ is None:
                 assert to_ is not None
                 join = EmptyjoinActivity(to_, False, jo, InnerjoinActivity)
@@ -214,7 +214,7 @@ class SchemaEngine(object):
                         jo.__class__)
             joininfo.add_join(join)
 
-        for jo, from_, to_ in self.crossj_proj.yield_results():
+        for jo, from_, to_ in self.crossj_proj.yield_results(target_byname):
             if from_ is None:
                 assert to_ is not None
                 join = EmptyjoinActivity(to_, False, jo, CrossjoinActivity)

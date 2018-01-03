@@ -22,5 +22,4 @@ TIME = "time"
 SECONDS = "seconds"
 
 ALL_VARS = {COMPONENT, TARGET, HOST, THREAD, REQUEST, KEYWORD, TIME, SECONDS}
-
-TARGET_HINT = "target_hint"
+TARGET_ALIAS = "target_alias"

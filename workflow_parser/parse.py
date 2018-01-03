@@ -55,10 +55,10 @@ def main1(driver):
 
     try:
         # build logs
-        targetobjs = l_proceed(args.folder, driver.services, driver, report_i)
+        targets_byname = l_proceed(args.folder, driver.services, driver, report_i)
 
         # build states
-        requestinss = proceed(targetobjs, master, report_i)
+        requestinss = proceed(targets_byname, master, report_i)
     except Exception:
         print("\n%r\n" % report_i)
         raise

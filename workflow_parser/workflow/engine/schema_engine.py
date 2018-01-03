@@ -76,9 +76,9 @@ class JoiningProject(object):
                     join_obj, self.name))
             join_work.load_toitem(to_item)
 
-    def yield_results(self):
+    def yield_results(self, target_byname):
         for jo_work in self.works_byjo.itervalues():
-            for jo, from_, to_ in jo_work.yield_results():
+            for jo, from_, to_ in jo_work.yield_results(target_byname):
                 yield jo, from_, to_
         for jo, from_, to_ in self.yield_empty():
             yield jo, from_, to_
@@ -251,21 +251,31 @@ class PandasIndexer(IndexerBase):
 
         self.to_items.append(to_item)
 
-    def yield_results(self):
+    def yield_results(self, target_byname):
         print(self.join_obj.name+
               "(%d -> %d): "%(len(self.from_items), len(self.to_items))+
               repr(self.join_obj))
 
         str_schema = self.join_obj.str_schema
         columns = ["seconds", "_item", str_schema]
+
+        # translation from *target* to target_alias
+        def get_value(item, schema, other):
+            ret = str(item.env[schema])
+            if "target" != schema and "target" == other:
+                if ret not in target_byname:
+                    raise StateError("Cannot translate target %s" % ret)
+                ret = target_byname[ret].target
+            return ret
+
         # index from_items, count ignored
         self.from_items.sort(key=lambda i:i.seconds)
         def generate_from_rows():
             for item in self.from_items:
                 if item.is_joinable(self.join_obj):
                     yield (item.seconds, item,
-                           ",".join(str(item.env[schema])
-                               for schema, _ in self.schemas))
+                           ",".join(get_value(item, schema, other)
+                               for schema, other in self.schemas))
                 else:
                     self.from_cnt_ignored += 1
         from_indexer = pd.DataFrame(
@@ -279,8 +289,8 @@ class PandasIndexer(IndexerBase):
             for item in self.to_items:
                 if item.is_joinable(self.join_obj):
                     yield (item.seconds, item,
-                           ",".join(str(item.env[schema])
-                               for _, schema in self.schemas))
+                           ",".join(get_value(item, schema, other)
+                               for other, schema in self.schemas))
                 else:
                     self.to_cnt_ignored += 1
         to_indexer = pd.DataFrame(
