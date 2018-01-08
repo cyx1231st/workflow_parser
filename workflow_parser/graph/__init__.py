@@ -115,6 +115,7 @@ class NodeBase(object):
         self.edges = OrderedSet()
         self.marks = OrderedSet()
         self.vis_weight = 0
+        self.request_state = None
 
     @property
     def is_start(self):
@@ -124,10 +125,20 @@ class NodeBase(object):
     def is_end(self):
         return self in self.graph.end_nodes
 
+    @property
+    def is_request_end(self):
+        if self.request_state:
+            assert self in self.graph.master.req_endnodes
+            return True
+        else:
+            return False
+
     def __repr_marks__(self):
         ret = ""
         if self.marks:
             ret += ", *" + "-".join(self.marks)
+        if self.request_state:
+            ret += ", R@%s" % self.request_state
         return ret
 
     def __repr__(self):
@@ -152,11 +163,18 @@ class NodeBase(object):
                   self.__repr_marks__())
 
     def set_state(self, state_str, is_mark=False):
-        assert not self.is_start
         if not is_mark:
-            raise RuntimeError("set_state() failed, "
-                    "cannot assign reqstate:%s %s <- %s!" % (
-                        self.__class__.__name__, self.name, state_str))
+            assert not self.is_start
+            if self.request_state is not None:
+                raise RuntimeError("set_state() failed, "
+                        "already has reqstate %s: %s %s <- %s!" % (
+                        self.request_state, self.__class__.__name__,
+                        self.name, state_str))
+            if not state_str:
+                raise RuntimeError("set_state() failed, "
+                        "empty reqstate %s!" % state_str)
+            self.request_state = state_str
+            self.graph.master._register_requestend(self)
         else:
             self.marks.add(state_str)
 
@@ -483,6 +501,13 @@ class FnNode(NodeBase):
             self.graph.end_nodes.discard(self)
         return self.build(self.graph.end_node, payload_or_edge)
 
+    def set_state(self, state_str, is_mark=False):
+        if self.is_end:
+            raise RuntimeError("set_state() failed, "
+                    "cannot assign state to end FnNode %s <- %s"
+                    % (self.name, state_str))
+        super(FnNode,self).set_state(state_str, is_mark)
+
 
 class FunctionGraph(GraphNamespaceMixin, GraphBase):
     def __init__(self, func_name, master):
@@ -538,48 +563,10 @@ class TdNode(NodeBase):
     def __init__(self, name, index, graph):
         assert isinstance(graph, ThreadGraph)
         super(TdNode, self).__init__(name, index, graph)
-        _defensive_check(TdNode, self, "request_state")
-
-        self.request_state = None
 
     @property
     def is_request_start(self):
         return False
-
-    @property
-    def is_request_end(self):
-        if self.request_state:
-            assert self.is_end
-            assert self in self.graph.master.req_endnodes
-            return True
-        else:
-            return False
-
-    def __repr_marks__(self):
-        mark = super(TdNode, self).__repr_marks__()
-        if self.request_state:
-            mark += ", R@%s" % self.request_state
-        return mark
-
-    def set_state(self, state_str, is_mark=False):
-        if not is_mark:
-            assert not self.is_start
-            if not self.is_end:
-                raise RuntimeError("set_state() failed, "
-                        "isn't endnode for reqstate: %s %s!" % (
-                        self.__class__.__name__, self.name))
-            if self.request_state is not None:
-                raise RuntimeError("set_state() failed, "
-                        "already has reqstate %s: %s %s <- %s!" % (
-                        self.request_state, self.__class__.__name__,
-                        self.name, state_str))
-            if not state_str:
-                raise RuntimeError("set_state() failed, "
-                        "empty reqstate %s!" % state_str)
-            self.request_state = state_str
-            self.graph.master._register_requestend(self)
-        else:
-            super(TdNode, self).set_state(state_str, True)
 
     def set_end(self):
         self.graph.end_nodes.add(self)
@@ -799,8 +786,7 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
         self.req_startnode_bytype[rtype] = rnode
 
     def _register_requestend(self, node):
-        assert isinstance(node, TdNode)
-        assert node.is_end
+        assert isinstance(node, NodeBase)
         assert node.request_state
         self.req_endnodes.add(node)
 

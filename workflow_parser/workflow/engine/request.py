@@ -320,7 +320,7 @@ class RequestBuilder(object):
                 if requestins.end_activity:
                     self.e_extra_e_threadinss.add(threadins)
                 else:
-                    requestins.end_activity = threadins.end_activity
+                    requestins.end_activity = threadins.rend_activity
 
             # last_activity
             if threadins.end_activity.from_seconds is not None:

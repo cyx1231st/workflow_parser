@@ -251,12 +251,14 @@ class RequestInstance(RequestinsBase):
         activity = self.start_activity.to_pace.nxt_main_activity
 
         if not extended:
-            while activity.is_interval:
+            while activity is not None and activity.is_interval:
                 yield activity
+                pre = activity
                 activity = activity.to_pace.nxt_main_activity
         else:
+            raise NotImplementedError()
             from_pace = activity.from_pace
-            while activity.is_interval:
+            while activity is not None and activity.is_interval:
                 if isinstance(activity, JoinActivityBase):
                     if from_pace is not activity.from_pace:
                         yield ExtendedInterval(from_pace, activity.from_pace)
@@ -267,7 +269,6 @@ class RequestInstance(RequestinsBase):
                 activity = activity.to_pace.nxt_main_activity
             if from_pace is not activity.from_pace:
                 yield ExtendedInterval(from_pace, activity.from_pace)
-        assert activity is self.end_activity
 
     def iter_threadints(self):
         for tis in self.threadinss:

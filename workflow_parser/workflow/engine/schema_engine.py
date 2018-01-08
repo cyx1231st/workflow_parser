@@ -313,7 +313,7 @@ class PandasIndexer(IndexerBase):
         for to_item, to_matches in matches_byto:
             matches_byto_list.append((to_item,
                                       [item for item in to_matches["_item_from"]]))
-        matches_byto_list.sort(key=lambda item:item[0])
+        matches_byto_list.sort(key=lambda item:item[0].seconds)
         for to_item, to_matches in matches_byto_list:
             to_matches.sort(key=lambda i:i.seconds)
             for match in to_matches:
@@ -374,15 +374,15 @@ class PandasIndexer(IndexerBase):
                     if l[2]._peers[self.join_obj] is not l[3]:
                         label="!"
                     else:
-                        label=""
+                        label=" "
                     if l[2]._peers[self.join_obj] is None:
                         from_label="!"
                     else:
-                        from_label=""
+                        from_label=" "
                     if l[3]._peers[self.join_obj] is None:
                         to_label="!"
                     else:
-                        to_label=""
+                        to_label=" "
                     print("  %s%s: %s`%s`%s -> %s`%s`%s" % (
                         label, l[1],
                         l[2].seconds, l[2].item.keyword, from_label,

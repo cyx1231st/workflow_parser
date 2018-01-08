@@ -18,6 +18,7 @@ from ...datasource import Line
 from ...datasource import Thread
 from ...graph.token import State
 from ...graph.token import Token
+from ..exc import StateError
 from .bases import Pace
 from .bases import ActivityBase
 from .bases import ThreadinsBase
@@ -172,6 +173,7 @@ class ThreadInstance(ThreadinsBase):
         self.activities_bymark = defaultdict(list)
         self.len_activities = 1
         self.is_finish = False
+        self.rend_activity = None
 
         self.end_activity = self.start_activity
         assert self.start_activity.is_thread_start
@@ -199,11 +201,11 @@ class ThreadInstance(ThreadinsBase):
 
     @property
     def is_request_end(self):
-        return self.end_activity.is_request_end
+        return self.rend_activity is not None
 
     @property
     def request_state(self):
-        return self.end_activity.request_state
+        return self.rend_activity.request_state
 
     @property
     def threadgraph_name(self):
@@ -289,6 +291,14 @@ class ThreadInstance(ThreadinsBase):
                                   self, pace)
         self.end_activity = activity
         self.len_activities += 1
+        if activity.is_request_end:
+            if self.rend_activity is None:
+                self.rend_activity = activity
+            else:
+                raise StateError(
+                        "Apply token failed: duplicated request-end"
+                        "node in threadins %r: %r, %r"
+                        % (self, self.rend_activity, activity))
         self._process_vars(line_obj)
         for mark in activity.marks:
             self.activities_bymark[mark].append(activity)
