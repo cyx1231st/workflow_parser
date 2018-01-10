@@ -106,16 +106,11 @@ class State(object):
 
     @property
     def is_request_end(self):
-        if isinstance(self._node, TdNode):
-            return self._node.is_request_end
-        else:
-            return False
+        return self._node.is_request_end
 
     @property
     def request_state(self):
-        if isinstance(self._node, TdNode):
-            return self._node.request_state
-        return None
+        return self._node.request_state
 
     @property
     def vis_weight(self):
@@ -186,6 +181,10 @@ class Step(object):
             ret += "(@%s-`%s`)" % (
                     self.edgename, self.keyword)
         return ret
+
+    @property
+    def refresh_vars(self):
+        return self._kwedge.refresh_vars
 
     def __repr__(self):
         return "<%s: %s, %s%s>" % (

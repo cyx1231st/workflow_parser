@@ -37,9 +37,9 @@ def main1(driver):
     parser.add_argument('--brief',
                         action="store_true",
                         help="Don't export report and draw figures.")
-    parser.add_argument('--outfolder',
-                        help="Folder to put figures.",
-                        default="/root/container/out/")
+    # parser.add_argument('--outfolder',
+    #                     help="Folder to put figures.",
+    #                     default="/root/container/out/")
     # parser.add_argument('--csv-print-header', action="store_true",
     #                     help="Write a row into the CSV file for the headers.")
     # parser.add_argument('--outfile',
@@ -73,7 +73,7 @@ def main1(driver):
     report = Report(folders[-1] or folders[-2])
     draw_engine = None
     if not args.brief:
-        outfolder = args.folder+"/out/"
+        outfolder = args.folder + ("/out-%s/" % master.name)
         if not os.path.exists(outfolder):
             os.makedirs(outfolder)
         draw_engine = DrawEngine(outfolder)

@@ -436,6 +436,10 @@ class Pace(LineStateBase, object):
             ret[k] = self[k]
         return ret
 
+    @property
+    def refresh_vars(self):
+        return self.step.refresh_vars
+
     # TODO: bug here
     @property
     def _ls_state(self):

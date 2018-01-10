@@ -316,6 +316,25 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
                 threadins.set_finish()
             thread_objs.append(thread_obj)
             valid_lineobjs += thread_valid_lineobjs
+
+        # per target:
+        ## process vars
+        refresh_vars = defaultdict(lambda: defaultdict(lambda: 0))
+        for line_obj in target_obj.iter_lineobjs():
+            pace = line_obj._line_state
+            if pace:
+                for key in pace.refresh_vars:
+                    value = line_obj._schema_vars[key]
+                    refresh_vars[key][value] += 1
+                    # print("%s=%s *%s %s" % (key, value, refresh_vars[key][value], line_obj.keyword))
+                keys = line_obj._schema_vars.viewkeys() & refresh_vars.viewkeys()
+                for key in keys:
+                    ovalue = line_obj._schema_vars[key]
+                    value = str(refresh_vars[key][ovalue]) + ":" + str(ovalue)
+                    line_obj._schema_vars[key] = value
+                    # print("%s=%s !%s %s" % (
+                    #     key, ovalue, refresh_vars[key][ovalue], line_obj.keyword))
+
     print("-------------------------")
 
     #### collect ####

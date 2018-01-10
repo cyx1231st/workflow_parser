@@ -256,6 +256,13 @@ class KwEdge(InnerjoinMixin, CrossCalleeMixin, EdgeBase):
                 node=node,
                 keyword=keyword)
 
+        self.refresh_vars = set()
+
+    def refresh_var(self, var):
+        assert isinstance(var, str)
+        assert var not in self.refresh_vars
+        self.refresh_vars.add(var)
+
 
 class ClEdge(EdgeBase):
     def __init__(self, func_graph, node, name):

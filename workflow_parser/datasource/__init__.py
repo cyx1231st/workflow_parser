@@ -80,6 +80,8 @@ class Line(object):
         self.nxt_source_line = None
         self.prv_thread_line = None
         self.nxt_thread_line = None
+        self.prv_target_line = None
+        self.nxt_target_line = None
 
     @property
     def name(self):
@@ -339,6 +341,9 @@ class Target(object):
 
         self._offset = 0
         self.thread_objs = {}
+
+        self.start_lineobj = None
+        self.last_lineobj = None
         self.len_lineobjs = 0
 
         self._index_thread = 0
@@ -411,8 +416,25 @@ class Target(object):
             self.thread_objs[thread] = thread_obj
 
         line_obj = thread_obj._append_line(**kwds)
+
+        if self.start_lineobj is None:
+            self.start_lineobj = line_obj
+            assert self.last_lineobj is None
+            assert self.len_lineobjs == 0
+        else:
+            assert self.last_lineobj.lino < line_obj.lino
+            self.last_lineobj.nxt_target_line = line_obj
+            line_obj.prv_target_line = self.last_lineobj
+        self.last_lineobj = line_obj
         self.len_lineobjs += 1
+
         return line_obj
+
+    def iter_lineobjs(self):
+        line = self.start_lineobj
+        while line is not None:
+            yield line
+            line = line.nxt_target_line
 
 
 # granularity: target, host
