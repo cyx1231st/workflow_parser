@@ -198,7 +198,6 @@ class CephRbdobjectreq(DriverBase):
                         k = k.strip()
                         ret[k] = eval(v.strip())
             except Exception:
-                import pdb; pdb.set_trace()
                 raise RuntimeError("Cannot evaluate %s" % dict_str)
             return ret
 

@@ -82,7 +82,6 @@ class CephWritefull(DriverBase):
                               10, "messenger_fastdispatch_entry")
         e  , n11 = n10.build( 11, "objecter_complete")
         e  , n12 = n11.build( 12, "messenger_fastdispatch_exit")
-        n12.set_state("SUCCESS")
 
         # thread osd recieive message
         e20, n15 = graph.build_thread(osd,
@@ -138,6 +137,10 @@ class CephWritefull(DriverBase):
         _  , n55 = graph.build_thread(osd,
                               55, f_rapply)
 
+#### request imagereq states ####
+        n12.set_state("SUCCESS")
+
+#### relationship ####
         # client send osd
         j1 = e10.join_one(e20, True, ["tid",
                                       "msg_op",

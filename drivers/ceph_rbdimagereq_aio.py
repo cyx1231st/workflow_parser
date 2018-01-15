@@ -60,7 +60,7 @@ class CephRbdimagereq(DriverBase):
 
 #### request imagereq ####
         # receive aio_write
-        e  , n1  = graph.build_thread(client,
+        e14, n1  = graph.build_thread(client,
                                1, "imagerequestwq_entry", "imagereq")
         ## enqueue ireq
         e4 , n2  =  n1.build(  2, "imagerequestwq_enqueue")
@@ -98,6 +98,9 @@ class CephRbdimagereq(DriverBase):
         end1.set_state("FAIL")
         n13.set_state("FAIL_JOURNAL")
         n16.set_state("SUCCESS")
+        e0.refresh_var("comp")
+        e12.refresh_var("comp")
+        e4.refresh_var("ireq")
 
 #### relationship ####
         # oreq completes
@@ -165,7 +168,6 @@ class CephRbdimagereq(DriverBase):
                         k = k.strip()
                         ret[k] = eval(v.strip())
             except Exception:
-                import pdb; pdb.set_trace()
                 raise RuntimeError("Cannot evaluate %s" % dict_str)
             return ret
 
