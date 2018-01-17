@@ -16,7 +16,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 from itertools import chain
-from itertools import izip_longest
+from itertools import zip_longest
 import pandas as pd
 import numpy as np
 
@@ -82,14 +82,14 @@ def general_purpose_analysis(master_graph,
 
     #####  recorded statistics  #####
     targetobjs_by_component = defaultdict(list)
-    for t in targetobjs_by_target.itervalues():
+    for t in targetobjs_by_target.values():
         targetobjs_by_component[t.component].append(t)
     for comp in comps:
         report.register("targets %s" % comp,
                 len(targetobjs_by_component.get(comp, [])))
 
     report.register("hosts",
-            len(set(t.host for t in targetobjs_by_target.itervalues())))
+            len(set(t.host for t in targetobjs_by_target.values())))
 
     for comp in comps:
         report.register("hosts %s" % comp,
@@ -97,7 +97,7 @@ def general_purpose_analysis(master_graph,
                         targetobjs_by_component.get(comp, []))))
 
     report.register("threads",
-            sum(len(t.thread_objs) for t in targetobjs_by_target.itervalues()))
+            sum(len(t.thread_objs) for t in targetobjs_by_target.values()))
 
     for comp in comps:
         report.register("threads %s dist" % comp,
@@ -105,10 +105,10 @@ def general_purpose_analysis(master_graph,
                         targetobjs_by_component.get(comp, [])]))
 
     report.register("threadinss",
-            sum(len(r.threadinss) for r in requestinss_by_request.itervalues()))
+            sum(len(r.threadinss) for r in requestinss_by_request.values()))
 
     report.register("paces",
-            sum(r.len_paces for r in requestinss_by_request.itervalues()))
+            sum(r.len_paces for r in requestinss_by_request.values()))
 
     lapse_total = start_end["seconds"]["end"] - start_end["seconds"]["start"]
     report.register("lapse", lapse_total)
@@ -226,7 +226,7 @@ def general_purpose_analysis(master_graph,
                  .sum()\
                  .sort_values(ascending=False)
     addedup_by_ptype = {}
-    for name, lapse in addedup_df.iteritems():
+    for name, lapse in addedup_df.items():
         addedup_by_ptype[name] = lapse
         report_i.register("added %s" % name, "%.5f %.3f%% %s" %
             (lapse, lapse/addedup_total*100, desc_bypath[name]))
@@ -236,7 +236,7 @@ def general_purpose_analysis(master_graph,
                  .mean()\
                  .sort_values(ascending=False)
     average_by_ptype = {}
-    for name, lapse in average_df.iteritems():
+    for name, lapse in average_df.items():
         average_by_ptype[name] = lapse
         report_i.register(
                 "avg %s" % name, "%.5f %s" % (
@@ -263,7 +263,7 @@ def general_purpose_analysis(master_graph,
         _requestinss = requestinss_byrtype.get(r_type, [])
         requestins_iters = [r.iter_mainints() for r in _requestinss]
         workflow = Workflow(r_type)
-        for intervals in izip_longest(*requestins_iters):
+        for intervals in zip_longest(*requestins_iters):
             workflow.build(intervals)
         workflow.reduce()
         workflow.ready()

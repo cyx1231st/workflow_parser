@@ -113,7 +113,7 @@ def group_threads(threadinss, joininfo, report):
                     else:
                         sum_['joined'] += 1
 
-    collect_group(threadgroup_by_request.itervalues())
+    collect_group(threadgroup_by_request.values())
     collect_group(threadgroups_without_request)
 
     #### summary ####
@@ -172,7 +172,7 @@ def group_threads(threadinss, joininfo, report):
             # for join_int in join_ints:
             #     join_ints_by_obj[join_int.join_obj].append(join_int)
             # print("#### debug group ####")
-            # for join_obj, join_ints in join_ints_by_obj.iteritems():
+            # for join_obj, join_ints in join_ints_by_obj.items():
             #     print("%s:" % join_obj.name)
             #     schemas = join_obj.schemas
             #     for join_int in join_ints:
@@ -187,7 +187,7 @@ def group_threads(threadinss, joininfo, report):
         raise StateError("(ParserEngine) thread group has multiple requests!")
 
     ret = []
-    for req, tgroup in threadgroup_by_request.iteritems():
+    for req, tgroup in threadgroup_by_request.items():
         ret.append((req, tgroup))
     for tgroup in threadgroups_without_request:
         ret.append((None, tgroup))
@@ -330,7 +330,7 @@ class RequestBuilder(object):
                     requestins.last_activity = threadins.end_activity
 
             # activities_bymark
-            for mark, acts in threadins.activities_bymark.iteritems():
+            for mark, acts in threadins.activities_bymark.items():
                 requestins.activities_bymark[mark].extend(acts)
 
             # request vars
@@ -338,9 +338,9 @@ class RequestBuilder(object):
             requestins.request_vars["host"].add(threadins.host)
             requestins.request_vars["component"].add(threadins.component)
             requestins.request_vars["target"].add(threadins.target)
-            for key, val in threadins.thread_vars.iteritems():
+            for key, val in threadins.thread_vars.items():
                 requestins.request_vars[key].add(val)
-            for key, vals in threadins.thread_vars_dup.iteritems():
+            for key, vals in threadins.thread_vars_dup.items():
                 requestins.request_vars[key].update(vals)
 
             # len_paces
@@ -466,7 +466,7 @@ def build_requests(threadgroup_by_request, joininfo, report):
     rcrossjoins = set()
     join_byremotetype = defaultdict(set)
 
-    for requestins in requestinss.itervalues():
+    for requestins in requestinss.values():
         assert isinstance(requestins, RequestInstance)
         cnt_lines += requestins.len_paces
         components.update(requestins.components)
@@ -475,7 +475,7 @@ def build_requests(threadgroup_by_request, joininfo, report):
         thread_objs.update(requestins.thread_objs)
         threadinss.update(requestins.threadinss)
         requests_vars["request"].add(requestins.request)
-        for k, vs in requestins.request_vars.iteritems():
+        for k, vs in requestins.request_vars.items():
             requests_vars[k].update(vs)
 
         innerjoins.update(requestins.innerjoin_activities)
@@ -491,11 +491,11 @@ def build_requests(threadgroup_by_request, joininfo, report):
             % (len(requestinss),
                len(threadinss)))
     print("%d relations:" % (len(innerjoins)+len(requestjoins)))
-    for j_type, join in join_byremotetype.iteritems():
+    for j_type, join in join_byremotetype.items():
         print("  %d %s relations" % (len(join), j_type))
 
     print("%d vars:" % len(requests_vars))
-    for k, vs in requests_vars.iteritems():
+    for k, vs in requests_vars.items():
         print("  %s: %d" % (k, len(vs)))
     print()
 
@@ -526,16 +526,16 @@ def build_requests(threadgroup_by_request, joininfo, report):
     if error_builders:
         print("!! ERROR !!")
         print("%d error request instances" % len(error_builders))
-        for err, builders in builders_by_error.iteritems():
+        for err, builders in builders_by_error.items():
             print("  %s: %d requests" % (err, len(builders)))
         print()
 
     if main_route_error:
         print("!! ERROR !!")
         print("Tracing errors:")
-        for e_msg, where_count in main_route_error.iteritems():
+        for e_msg, where_count in main_route_error.items():
             print("  %s:" % e_msg)
-            for where, cnt in where_count.iteritems():
+            for where, cnt in where_count.items():
                 print("    %s: %d" % (where, cnt))
         print()
 
@@ -543,7 +543,7 @@ def build_requests(threadgroup_by_request, joininfo, report):
         print("! WARN !")
         print("%d warn request instances:" %
                 len(warn_builders))
-        for warn, builders in builders_by_warn.iteritems():
+        for warn, builders in builders_by_warn.items():
             print("  %s: %d requests" % (warn, len(builders)))
         print()
 

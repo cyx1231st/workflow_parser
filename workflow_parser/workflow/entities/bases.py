@@ -181,7 +181,7 @@ class IntervalBase(object):
         ret = "[%s %s" % (self.int_name, self.__repr_intlabels__())
         if self._from_pace:
             context = ",".join(str(k)+"="+str(v)
-                    for k,v in self._from_pace.line_context.iteritems())
+                    for k,v in self._from_pace.line_context.items())
             if context:
                 context = " " + context
             ret += "<-(%.3f,%s`%s`%s)]" % (
@@ -197,7 +197,7 @@ class IntervalBase(object):
         ret = "[%s %s" % (self.int_name, self.__repr_intlabels__())
         if self._to_pace:
             context = ",".join(str(k)+"="+str(v)
-                    for k,v in self._to_pace.line_context.iteritems())
+                    for k,v in self._to_pace.line_context.items())
             if context:
                 context = " " + context
             ret += "->(%.3f,%s`%s`%s)]" % (
@@ -215,6 +215,10 @@ class IntervalBase(object):
     __lt__ = lambda self, other:\
             (self.from_seconds, self.to_seconds) <\
             (other.from_seconds, other.to_seconds)
+
+    def __hash__(self):
+        return id(self)
+
 
 
 class RequestinsBase(IntervalBase):
@@ -307,6 +311,9 @@ class ThreadinsBase(IntervalBase):
     @property
     def int_name(self):
         return self.thread_name
+
+    def __hash__(self):
+        return id(self)
 
     def _process_vars(self, line_obj):
         assert isinstance(line_obj, Line)
@@ -495,13 +502,13 @@ class Pace(LineStateBase, object):
 
     def __repr_marks__(self):
         mark_str = ""
-        for type_, acts in self.prv_activity_bytype.iteritems():
+        for type_, acts in self.prv_activity_bytype.items():
             mark_str += ", prv_"+type_+"("
             mark_str += ",".join(act.__repr_from__()
                     for act in acts)
             mark_str += ")"
 
-        for type_, acts in self.nxt_activity_bytype.iteritems():
+        for type_, acts in self.nxt_activity_bytype.items():
             mark_str += ", nxt_"+type_+"("
             mark_str += ",".join(act.__repr_to__()
                     for act in acts)

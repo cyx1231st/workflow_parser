@@ -292,19 +292,19 @@ class CausalEngine(object):
         while True:
             next_hostc = None
             # ready hostc first
-            for hostc in self.unknown_hostcs.iterkeys():
+            for hostc in self.unknown_hostcs.keys():
                 if hostc.adjust(self.distance):
                     next_hostc = hostc
                     break
             # sided hostc second
             if next_hostc is None:
-                for hostc in self.unknown_hostcs.iterkeys():
+                for hostc in self.unknown_hostcs.keys():
                     if hostc.adjust_side(self.distance):
                         next_hostc = hostc
                         break
             # isolated hostc
             if next_hostc is None:
-                next_hostc = self.unknown_hostcs.iterkeys().next()
+                next_hostc = next(iter(self.unknown_hostcs.keys()))
                 next_hostc.adjust_none()
 
             self.unknown_hostcs.pop(next_hostc)

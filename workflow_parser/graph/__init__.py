@@ -410,11 +410,11 @@ class GraphNamespaceMixin(object):
         self._ns_fnedge_index_byfn = defaultdict(lambda: 0)
 
     def _ns_iter_edges(self):
-        for edge in self.ns_edge_byname.itervalues():
+        for edge in self.ns_edge_byname.values():
             yield edge
 
     def _ns_iter_nodes(self):
-        for node in self.ns_node_byid.itervalues():
+        for node in self.ns_node_byid.values():
             yield node
 
     def _ns_create_node(self, cls, graph, index, is_id=False, prefix=""):
@@ -487,7 +487,7 @@ class GraphNamespaceMixin(object):
                 len(self.ns_node_byname),
                 len(self.ns_edge_byname),
                 sum(len(l) for l in
-                    self.ns_edges_byfromto.itervalues()))
+                    self.ns_edges_byfromto.values()))
         return marks
 
 
@@ -546,7 +546,7 @@ class FunctionGraph(GraphNamespaceMixin, GraphBase):
     @property
     def start_edge(self):
         assert len(self.start_node.edges) == 1
-        return iter(self.start_node.edges).next()
+        return next(iter(self.start_node.edges))
 
     def __repr_marks__(self):
         mark = super(FunctionGraph, self).__repr_marks__()
@@ -690,7 +690,7 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
 
     @property
     def request_types(self):
-        return list(self.req_startnode_bytype.iterkeys())
+        return list(self.req_startnode_bytype.keys())
 
     @property
     def request_states(self):
@@ -734,13 +734,13 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
         ret_str = "\n>>--------------"
         ret_str += "\n %r" % self
         ret_str += "\n  Functions:"
-        for fn_obj in self.funcgraph_byname.itervalues():
+        for fn_obj in self.funcgraph_byname.values():
             ret_str += "\n    %r" % fn_obj
         ret_str += "\n  Threads:"
         for th_obj in self.thread_graphs:
             ret_str += "\n    %r" % th_obj
         ret_str += "\n  Request start nodes:"
-        for node in self.req_startnode_bytype.itervalues():
+        for node in self.req_startnode_bytype.values():
             ret_str += "\n    %r" % node
         ret_str += "\n  Request end nodes:"
         for node in self.req_endnodes:
@@ -758,7 +758,7 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
         if self.funcgraph_byname:
             ret_str += "\n--<FunctionGraphs>--\n"
             ret_str += "\n\n".join(str(fn_g)
-                    for fn_g in self.funcgraph_byname.itervalues())
+                    for fn_g in self.funcgraph_byname.values())
             ret_str += "\n"
 
         ret_str += "\n--<ThreadGraphs>--\n"
@@ -812,7 +812,7 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
         self.threadgraphs_bycomponent[component].add(thread)
 
         assert len(thread.start_nodes) == 1
-        from_node = iter(thread.start_nodes).next()
+        from_node = next(iter(thread.start_nodes))
         return from_node.build(tonode_or_id, payload_or_edge)
 
     def build_func(self, tonode_or_id, payload_or_edge, func_name):
@@ -830,7 +830,7 @@ class Master(JoinMasterMixin, GraphNamespaceMixin, MasterBase):
 
     def iter_namespaces(self):
         yield self
-        for fn in self.funcgraph_byname.itervalues():
+        for fn in self.funcgraph_byname.values():
             yield fn
 
     def iter_edges(self):

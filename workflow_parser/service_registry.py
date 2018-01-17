@@ -12,6 +12,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from functools import total_ordering
+
+
+@total_ordering
 class Component(object):
     def __init__(self, component, service):
         assert isinstance(component, str)
@@ -26,6 +30,13 @@ class Component(object):
 
     def __repr__(self):
         return "<Component: %s>" % self.name
+
+    def __hash__(self):
+        return hash(self.name)
+    def __eq__(self, other):
+        return self.name == other.name
+    def __lt__(self, other):
+        return self.name < other.name
 
 
 class Service(object):
@@ -45,7 +56,7 @@ class Service(object):
         return self._components[attr]
 
     def __iter__(self):
-        for component in self._components.itervalues():
+        for component in self._components.values():
             yield component
 
 
@@ -73,7 +84,7 @@ class ServiceRegistry(object):
             assert comp in self.sr_components
             return comp
         elif isinstance(comp, str):
-            for service in self._services.itervalues():
+            for service in self._services.values():
                 ret = service._components.get(comp)
                 if ret:
                     return ret

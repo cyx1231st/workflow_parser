@@ -56,7 +56,7 @@ class Line(object):
         assert isinstance(lino, int)
         assert isinstance(line, str)
         assert isinstance(vs, dict)
-        assert not rv.ALL_VARS & vs.viewkeys()
+        assert not rv.ALL_VARS & vs.keys()
         assert isinstance(thread_obj, Thread)
         assert isinstance(time, str)
         assert isinstance(seconds, numbers.Real)
@@ -113,11 +113,11 @@ class Line(object):
 
     @property
     def keys(self):
-        return self._schema_vars.viewkeys() | rv.ALL_VARS
+        return self._schema_vars.keys() | rv.ALL_VARS
 
     @property
     def keys_(self):
-        return self._schema_vars.viewkeys()
+        return self._schema_vars.keys()
 
     # total ordering
     __eq__ = lambda self, other: self.seconds == other.seconds
@@ -136,7 +136,7 @@ class Line(object):
     def __repr_marks__(self):
         mark_str = ""
         if self._schema_vars:
-            kvs = [ str(item[0])+"="+str(item[1]) for item in self._schema_vars.iteritems()]
+            kvs = [ str(item[0])+"="+str(item[1]) for item in self._schema_vars.items()]
             mark_str += ", (%s)"% ",".join(kvs)
         if self._line_state is None:
             mark_str += ", ~PATH"
@@ -449,7 +449,7 @@ class Source(object):
         err_keys = {rv.REQUEST,
                     rv.SECONDS,
                     rv.KEYWORD,
-                    rv.TIME} & vs.viewkeys()
+                    rv.TIME} & vs.keys()
         if err_keys:
             raise LogError("Cannot set keys %s in Source!" % err_keys)
 
@@ -469,7 +469,7 @@ class Source(object):
         marks = ""
         if self.vars_:
             marks += ", var("
-            marks += ",".join("%s:%s" for k,v in self.vars_.iteritems())
+            marks += ",".join("%s:%s" for k,v in self.vars_.items())
             marks += ")"
 
         return "<%s#%s: %d lines, from %s, %s>" % (
@@ -511,7 +511,7 @@ class Source(object):
 
         #1. no conflcit of line vars and source vars
         # e.g. host/target defined in filename
-        dup_keys = vs.viewkeys() & self.vars_.viewkeys()
+        dup_keys = vs.keys() & self.vars_.keys()
         for k in dup_keys:
             if vs[k] != self.vars_[k]:
                 raise LogError(
@@ -524,7 +524,7 @@ class Source(object):
         #2. split reserved vars
         resv = {}
         vars_ = {}
-        for k,v in vs.iteritems():
+        for k,v in vs.items():
             if k in rv.ALL_VARS:
                 resv[k] = v
             elif k == rv.TARGET_ALIAS:
@@ -533,7 +533,7 @@ class Source(object):
                 vars_[k] = v
 
         #3. check required line vars
-        required = {rv.THREAD, rv.KEYWORD, rv.TIME, rv.SECONDS} - resv.viewkeys()
+        required = {rv.THREAD, rv.KEYWORD, rv.TIME, rv.SECONDS} - resv.keys()
         if required:
             raise LogError(
                     "Error in %s@%d %s: cannot identify vars %s!" % (

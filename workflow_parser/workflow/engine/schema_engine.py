@@ -80,7 +80,7 @@ class JoiningProject(object):
             join_work.load_toitem(to_item)
 
     def yield_results(self, target_byname):
-        for jo_work in self.works_byjo.itervalues():
+        for jo_work in self.works_byjo.values():
             for jo, from_, to_ in jo_work.yield_results(target_byname):
                 yield jo, from_, to_
         for jo, from_, to_ in self.yield_empty():
@@ -114,6 +114,7 @@ class JoiningProject(object):
 
 
 # NOTE: no total_ordering because it will be grouped
+@total_ordering
 class JoinItem(object):
     def __init__(self, strategy, seconds, env, item, join_objs):
         assert strategy in JoinTypes
@@ -140,7 +141,7 @@ class JoinItem(object):
             else:
                 return False
         elif self.strategy == ALL:
-            for _, peers in self._peers.iteritems():
+            for _, peers in self._peers.items():
                 if len(peers) == 0:
                     return False
                 elif len(peers) > 1:
@@ -148,6 +149,13 @@ class JoinItem(object):
             return True
         else:
             raise NotImplementedError()
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+    def __lt__(self, other):
+        return (self.seconds, id(self)) < (other.seconds, id(other))
+    def __hash__(self):
+        return id(self)
 
     # NOTE: only yield when is_success is False!
     # yield jos that are empty
@@ -158,7 +166,7 @@ class JoinItem(object):
             else:
                 raise RuntimeError("No jos in joinitem")
         elif self.strategy == ALL:
-            for jo, peers in self._peers.iteritems():
+            for jo, peers in self._peers.items():
                 if len(peers) == 0:
                     yield [jo]
         else:

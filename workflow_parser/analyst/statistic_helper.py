@@ -18,7 +18,6 @@ from collections import defaultdict
 from functools import total_ordering
 import numpy as np
 from itertools import chain
-from itertools import izip
 
 from ..workflow.entities.bases import IntervalBase
 from ..workflow.entities.threadins import ThreadActivity
@@ -116,8 +115,13 @@ class IntGroup(object):
                 len(self.intervals),
                 len(self._nxt_groups))
 
-    __eq__ = lambda self, other: len(self.intervals) == len(other.intervals)
-    __lt__ = lambda self, other: len(self.intervals) > len(other.intervals)
+    __eq__ = lambda self, other:\
+            id(self) == id(other)
+    __lt__ = lambda self, other:\
+            len(self.intervals) > len(other.intervals)\
+            and id(self) > id(other)
+    __hash__ = lambda self:\
+            id(self)
 
     def append_interval(self, interval):
         assert isinstance(interval, IntervalBase)
@@ -278,7 +282,7 @@ class Workflow(object):
     def reduce(self):
         print("Workflow: built %d groups" % len(self.groups))
         #1 sort states
-        path_weights = sorted(self.paths.iteritems(),
+        path_weights = sorted(self.paths.items(),
                               key=lambda s:s[1],
                               reverse=True)
         for path, _ in path_weights:
@@ -338,7 +342,7 @@ class Workflow(object):
         format_str = "\n%-" + str(len_line) + "s|" + "%6s,"\
                 + "%9.5f,"*5 + " %s"
         for line, (len_ints, proj, added, lapse, avg, ratio, desc)\
-                in izip(lines, attrs):
+                in zip(lines, attrs):
             ret += format_str % (
                     line, len_ints, proj, added, lapse, avg*1000, ratio*1000, desc)
         return ret

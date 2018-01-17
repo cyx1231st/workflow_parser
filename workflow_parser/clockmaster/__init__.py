@@ -24,7 +24,7 @@ from .relation_engine import CausalEngine
 def adjust_clock(requestinss):
     remote_relations = set()
     targetobjs_by_host = defaultdict(set)
-    for requestins in requestinss.itervalues():
+    for requestins in requestinss.values():
         assert isinstance(requestins, RequestInstance)
         for join in requestins.iter_joins():
             if join.remote_type == "remote":
@@ -69,7 +69,7 @@ def adjust_clock(requestinss):
 
         #### summary ####
         print("%d relax attempts" % causal_engine.relax_counter)
-        hosts = causal_engine.hosts.values()
+        hosts = list(causal_engine.hosts.values())
         hosts.sort(key=lambda hostc: hostc.hostname)
         for hostc in hosts:
             if hostc.low != 0:

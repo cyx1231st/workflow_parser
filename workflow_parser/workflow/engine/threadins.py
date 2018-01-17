@@ -223,7 +223,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
     print("Build thread instances...")
     for target_obj in target_objs:
         assert isinstance(target_obj, Target)
-        for thread_obj in target_obj.thread_objs.itervalues():
+        for thread_obj in target_obj.thread_objs.values():
             assert isinstance(thread_obj, Thread)
             threadins = None
             thread_valid_lineobjs = 0
@@ -327,7 +327,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
                     value = line_obj._schema_vars[key]
                     refresh_vars[key][value] += 1
                     # print("%s=%s *%s %s" % (key, value, refresh_vars[key][value], line_obj.keyword))
-                keys = line_obj._schema_vars.viewkeys() & refresh_vars.viewkeys()
+                keys = line_obj._schema_vars.keys() & refresh_vars.keys()
                 for key in keys:
                     ovalue = line_obj._schema_vars[key]
                     value = str(refresh_vars[key][ovalue]) + ":" + str(ovalue)
@@ -372,7 +372,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
     print("%d valid line_objs" % valid_lineobjs)
     print("%d thread instances" % len(threadinss))
     if complete_threadinss_by_graph:
-        for gname, tis in complete_threadinss_by_graph.iteritems():
+        for gname, tis in complete_threadinss_by_graph.items():
             print("  %s: %d inss" % (gname, len(tis)))
 
     print("%d request start t_instances" % len(start_threadinss))
@@ -398,7 +398,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
 
     if ignored_lineobjs_by_component:
         print("! WARN !")
-        for comp, line_objs in ignored_lineobjs_by_component.iteritems():
+        for comp, line_objs in ignored_lineobjs_by_component.items():
             print("%s: %d ignored line_objs" % (comp, len(line_objs)))
         print()
 
@@ -418,7 +418,7 @@ def build_thread_instances(target_objs, mastergraph, schema_engine, report):
     if incomplete_threadinss_by_graph:
         print("! WARN !")
         print("Incompleted t_instances:")
-        for gname, tis in incomplete_threadinss_by_graph.iteritems():
+        for gname, tis in incomplete_threadinss_by_graph.items():
             print("  %s: %d t_instances" % (gname, len(tis)))
         print()
 

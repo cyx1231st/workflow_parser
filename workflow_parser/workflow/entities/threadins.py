@@ -246,13 +246,13 @@ class ThreadInstance(ThreadinsBase):
             mark_str += ", REQE@%s" % self.request_state
         if self.activities_bymark:
             mark_str += ", MARKS(%s)" % \
-                    ",".join(self.activities_bymark.iterkeys())
+                    ",".join(self.activities_bymark.keys())
         if self.thread_vars:
             mark_str += ", VARS(%s)" % \
-                    ",".join(self.thread_vars.iterkeys())
+                    ",".join(self.thread_vars.keys())
         if self.thread_vars_dup:
             mark_str += ", DUP(%s)" % \
-                    ",".join(self.thread_vars_dup.iterkeys())
+                    ",".join(self.thread_vars_dup.keys())
 
         return "<TdIns#%s-%s: %s %s %s, %d acts, graph %s%s>" % (
                 self.thread_name,
@@ -268,11 +268,11 @@ class ThreadInstance(ThreadinsBase):
         ret_str = repr(self)
         if self.thread_vars:
             ret_str += "\n VARS: "+\
-                    ",".join("%s=%s" % (k,v) for k,v in self.thread_vars.iteritems())
+                    ",".join("%s=%s" % (k,v) for k,v in self.thread_vars.items())
         if self.thread_vars_dup:
             ret_str += "\n DUP: "+\
                     ",".join("%s(%s)" % (k,",".join(str(i_) for i_ in v))
-                            for k,v in self.thread_vars_dup.iteritems())
+                            for k,v in self.thread_vars_dup.items())
 
         activity = self.start_activity
         while activity:

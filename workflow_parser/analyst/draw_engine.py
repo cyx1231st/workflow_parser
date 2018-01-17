@@ -26,7 +26,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sys import maxint
+from sys import maxsize
 
 from ..datasource import Target
 from ..workflow.entities.join import JoinActivityBase
@@ -681,7 +681,7 @@ class DrawEngine(object):
 
         # 2. pad entity interval lists
         paddedintlists_todraw = []
-        for p_name, intlists in intlists_byentity.iteritems():
+        for p_name, intlists in intlists_byentity.items():
             padded_intlists = []
 
             assert len(intlists) > 0
@@ -827,7 +827,7 @@ class DrawEngine(object):
         ax = fig.add_subplot(1,1,1)
 
         # prepare requests
-        start = maxint
+        start = maxsize
         last = 0
         for ti in threadgroup:
             start = min(start, ti.from_seconds)
@@ -995,7 +995,7 @@ class DrawEngine(object):
         print("(DrawEngine) drawing %s..." % target_obj.target)
         df = pd.DataFrame(((to.lapse,
                             to.name)
-                           for to in target_obj.thread_objs.itervalues()),
+                           for to in target_obj.thread_objs.values()),
                           columns=["lapse", "thread"])
 
         fig = plt.figure(figsize=(15, len(target_obj.thread_objs)*.5+2))

@@ -26,7 +26,7 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
     first_req = None
     end_req = None
     last_req = None
-    for requestins in requestinss.itervalues():
+    for requestins in requestinss.values():
         if first_req is None:
             first_req = requestins
         elif first_req.from_seconds > requestins.from_seconds:
@@ -58,7 +58,7 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
             last_t))
 
     if do_reset:
-        for tg in targetobjs_by_target.itervalues():
+        for tg in targetobjs_by_target.values():
             tg.offset -= start_s
         end_s = end_s - start_s
         last_s = last_s - start_s
@@ -109,10 +109,10 @@ def do_statistics(master_graph, requestinss, d_engine, report):
 
     print("Preparing relations...")
     targetobjs_by_target = {t.target: t
-                            for r in requestinss.itervalues()
+                            for r in requestinss.values()
                             for t in r.target_objs}
     requestinss_by_type = defaultdict(list)
-    for r in requestinss.itervalues():
+    for r in requestinss.values():
         assert isinstance(r, RequestInstance)
         requestinss_by_type[r.request_type].append(r)
 
@@ -121,13 +121,13 @@ def do_statistics(master_graph, requestinss, d_engine, report):
 
     ## prepare dataframes
     targets_df = _convert_to_dataframe(
-            targetobjs_by_target.itervalues(),
+            targetobjs_by_target.values(),
             "target",
             ("component",
              "host"))
 
     join_intervals_df = _convert_to_dataframe(
-            chain(chain.from_iterable(req.iter_joins() for req in requestinss.itervalues())),
+            chain(chain.from_iterable(req.iter_joins() for req in requestinss.values())),
             None,
             ("request",
              "request_type",
@@ -152,7 +152,7 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_thread"))
 
     td_intervals_df = _convert_to_dataframe(
-            chain.from_iterable(req.iter_threadints() for req in requestinss.itervalues()),
+            chain.from_iterable(req.iter_threadints() for req in requestinss.values()),
             None,
             ("request",
              "request_type",
@@ -172,7 +172,7 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "thread"))
 
     extendedints_df = _convert_to_dataframe(
-            chain.from_iterable(req.iter_mainints() for req in requestinss.itervalues()),
+            chain.from_iterable(req.iter_mainints() for req in requestinss.values()),
             None,
             ("request",
              "request_type",
@@ -187,7 +187,7 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_keyword"))
 
     request_df = _convert_to_dataframe(
-            requestinss.itervalues(),
+            requestinss.values(),
             "request",
             ("request_type",
              "int_name",

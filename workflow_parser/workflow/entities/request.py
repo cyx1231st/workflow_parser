@@ -179,7 +179,7 @@ class RequestInstance(RequestinsBase):
     def __str__(self):
         ret = repr(self)
         ret += "\n VARS:"
-        for k, v in self.request_vars.iteritems():
+        for k, v in self.request_vars.items():
             ret += "\n  %s: %s" % (k, ",".join(str(v_) for v_ in v))
         ret += "\n THREADINSS:"
         for tis in self.threadinss:

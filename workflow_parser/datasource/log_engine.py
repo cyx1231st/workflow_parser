@@ -226,7 +226,7 @@ def readsources(datasources, sr, report):
     for datasource in datasources:
         for line_obj in datasource.yield_lineobjs(targets_byname):
             pass
-    for targetobj in targets_byname.itervalues():
+    for targetobj in targets_byname.values():
         if not isinstance(targetobj.target, str) or not targetobj.target:
             raise LogError("%s has invalid target: %s" % (
                     targetobj, target.target))
@@ -267,8 +267,8 @@ def readsources(datasources, sr, report):
         else:
             component_threads = sum(len(target.thread_objs) for target in targets)
             component_lines = sum(target.len_lineobjs for target in targets)
-            min_target_threads, max_target_threads = sys.maxint, 0
-            min_target_lineobjs, max_target_lineobjs = sys.maxint, 0
+            min_target_threads, max_target_threads = sys.maxsize, 0
+            min_target_lineobjs, max_target_lineobjs = sys.maxsize, 0
             hosts_ = set()
             for target_obj in targets:
                 hosts_.add(target_obj.host)

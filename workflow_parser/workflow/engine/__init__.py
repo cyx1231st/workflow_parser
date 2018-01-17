@@ -22,7 +22,7 @@ __all__ = ["proceed"]
 
 
 def proceed(target_byname, mastergraph, report):
-    target_objs = set(t for t in target_byname.itervalues())
+    target_objs = set(t for t in target_byname.values())
     schema_engine = SchemaEngine(mastergraph)
     threadinss = build_thread_instances(target_objs,
                                         mastergraph,
