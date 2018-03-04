@@ -34,6 +34,29 @@ class Report(object):
     def __setitem__(self, item, val):
         return self.register(item, val)
 
+    def __repr__(self):
+        ret = "<REPORT(%s)>" % self.name
+        return ret
+
+    def __str__(self):
+        ret = repr(self)
+        for content in self.contents:
+            if content is None:
+                ret += "\n"
+            elif content[1] is None:
+                format_str = "{:<" + str(self.key_len + 2) + "}"
+                ret += "\n" + format_str.format(content[0])
+            elif isinstance(content[1], Integral):
+                format_str = "{:<" + str(self.key_len + 2) + "}{:d}"
+                ret += "\n" + format_str.format(content[0]+":", content[1])
+            elif isinstance(content[1], Real):
+                format_str = "{:<" + str(self.key_len + 2) + "}{:7.5f}"
+                ret += "\n" + format_str.format(content[0]+":", content[1])
+            else:
+                format_str = "{:<" + str(self.key_len + 2) + "}{:s}"
+                ret += "\n" + format_str.format(content[0]+":", content[1])
+        return ret
+
     def register(self, key, value):
         if key in self.content_dict.keys():
             raise RuntimeError("Report %s already has key %s!"
@@ -49,30 +72,11 @@ class Report(object):
         self.outfile = outfile
         self.print_header = print_header
 
-    def export_terminal(self):
-        print("\n >> FINAL REPORT(%s):" % self.name)
-        for content in self.contents:
-            if content is None:
-                print("")
-            elif content[1] is None:
-                format_str = "{:<" + str(self.key_len + 2) + "}"
-                print(format_str.format(content[0]))
-            elif isinstance(content[1], Integral):
-                format_str = "{:<" + str(self.key_len + 2) + "}{:d}"
-                print(format_str.format(content[0]+":", content[1]))
-            elif isinstance(content[1], Real):
-                format_str = "{:<" + str(self.key_len + 2) + "}{:7.5f}"
-                print(format_str.format(content[0]+":", content[1]))
-            else:
-                format_str = "{:<" + str(self.key_len + 2) + "}{:s}"
-                print(format_str.format(content[0]+":", content[1]))
-
-
     def export(self):
         if self.outfile is None:
-            self.export_terminal()
+            print("%s" % self)
         else:
-            self.export_terminal()
+            print("%s" % self)
             outfile = open(self.outfile, "a+")
             if self.print_header:
                 header_fields = [content[0] for content in self.contents

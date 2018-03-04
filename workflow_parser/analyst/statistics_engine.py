@@ -16,10 +16,11 @@ from __future__ import print_function
 
 from collections import defaultdict
 from itertools import chain
+from itertools import zip_longest
 import pandas as pd
 
 from ..workflow.entities.request import RequestInstance
-from .automated_suite import general_purpose_analysis
+from .statistic_helper import Workflow
 
 
 def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
@@ -74,6 +75,9 @@ def _reset_starttime(requestinss, targetobjs_by_target, do_reset=True):
 
 
 def _convert_to_dataframe(objs, index, columns):
+    # objs: objs to be converted
+    # index: the index attr
+    # columns: appended "_entity" column
     if index is None:
         index_vals = None
     else:
@@ -102,12 +106,7 @@ def _convert_to_dataframe(objs, index, columns):
     return df
 
 
-def do_statistics(master_graph, requestinss, d_engine, report):
-    if not requestinss:
-        print("No requests available, abort!")
-        return
-
-    print("Preparing relations...")
+def generate_dataframes(requestinss):
     targetobjs_by_target = {t.target: t
                             for r in requestinss.values()
                             for t in r.target_objs}
@@ -118,6 +117,16 @@ def do_statistics(master_graph, requestinss, d_engine, report):
 
     ## adjust offset
     start_end = _reset_starttime(requestinss, targetobjs_by_target)
+
+    workflow_by_type = {}
+    for r_type, reqinss in requestinss_by_type.items():
+        requestins_iters = [r.iter_mainints() for r in reqinss]
+        workflow = Workflow(r_type)
+        for intervals in zip_longest(*requestins_iters):
+            workflow.build(intervals)
+        workflow.reduce()
+        workflow.ready()
+        workflow_by_type[r_type] = workflow
 
     ## prepare dataframes
     targets_df = _convert_to_dataframe(
@@ -138,14 +147,22 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_seconds",
              "from_time",
              "to_time",
-
-             "is_main",
+             "from_keyword",
+             "to_keyword",
              ("int_type", lambda i: i.__class__.__name__),
+
+             ("desc", lambda i: "%s: %s -> %s" % (i.path,
+                                                  i.from_keyword,
+                                                  i.to_keyword)),
+             "order",
+             "is_main",
              "remote_type",
              "from_target",
              "to_target",
              "from_host",
              "to_host",
+             ("hosts", lambda i: "%s -> %s" % (i.from_host,
+                                               i.to_host)),
              "from_component",
              "to_component",
              "from_thread",
@@ -163,28 +180,19 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_seconds",
              "from_time",
              "to_time",
-
-             "is_main",
+             "from_keyword",
+             "to_keyword",
              ("int_type", lambda i: i.__class__.__name__),
+
+             ("desc", lambda i: "%s: %s -> %s" % (i.path,
+                                                  i.from_keyword,
+                                                  i.to_keyword)),
+             "order",
+             "is_main",
              "target",
              "host",
              "component",
              "thread"))
-
-    extendedints_df = _convert_to_dataframe(
-            chain.from_iterable(req.iter_mainints() for req in requestinss.values()),
-            None,
-            ("request",
-             "request_type",
-             "int_name",
-             "lapse",
-             "path",
-             "from_seconds",
-             "to_seconds",
-             "from_time",
-             "to_time",
-             "from_keyword",
-             "to_keyword"))
 
     request_df = _convert_to_dataframe(
             requestinss.values(),
@@ -197,6 +205,9 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              "to_seconds",
              "from_time",
              "to_time",
+             "from_keyword",
+             "to_keyword",
+             ("int_type", lambda i: i.__class__.__name__),
 
              "request_state",
              "last_seconds",
@@ -208,11 +219,9 @@ def do_statistics(master_graph, requestinss, d_engine, report):
              ("len_targets", lambda r: len(r.target_objs)),
              ("len_hosts", lambda r: len(r.hosts))))
 
-    general_purpose_analysis(master_graph,
-                             requestinss, requestinss_by_type,
-                             targetobjs_by_target, start_end,
-                             join_intervals_df, td_intervals_df,
-                             extendedints_df, request_df, targets_df,
-                             d_engine, report)
-
-    report.export()
+    return (requestinss_by_type,
+            targetobjs_by_target,
+            workflow_by_type,
+            start_end,
+            join_intervals_df, td_intervals_df,
+            request_df, targets_df)

@@ -25,7 +25,7 @@ class WFException(Exception):
         return self._to_str(0)
 
     def _to_str(self, indent):
-        ret = "\n%s%s" % ("> "*indent, self.message)
+        ret = "\n%s%s" % ("> "*indent, self.args[0])
         if self.e:
             if isinstance(self.e, WFException):
                 ret += self.e._to_str(indent+1)

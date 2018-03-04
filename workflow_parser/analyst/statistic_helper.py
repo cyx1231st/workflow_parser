@@ -239,7 +239,8 @@ class Workflow(object):
                     weight = interval.component.vis_weight
                 else:
                     raise RuntimeError("Illegal interval %r" % interval)
-                desc = "%s -> %s" % (
+                desc = "%s: %s -> %s" % (
+                        interval.path,
                         interval.from_keyword,
                         interval.to_keyword)
 

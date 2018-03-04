@@ -32,6 +32,7 @@ class IntervalBase(object):
     def __init__(self):
         self._from_pace = None
         self._to_pace = None
+        self.order = 0
 
     ### from pace
     @property
@@ -534,6 +535,9 @@ class Pace(LineStateBase, object):
                 self.keyword,
                 self.line_context,
                 self.__repr_marks__())
+
+    def __hash__(self):
+        return id(self)
 
     def append_nxt(self, activity, template=None):
         assert isinstance(activity, ActivityBase)

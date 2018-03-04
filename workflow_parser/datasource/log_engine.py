@@ -32,11 +32,13 @@ from .exc import LogError
 class DriverPlugin(object):
     __metaclass__ = ABCMeta
 
-    def __init__(self, extensions=None):
-        if extensions is None:
-            self._extensions = ["log"]
-        else:
-            self._extensions = extensions
+    def __init__(self,
+            f_filter_logfile,
+            f_filter_logline,
+            extensions):
+        self._extensions = extensions
+        self.f_filter_logfile = f_filter_logfile
+        self.f_filter_logline = f_filter_logline
 
     def _purge_dict_empty_values(self, var_dict):
         for k in var_dict.keys():
@@ -62,7 +64,7 @@ class DriverPlugin(object):
 
         try:
             var_dict = {}
-            ret = self.filter_logfile(f_dir, f_name, var_dict)
+            ret = self.f_filter_logfile(f_dir, f_name, var_dict)
             assert isinstance(ret, bool)
             if ret:
                 # NOTE
@@ -75,7 +77,7 @@ class DriverPlugin(object):
                 return False, None
         except Exception as e:
             raise LogError(
-                "(LogDriver) `filter_logfile` error when f_name=%s"
+                "(LogDriver) `f_filter_logfile` error when f_name=%s"
                 % f_name, e)
 
     def do_filter_logline(self, line, lino, where):
@@ -85,22 +87,14 @@ class DriverPlugin(object):
 
         try:
             var_dict = {}
-            ret = self.filter_logline(line, var_dict)
+            ret = self.f_filter_logline(line, var_dict)
             assert all(isinstance(k, str) for k in var_dict.keys())
             self._purge_dict_empty_values(var_dict)
             assert isinstance(ret, bool)
             return ret, var_dict
         except Exception as e:
-            raise LogError("(LogDriver) `filter_logline` error at %s@%d %s"
+            raise LogError("(LogDriver) `f_filter_logline` error at %s@%d %s"
                 % (where, lino, line), e)
-
-    @abstractmethod
-    def filter_logfile(self, f_dir, f_name, var_dict):
-        pass
-
-    @abstractmethod
-    def filter_logline(self, line):
-        pass
 
 
 class FileDatasource(object):

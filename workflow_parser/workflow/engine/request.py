@@ -244,6 +244,35 @@ def _build_mainpath(reqins):
     return None
 
 
+def _set_orders(reqins):
+    assert isinstance(reqins, RequestInstance)
+    activity = reqins.start_activity
+    assert activity
+    # store path -> order
+    path_dict = defaultdict(lambda: 0)
+    # store act -> path_dict
+    bfdict = {}
+    bfdict[activity] = path_dict
+    while(bfdict):
+        npath_dict = {}
+        pacedict = {}
+        for act, path_dict in bfdict.items():
+            assert isinstance(act, ActivityBase)
+            path = act.path
+            order = path_dict[path]+1
+            act.order = order
+            npath_dict[path] = order
+            path_dict = path_dict.copy()
+            path_dict.update(npath_dict)
+            pacedict[act.to_pace] = path_dict
+        bfdict = {}
+        for pace, path_dict in pacedict.items():
+            if pace is not None:
+                for acts in pace.nxt_activity_bytype.values():
+                    for act in acts:
+                        bfdict[act] = path_dict
+
+
 class RequestBuilder(object):
     def __init__(self, request, joininfo, threadinss):
         assert isinstance(joininfo, JoinInfo)
@@ -398,6 +427,9 @@ class RequestBuilder(object):
             err = _build_mainpath(requestins)
             if err:
                 self.errors["Main route parse error"] = err
+
+        if not self.errors:
+            _set_orders(requestins)
 
         self.is_built = True
         if not self.errors:

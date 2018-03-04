@@ -12,9 +12,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from __future__ import print_function
-
 import heapq
+import inspect
+import sys
+
+
+def module_expose_api(module_name, m_locals):
+    module = sys.modules[module_name]
+    assert "__all__" not in dir(module)
+    module.__all__ = sorted(name for name, obj in m_locals.items()
+                            if not (name.startswith('_') or inspect.ismodule(obj)))
 
 
 def report_loglines(loglines, from_, to_=None, reason=None, blanks=0, printend=False):

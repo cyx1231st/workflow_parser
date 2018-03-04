@@ -12,40 +12,56 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from abc import ABCMeta
-from abc import abstractmethod
+import sys
 
 from . import reserved_vars as rv
 from .datasource.log_engine import DriverPlugin
 from .graph import Master
-from .parse import main1
 from .service_registry import ServiceRegistry
 
 
-class DriverBase(DriverPlugin):
-    __metaclass__ = ABCMeta
-
-    def __init__(self, services, name=None,
-            **kwgs):
+class Driver(DriverPlugin):
+    def __init__(self, services, graph, **kwgs):
         assert isinstance(services, ServiceRegistry)
+        assert isinstance(graph, Master)
 
-        if name is None:
-            self.name = self.__class__.__name__
-        else:
-            assert isinstance(name, str)
-            self.name = name
+        self.name = graph.name
         self.services = services
-        self.graph = Master(self.name)
+        self.graph = graph
 
-        self.build_graph(self.graph)
-        super(DriverBase, self).__init__(**kwgs)
+        # f_filter_logfile(self, f_dir, f_name):
+        # f_filter_logline(self, line):
+        # extentions = ["log"]
+        super(Driver, self).__init__(**kwgs)
 
-    def cmdrun(self):
-        main1(self)
 
-    @abstractmethod
-    def build_graph(self, graph):
-        pass
+def init(name):
+    return ServiceRegistry(), Master(name), rv
 
-    # def filter_logfile(self, f_dir, f_name):
-    # def filter_logline(self, line):
+
+def register_driver(module_name,
+        services, graph,
+        f_filter_logfile,
+        f_filter_logline,
+        extensions=None):
+
+    if not extensions:
+        extensions = ["log"]
+
+    driver = Driver(
+            services=services,
+            graph=graph,
+            f_filter_logfile=f_filter_logfile,
+            f_filter_logline=f_filter_logline,
+            extensions=extensions)
+
+    if module_name == "__main__":
+        from .loader import execute
+        execute(driver)
+    else:
+        module = sys.modules[module_name]
+        setattr(module, graph.name, driver)
+        module.__all__ = [graph.name]
+
+
+__all__ = ["init", "register_driver"]

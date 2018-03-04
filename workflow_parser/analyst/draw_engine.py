@@ -195,14 +195,17 @@ def _prepare_thread_indexes(thread_objs, plot_main=False):
 
 class DrawEngine(object):
     def __init__(self, out_path):
-        assert isinstance(out_path, str)
-
-        self.out_path = out_path
+        if not out_path:
+            self.out_path = None
+        else:
+            assert isinstance(out_path, str)
+            self.out_path = out_path
 
     @contextmanager
     def _build_fig(self, figtype, figname,
             figsize=None, title=None, tight=True):
-        print("(DrawEngine) drawing %s..." % figname)
+        if self.out_path:
+            print("(DrawEngine) drawing %s..." % figname)
 
         #### sns #####
         sns.set_style("whitegrid")
@@ -221,8 +224,18 @@ class DrawEngine(object):
 
         if tight:
             fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-        fig.savefig(self.out_path + figname + "_" + figtype + ".png")
-        print("ok")
+
+        if self.out_path:
+            fig.savefig(self.out_path + figname + "_" + figtype + ".png")
+        else:
+            from IPython.display import display_png
+            from IPython.core.pylabtools import print_figure
+            data = print_figure(fig, "png")
+            display_png(data, raw=True)
+        plt.close(fig)
+
+        if self.out_path:
+            print("ok")
 
 
     def draw_relation_heatmap(self, relation_df, name, fmt="d"):
@@ -235,8 +248,8 @@ class DrawEngine(object):
 
         relation_df = relation_df.ix[(relation_df.T!=0).any(),
                                      (relation_df!=0).any()]
-        relation_df.reindex_axis(sorted(relation_df.columns), axis=1)
-        relation_df.reindex_axis(sorted(relation_df.index))
+        relation_df.reindex(sorted(relation_df.columns), axis=1)
+        relation_df.reindex(sorted(relation_df.index))
         mask = relation_df[:].isin([0, np.NaN])
         l_col = len(relation_df.columns)
         l_row = len(relation_df)
@@ -283,27 +296,18 @@ class DrawEngine(object):
             ax_l.set_xticklabels([""]*l_col)
             ax_l.set_xlabel("")
 
-    def draw_violinplot(self, to_draw, name, x, y,
-                        hue=None, nth=None, scale=True,
-                        palette=None, color=None):
+    def draw_boxplot(self, to_draw, name, x, y,
+                     hue=None,
+                     palette=None, color=None,
+                     violin=True):
         x_groups = to_draw.groupby(x)[y]
-        ordered_x = x_groups.median().sort_values(ascending=False)
-        if nth is not None:
-            ordered_x = ordered_x[:nth]
-
-        if scale:
-            s = "count"
-            sh = False
-        else:
-            s = "width"
-            sh = True
-
-        kwargs = dict(split=False,
-                      inner="box",
-                      scale=s,
-                      scale_hue=sh,
-                      cut=0,
-                      bw=.1)
+        ordered_x = x_groups.median().sort_values(ascending=False).index
+        desc_max = 0
+        for _x in ordered_x:
+            desc_max = max(desc_max, len(str(_x)))
+        kwargs = dict(data=to_draw,
+                      color=color,
+                      palette=palette)
 
         if isinstance(to_draw, pd.Series) or isinstance(to_draw, list):
             pass
@@ -316,49 +320,62 @@ class DrawEngine(object):
         if hue is not None:
             fig_wid *= len(to_draw.groupby(hue))
 
-        with self._build_fig("violinplot", name,
-                figsize=(fig_wid+3, 5)) as fig:
-            ax = sns.violinplot(data=to_draw, order=ordered_x.index,
-                                palette=palette, color=color,
-                                **kwargs)
-            ax.set_xticklabels(ordered_x.index,rotation=90)
-            _patch_violinplot()
+        def _interact(x, draw_violin):
+            with self._build_fig("boxplot", name,
+                    figsize=(fig_wid+2, desc_max*0.07+7.5)) as fig:
+                _orderedx = []
+                for i in x:
+                    _orderedx.append(ordered_x[i])
+                _kwargs = kwargs.copy()
+                _kwargs["order"] = _orderedx
 
-    def draw_boxplot(self, to_draw, name, x, y,
-                     hue=None, nth=None, if_swarm=False,
-                     palette=None, color=None):
-        x_groups = to_draw.groupby(x)[y]
-        ordered_x = x_groups.median().sort_values(ascending=False)
-        if nth is not None:
-            ordered_x = ordered_x[:nth]
+                if draw_violin:
+                    _kwargs.update(dict(split=False,
+                                        inner="box",
+                                        scale="width", # or "count"
+                                        scale_hue=True, # or False
+                                        cut=0,
+                                        bw=.1))
+                    ax = sns.violinplot(**_kwargs)
+                    _patch_violinplot()
+                else:
+                    ax = sns.boxplot(**_kwargs)
 
-        kwargs = dict(data=to_draw,
-                      order=ordered_x.index)
+                x_labels = []
+                for k in _orderedx:
+                    x_labels.append("%s (%d)" % (k, len(x_groups.get_group(k))))
+                ax.set_xticklabels(x_labels,rotation=90)
 
-        if isinstance(to_draw, pd.Series) or isinstance(to_draw, list):
-            pass
-        elif isinstance(to_draw, pd.DataFrame):
-            kwargs.update({"x":x, "y":y, "hue":hue})
+        if self.out_path:
+            _interact(tuple(i for i in range(min(10, len(ordered_x)))), violin)
         else:
-            assert False
+            from ipywidgets import widgets, interactive_output, Layout
+            from IPython.display import display
 
-        fig_wid = len(ordered_x)*0.15
-        if hue is not None:
-            fig_wid *= len(to_draw.groupby(hue))
+            layout = Layout(width="99%")
+            w_violin = widgets.Checkbox(
+                    value=violin,
+                    description="plot violin")
+            options = [(v, i) for i, v in enumerate(ordered_x)]
+            w_range = widgets.SelectMultiple(
+                    options=options,
+                    index=tuple(i for i in range(min(10, len(ordered_x)))),
+                    rows=min(10, len(ordered_x)),
+                    description="x range",
+                    layout=layout)
 
-        with self._build_fig("boxplot", name,
-                figsize=(fig_wid+4, 5)) as fig:
-            ax = sns.boxplot(color=color, palette=palette, **kwargs)
-            x_labels = []
-            for k in ordered_x.index:
-                x_labels.append("%s(%d)" % (k, len(x_groups.get_group(k))))
-            ax.set_xticklabels(x_labels,rotation=90)
-            if if_swarm:
-                sns.swarmplot(**kwargs)
+            w_box = widgets.VBox([w_violin, w_range])
+            out = widgets.interactive_output(_interact,
+                                             {'x': w_range,
+                                              'draw_violin': w_violin})
+            display(w_box, out)
+
 
     def draw_distplot(self, to_draw, name):
         with self._build_fig("distplot", name) as fig:
-            sns.distplot(to_draw, kde=False, color="#86d7f5")
+            ax = fig.add_subplot(1,1,1)
+            ax.set_ylabel("count")
+            sns.distplot(to_draw, ax=ax, kde=False, color="#86d7f5")
 
     def draw_countplot(self, to_draw, name):
         with self._build_fig("countplot", name) as fig:
@@ -370,6 +387,14 @@ class DrawEngine(object):
                         height + 3,
                         '{:.2f}%'.format(height/total*100),
                         ha="center")
+
+    def draw_kdeplot(self, s_x, s_y, name):
+        with self._build_fig("kdeplot", name, figsize=(15, 7)) as fig:
+            cmap = sns.cubehelix_palette(
+                    as_cmap=True, dark=0, light=1, reverse=True)
+            ax = sns.kdeplot(s_x, s_y, cmap=cmap, shade=True, n_levels=100)
+            ax.set_xlim(s_x.min(), s_x.max())
+            ax.set_ylim(0, s_y.max())
 
     def draw_requestins(self, requestins, name, start_end=None):
         assert isinstance(requestins, RequestInstance)
@@ -396,6 +421,7 @@ class DrawEngine(object):
         start_t = start_end["time"]["start"]
         last_t = start_end["time"]["last"]
         all_lapse = last - start
+        last_plot = last + all_lapse * 0.05
 
         threadinss = list(threadinss)
         joinints = list(joinints)
@@ -439,7 +465,7 @@ class DrawEngine(object):
             ax.set_xlabel("lapse (seconds)")
             ax.set_ylabel("target | thread")
             ax.set_yticks(range(len(y_indexes_l)))
-            ax.set_xlim(0, last*1.05)
+            ax.set_xlim(start, last_plot)
             ax.set_ylim(.5, len(y_indexes_l)-0.5)
             ax.set_yticklabels(y_indexes_l)
             # ax2 = ax.twinx()
@@ -450,12 +476,12 @@ class DrawEngine(object):
 
             # 1. draw horizonal divide lines
             if plot_main:
-                ax.plot([start, last*1.05],
+                ax.plot([start, last_plot],
                         [1.5, 1.5],
                         color="#d0d0d0",
                         linewidth=10)
             for t_y in targets_y:
-                ax.plot([start, last*1.05],
+                ax.plot([start, last_plot],
                         [t_y, t_y],
                         linestyle=":",
                         color="#d0d0d0",
@@ -464,7 +490,7 @@ class DrawEngine(object):
             def _process_main(int_):
                 if plot_main and int_.is_main:
                     width = main_linewidth
-                    ax.plot([int_.from_seconds-start, int_.to_seconds-start],
+                    ax.plot([int_.from_seconds, int_.to_seconds],
                             [1, 1],
                             linestyle=int_style,
                             color=getcolor_byint(int_),
@@ -475,9 +501,9 @@ class DrawEngine(object):
 
             # 2. draw join intervals/main intervals
             for int_ in joinints:
-                from_x = int_.from_seconds - start
+                from_x = int_.from_seconds
                 from_y = tos_y[int_.from_threadobj]
-                to_x = int_.to_seconds - start
+                to_x = int_.to_seconds
                 to_y = tos_y[int_.to_threadobj]
                 width = _process_main(int_)
                 if to_y > from_y:
@@ -499,8 +525,8 @@ class DrawEngine(object):
                 color = ti.component.color
                 plot_y = tos_y[ti.thread_obj]
                 for int_ in ti.iter_ints():
-                    from_x = int_.from_seconds - start
-                    to_x = int_.to_seconds - start
+                    from_x = int_.from_seconds
+                    to_x = int_.to_seconds
                     linestyle = int_style
                     linewidth = _process_main(int_)
                     ax.plot([from_x, to_x],
@@ -521,21 +547,21 @@ class DrawEngine(object):
                 else:
                     t_marker = "."
                     color = "k"
-                ax.plot(ti.from_seconds-start, plot_y,
+                ax.plot(ti.from_seconds, plot_y,
                          marker=t_marker,
                          color=color,
                          markersize=markersize)
 
                 # annotate start edge
                 ax.annotate("%s" % ti.from_edgename,
-                             (ti.from_seconds-start, plot_y),
-                             (ti.from_seconds-start-annot_off_x, plot_y),
+                             (ti.from_seconds, plot_y),
+                             (ti.from_seconds-annot_off_x, plot_y),
                              **annot_kw)
 
                 marker=7
                 for int_ in ti.iter_ints():
-                    from_x = int_.from_seconds-start
-                    to_x = int_.to_seconds-start
+                    from_x = int_.from_seconds
+                    to_x = int_.to_seconds
 
                     # annotate thread interval
                     if marker == 6:
@@ -564,7 +590,7 @@ class DrawEngine(object):
                         t_marker = marker
                         color=ti_color
                         t_markersize=node_markersize
-                    ax.plot(int_.to_seconds-start, plot_y,
+                    ax.plot(int_.to_seconds, plot_y,
                              marker=t_marker,
                              color=color,
                              markersize=t_markersize)
@@ -585,9 +611,9 @@ class DrawEngine(object):
 
             # 5. annotate join intervals
             for int_ in joinints:
-                from_x = int_.from_seconds - start
+                from_x = int_.from_seconds
                 from_y = tos_y[int_.from_threadobj]
-                to_x = int_.to_seconds - start
+                to_x = int_.to_seconds
                 to_y = tos_y[int_.to_threadobj]
 
                 annot_str = "%s=%.2f" % (int_.int_name, int_.lapse)
@@ -599,9 +625,10 @@ class DrawEngine(object):
                             (anot_x, anot_y),
                             **annot_kw)
 
-            ax.annotate(start_t, xy=(0, .5), xytext=(0, 0.5))
+            ax.annotate(start_t, xy=(start, .5), xytext=(start, 0.5))
             ax.annotate(last_t, xy=(last, .5), xytext=(last, 0.5))
-            ax.plot([0, last], [.5, .5], 'r*')
+            ax.plot([start, last], [.5, .5], 'r*')
+
 
     def draw_workflow(self, start_end, workflow, name):
         assert isinstance(workflow, Workflow)
@@ -622,10 +649,10 @@ class DrawEngine(object):
                 for s in workflow.start_group.iter_nxtgroups())]))
 
         for group in workflow.sort_topologically():
-            int_name = group.int_name
+            _name = group.desc
             color = getcolor_byint(group.intervals[0], ignore_lr=True)
             main_stacked_results.append((
-                int_name,
+                _name,
                 color,
                 [(c.from_seconds, c.to_seconds)
                     for c in group.intervals]))
@@ -634,24 +661,96 @@ class DrawEngine(object):
         types, colors, main_x_list, main_ys_list =\
                 _generate_stackeddata(main_stacked_results)
 
-        # 3. calc the max y
-        y_max = workflow.len_reqs
+        # 3. calc and check the arguments
+        x_start_default = 0
+        y_start_default = 0
+        x_end_default = last_s*1.05
+        y_end_default = workflow.len_reqs
 
-        with self._build_fig("workflowplot", name,
-                figsize=(30, 6)) as fig:
-            ax = fig.add_subplot(1 ,1, 1)
-            ax.set_xlabel("lapse (seconds)")
-            ax.set_xlim(0, last_s*1.05)
-            ax.set_ylim(0, y_max)
-            ax.set_ylabel("MAIN")
+        def _interact(x, y, selects, color):
+            with self._build_fig("workflowplot", name,
+                    figsize=(30, 6)) as fig:
+                ax = fig.add_subplot(1 ,1, 1)
+                ax.set_xlabel("lapse (seconds)")
+                ax.set_ylabel("requests")
+                ax.set_xlim(x[0], x[1])
+                ax.set_ylim(y[0], y[1])
+                plot_colors = colors[:]
+                if color:
+                    for s in selects:
+                        plot_colors[s] = color
+                ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
+                ax.annotate(last_t, xy=(last_s, 0), xytext=(last_s, 0))
+                ax.plot([0, last_s], [0, 0], 'r*')
 
-            ax.annotate(start_t, xy=(0, 0), xytext=(0, 0))
-            ax.annotate(last_t, xy=(last_s, 0), xytext=(last_s, 0))
-            ax.plot([0, last_s], [0, 0], 'r*')
+                ax.stackplot(main_x_list, *main_ys_list, colors=plot_colors,
+                             edgecolor="black", linewidth=.1)
+                # ax.legend((mpatches.Patch(color=color) for color in colors), types)
 
-            ax.stackplot(main_x_list, *main_ys_list, colors=colors,
-                         edgecolor="black", linewidth=.1)
-            # ax.legend((mpatches.Patch(color=color) for color in colors), types)
+        if self.out_path:
+            _interact((x_start_default, x_end_default),
+                      (y_start_default, y_end_default),
+                      [],
+                      None,
+                      None)
+        else:
+            from ipywidgets import widgets, interactive_output, fixed, Layout
+            from IPython.display import display
+
+            layout = Layout(width="99%")
+            w_lapse = widgets.FloatRangeSlider(
+                value=[x_start_default, x_end_default],
+                min=x_start_default,
+                max=x_end_default,
+                step=0.0001,
+                description='x-lapse:',
+                continuous_update=False,
+                readout_format='.4f',
+                layout=layout
+            )
+            w_requests = widgets.IntRangeSlider(
+                value=[y_start_default, y_end_default],
+                min=y_start_default,
+                max=y_end_default,
+                description='y-requests:',
+                continuous_update=False,
+                layout=layout
+            )
+            w_range = widgets.VBox([w_lapse, w_requests])
+
+            w_color = widgets.ColorPicker(
+                concise=True,
+                description='Highlight:',
+                value='#ff40ff',
+                layout=layout
+            )
+            options = [types[i] for i in range(1, len(types)-1)]
+            dedup = defaultdict(lambda: -1)
+            for i, o in enumerate(options):
+                dedup[o] += 1
+                if dedup[o]:
+                    options[i] = ("%s (%d)" % (options[i], dedup[o]))
+            options = [(v, i+1) for i, v in enumerate(options)]
+            w_select = widgets.SelectMultiple(
+                options=options,
+                rows=min(10, len(options)),
+                description='Steps:',
+                layout=layout
+            )
+            w_highlight = widgets.VBox([w_color, w_select])
+
+            w_tab = widgets.Tab()
+            w_tab.children = [w_range, w_highlight]
+            w_tab.set_title(0, "range")
+            w_tab.set_title(1, "highlight")
+
+            out = widgets.interactive_output(_interact,
+                                             {'x': w_lapse,
+                                              'y': w_requests,
+                                              'selects': w_select,
+                                              'color': w_color})
+            display(w_tab, out)
+
 
     def draw_profiling(self, start_end, reqinss, name):
         start_s = start_end["seconds"]["start"]

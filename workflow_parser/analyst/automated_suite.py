@@ -26,7 +26,7 @@ from ..workflow.entities.join import InnerjoinActivity
 from ..workflow.entities.join import RequestjoinActivity
 from .draw_engine import DrawEngine
 from .statistic_helper import projection_time
-from .statistic_helper import Workflow
+from .statistics_engine import generate_dataframes
 from .draw_engine import (REMOTE_C,
                           LOCALREMOTE_C,
                           LOCAL_C,
@@ -57,88 +57,79 @@ def f_dist(iterable, lim=None):
     return "%s[%s|%s|%s]%s" % (i_min, i_25, i_50, i_75, i_max)
 
 
-def general_purpose_analysis(master_graph,
-                             requestinss_by_request, requestinss_byrtype,
-                             targetobjs_by_target, start_end,
-                             join_intervals_df, td_intervals_df,
-                             extendedints_df, request_df, targets_df,
-                             d_engine, report):
+def generate_reports(name, master_graph,
+                     requestinss_byrtype,
+                     targetobjs_by_target,
+                     workflow_byrtype,
+                     start_end,
+                     join_intervals_df, td_intervals_df,
+                     request_df, targets_df):
+    assert isinstance(name, str)
     assert isinstance(master_graph, Master)
-    assert isinstance(requestinss_by_request, dict)
-    assert isinstance(requestinss_byrtype, dict)
-    assert isinstance(targetobjs_by_target, dict)
-    assert isinstance(start_end, dict)
-    assert isinstance(join_intervals_df, pd.DataFrame)
-    assert isinstance(td_intervals_df, pd.DataFrame)
-    # NOTE: not extended now
-    assert isinstance(extendedints_df, pd.DataFrame)
-    assert isinstance(request_df, pd.DataFrame)
-    assert isinstance(targets_df, pd.DataFrame)
-    # assert isinstance(d_engine, DrawEngine)
-    assert isinstance(report, Report)
 
+    #####  request statistics  #####
+    report_r = Report(name)
     r_types = master_graph.request_types
     comps = master_graph.components
 
-    #####  recorded statistics  #####
     targetobjs_by_component = defaultdict(list)
     for t in targetobjs_by_target.values():
         targetobjs_by_component[t.component].append(t)
     for comp in comps:
-        report.register("targets %s" % comp,
+        report_r.register("targets %s" % comp,
                 len(targetobjs_by_component.get(comp, [])))
 
-    report.register("hosts",
+    report_r.register("hosts",
             len(set(t.host for t in targetobjs_by_target.values())))
 
     for comp in comps:
-        report.register("hosts %s" % comp,
+        report_r.register("hosts %s" % comp,
                 len(set(t.host for t in
                         targetobjs_by_component.get(comp, []))))
 
-    report.register("threads",
-            sum(len(t.thread_objs) for t in targetobjs_by_target.values()))
+    report_r.register("threads",
+            sum(len(t.thread_objs) for t in targets_df._entity))
 
     for comp in comps:
-        report.register("threads %s dist" % comp,
+        report_r.register("threads %s dist" % comp,
                 f_dist([len(t.thread_objs) for t in
                         targetobjs_by_component.get(comp, [])]))
 
-    report.register("threadinss",
-            sum(len(r.threadinss) for r in requestinss_by_request.values()))
+    report_r.register("threadinss",
+            sum(len(r.threadinss) for r in request_df._entity))
 
-    report.register("paces",
-            sum(r.len_paces for r in requestinss_by_request.values()))
+    report_r.register("paces",
+            sum(r.len_paces for r in request_df._entity))
 
     lapse_total = start_end["seconds"]["end"] - start_end["seconds"]["start"]
-    report.register("lapse", lapse_total)
+    report_r.register("lapse", lapse_total)
 
-    report.blank()
+    report_r.blank()
 
     for r_type in r_types:
-        report.register("%s reqs" % r_type,
+        report_r.register("%s reqs" % r_type,
                 len(requestinss_byrtype.get(r_type, [])))
 
-        report.register("%s targets dist" % r_type,
+        report_r.register("%s targets dist" % r_type,
                 f_dist([len(r.target_objs) for r in
                         requestinss_byrtype.get(r_type, [])]))
 
-        report.register("%s hosts dist" % r_type,
+        report_r.register("%s hosts dist" % r_type,
                 f_dist([len(r.hosts) for r in
                         requestinss_byrtype.get(r_type, [])]))
 
-        report.register("%s threads dist" % r_type,
+        report_r.register("%s threads dist" % r_type,
                 f_dist([len(r.thread_objs) for r in
                         requestinss_byrtype.get(r_type, [])]))
 
-        report.register("%s threadinss dist" % r_type,
+        report_r.register("%s threadinss dist" % r_type,
                 f_dist([len(r.threadinss) for r in
                         requestinss_byrtype.get(r_type, [])]))
 
-        report.register("%s paces dist" % r_type,
+        report_r.register("%s paces dist" % r_type,
                 f_dist([r.len_paces for r in
                         requestinss_byrtype.get(r_type, [])]))
-        report.blank()
+        report_r.blank()
 
     innerjoinints_df = join_intervals_df\
             .loc[join_intervals_df["int_type"] == InnerjoinActivity.__name__]
@@ -159,58 +150,59 @@ def general_purpose_analysis(master_graph,
     mainremotejoins_df = mainjoins_df[mainjoins_df["remote_type"]=="remote"]
 
     for r_type in r_types:
-        report.register("%s td_ints" % r_type,
+        report_r.register("%s td_ints" % r_type,
                 td_intervals_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s innerjoin_ints" % r_type,
+        report_r.register("%s innerjoin_ints" % r_type,
                 innerjoinints_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s crossjoin_ints" % r_type,
+        report_r.register("%s crossjoin_ints" % r_type,
                 crossjoinints_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s requestjoin_ints" % r_type,
+        report_r.register("%s requestjoin_ints" % r_type,
                 reqjoinints_df["request_type"].value_counts().get(r_type, 0))
 
-        report.register("%s lapse dist" % r_type,
+        report_r.register("%s lapse dist" % r_type,
                 "100.00% " +
                 f_dist([r.lapse for r in
                         requestinss_byrtype.get(r_type, [])], 5))
 
         cumulated = sum(r.lapse for r in requestinss_byrtype.get(r_type, []))
 
-        comp_df = extendedints_df[extendedints_df["request_type"] == r_type]
+        maintdints_df = td_intervals_df[td_intervals_df["is_main"]==True]
         for comp in comps:
-            _df = comp_df[comp_df["int_name"] == str(comp)]["lapse"]
-            report.register("%s %s dist:" % (r_type, comp),
+            _df = maintdints_df[maintdints_df["component"] == comp]["lapse"]
+            report_r.register("%s %s dist:" % (r_type, comp),
                     ("%6.2f%% " % (_df.sum()/cumulated*100))
                     + f_dist([v for v in _df], 9))
 
         _df = mainlocaljoins_df[mainlocaljoins_df["request_type"]==r_type]["lapse"]
-        report.register("%s local" % r_type,
+        report_r.register("%s local" % r_type,
                 ("%6.2f%% " % (_df.sum()/cumulated*100))
                 + f_dist([v for v in _df], 9))
 
         _df = mainremoteljoins_df[mainremoteljoins_df["request_type"]==r_type]["lapse"]
-        report.register("%s remote_l" % r_type,
+        report_r.register("%s remote_l" % r_type,
                 ("%6.2f%% " % (_df.sum()/cumulated*100))
                 + f_dist([v for v in _df], 9))
 
         _df = mainremotejoins_df[mainremotejoins_df["request_type"]==r_type]["lapse"]
-        report.register("%s remote_r" % r_type,
+        report_r.register("%s remote_r" % r_type,
                 ("%6.2f%% " % (_df.sum()/cumulated*100))
                 + f_dist([v for v in _df], 9))
 
         _df = mainnested_df[mainnested_df["request_type"]==r_type]["lapse"]
-        report.register("%s nest" % r_type,
+        report_r.register("%s nest" % r_type,
                 ("%6.2f%% " % (_df.sum()/cumulated*100))
                 + f_dist([v for v in _df], 9))
 
-        report.blank()
-
-    #####  printed statistics  #####
+    #####  interval statistics  #####
     report_i = Report("Intervals")
 
-    intsbypath_df = extendedints_df.groupby("path")
+    all_intervals_df = pd.concat([td_intervals_df, join_intervals_df],
+                                 join="inner", ignore_index=True)
+    main_intervals_df = all_intervals_df[all_intervals_df["is_main"]==True]
+    intsbypath_df = main_intervals_df.groupby("path")
     desc_bypath = {}
     for p_type, e_df in intsbypath_df:
         if len(e_df):
@@ -219,7 +211,7 @@ def general_purpose_analysis(master_graph,
                     e_df["to_keyword"].iloc[0])
             desc_bypath[p_type] = desc
 
-    addedup_total = extendedints_df["lapse"].sum()
+    addedup_total = main_intervals_df["lapse"].sum()
     report_i.register("Addedup total", "%.5f %.2f(rate)" % (
         addedup_total, addedup_total/lapse_total))
     addedup_df = intsbypath_df["lapse"]\
@@ -256,18 +248,28 @@ def general_purpose_analysis(master_graph,
         report_i.register("proj %s" % p_type,
                           "%.5f %.2f %s" % (proj_t, proj_ratio, desc_bypath[p_type]))
 
-    report_i.export()
+    return report_r, report_i
 
-    workflow_byrtype = {}
-    for r_type in r_types:
-        _requestinss = requestinss_byrtype.get(r_type, [])
-        requestins_iters = [r.iter_mainints() for r in _requestinss]
-        workflow = Workflow(r_type)
-        for intervals in zip_longest(*requestins_iters):
-            workflow.build(intervals)
-        workflow.reduce()
-        workflow.ready()
-        workflow_byrtype[r_type] = workflow
+
+def do_statistics(name, master_graph, requestinss, d_engine, out_file):
+    if not requestinss:
+        print("No requests available, abort!")
+        return
+
+    print("Preparing dataframes...")
+    ret = generate_dataframes(requestinss)
+
+    print("Generate reports...")
+    report_r, report_i = generate_reports(
+            name, master_graph, *ret)
+    if out_file:
+        report_r.set_outfile(out_file, True)
+    print()
+    report_r.export()
+    print()
+    report_i.export()
+    for r_type, workflow in ret[2].items():
+        print()
         print("%s" % workflow)
 
     #####  visualization  #####
@@ -324,7 +326,7 @@ def general_purpose_analysis(master_graph,
         d_engine.draw_relation_heatmap(componentremote_relations_df,
                 "component_remoterelations_pertarget", "f")
 
-        if len(requestinss_by_request) > 1:
+        if len(request_df) > 1:
             # 4. lapse distplot
             d_engine.draw_distplot(request_df["lapse"],
                     "request_lapse")
@@ -391,15 +393,12 @@ def general_purpose_analysis(master_graph,
                 "path", "lapse", palette=palette_path)
 
         # 13. all intervals lapse by path box/violinplot
-        all_intervals_df = pd.concat([td_intervals_df, join_intervals_df],
-                                     ignore_index=True)
         d_engine.draw_boxplot(all_intervals_df, "allints_lapse_bypath",
                               "path", "lapse", palette=palette_path, nth=20)
         d_engine.draw_violinplot(all_intervals_df, "allints_lapse_bypath",
                                  "path", "lapse", palette=palette_path, nth=20)
 
         # 14. main intervals lapse by path box/violinplot
-        main_intervals_df = all_intervals_df[all_intervals_df["is_main"]==True]
         d_engine.draw_boxplot(main_intervals_df, "mainints_lapse_bypath",
                               "path", "lapse", palette=palette_path)
         d_engine.draw_violinplot(main_intervals_df, "mainints_lapse_bypath",
