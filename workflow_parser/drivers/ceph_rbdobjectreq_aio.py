@@ -173,6 +173,8 @@ def filter_logline(line, var_dict):
         comp = client
     elif comp == "fio":
         comp = client
+    elif comp == "qemu-system-x86":
+        comp = client
     else:
         raise RuntimeError("Unknown component: %s" % comp)
     var_dict[rv.COMPONENT] = comp

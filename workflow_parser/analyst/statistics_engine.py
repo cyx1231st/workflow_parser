@@ -219,9 +219,29 @@ def generate_dataframes(requestinss):
              ("len_targets", lambda r: len(r.target_objs)),
              ("len_hosts", lambda r: len(r.hosts))))
 
+    #vars
+    invalid_keys = set()
+    valid_keys = set()
+    for req in requestinss.values():
+        for k, v in req.request_vars.items():
+            if len(v) > 1:
+                valid_keys.discard(k)
+                invalid_keys.add(k)
+            elif len(v) == 1:
+                if k not in invalid_keys:
+                    valid_keys.add(k)
+
+    def _get_val(k):
+        return lambda r: list(r.request_vars.get(k, [None]))[0]
+    request_vars_df = _convert_to_dataframe(
+            requestinss.values(),
+            "request",
+            ((k, _get_val(k)) for k in valid_keys))
+
     return (requestinss_by_type,
             targetobjs_by_target,
             workflow_by_type,
             start_end,
             join_intervals_df, td_intervals_df,
-            request_df, targets_df)
+            request_df, targets_df,
+            request_vars_df)

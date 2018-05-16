@@ -44,25 +44,11 @@ e6 , _   =  n1.build_endf("rosd_opcommit_exit")
 _  , n2  =  n1.build(  2, f_sendcli)
 _  , _   =  n2.build_endf(e6)
 
-# function main apply
-e35, n1 , f_mapply = graph.build_func(
-                       1, "rosd_opapply_entry", "mapply")
-e7 , _   =  n1.build_endf("rosd_opapply_exit")
-_  , n2  =  n1.build(  2, f_sendcli)
-_  , _   =  n2.build_endf(e7)
-
 # function replica commit
 e40, n1 , f_rcommit = graph.build_func(
                        1, "rosd_repopcommit_entry", "rcommit")
 _  , n2  =  n1.build(  2, f_sendosd)
 e  , _   =  n2.build_endf("rosd_repopcommit_exit")
-
-# function replica apply
-e45, n1 , f_rapply = graph.build_func(
-                       1, "rosd_repopapply_entry", "rapply")
-e8 , _   =  n1.build_endf("rosd_repopapply_exit")
-_  , n2  =  n1.build(  2, f_sendosd)
-_  , _   =  n2.build_endf(e8)
 
 #### request write_full ####
 # thread client issue writefull
@@ -96,17 +82,13 @@ e  , n22 = n21.build( 22, "rosd_issueop_entry")
 _  , _   = n22.build(n22, f_sendosd)
 e  , n23 = n22.build( 23, "rosd_issueop_exit")
 e26, n24 = n23.build( 24, "rosd_qtrans_entry")
-e50, n25 = n24.build( 25, "rosd_qtrans_exit")
-_  , n60 = n24.build( 60, f_mapply)
-_  , _   = n60.build(n25, e50)
+e  , n25 = n24.build( 25, "rosd_qtrans_exit")
 e52, n26 = n25.build( 26, "posd_doop_exit")
 e27, n27 = n26.build( 27, "osd_dequeueop_exit")
 # replica osd do_repop
 e  , n30 = n20.build( 30, "rosd_dorepop_entry")
 e28, n31 = n30.build( 31, "rosd_qtrans_entry")
-e51, n32 = n31.build( 32, "rosd_qtrans_exit")
-_  , n61 = n31.build( 61, f_rapply)
-_  , _   = n61.build(n32, e51)
+e  , n32 = n31.build( 32, "rosd_qtrans_exit")
 e  , n33 = n32.build( 33, "rosd_dorepop_exit")
 _  , _   = n33.build(n27, e27)
 # main osd do_repop_reply
@@ -122,17 +104,9 @@ _  , _   = n21.build(n26, e52)
 _  , n40 = graph.build_thread(osd,
                       40, f_mcommit)
 
-# thread main osd apply
-_  , n45 = graph.build_thread(osd,
-                      45, f_mapply)
-
 # thread replica osd on commit
 _  , n50 = graph.build_thread(osd,
                       50, f_rcommit)
-
-# thread replica osd on applied
-_  , n55 = graph.build_thread(osd,
-                      55, f_rapply)
 
 #### request imagereq states ####
 n12.set_state("SUCCESS")
@@ -158,16 +132,12 @@ j3 = e1.join_one(e20, True, ["tid",
 # main osd queue transactions
 j4 = e26.join_all(e30, False, ["tid",
                                "op_seq"])
-j5 = e26.join_all(e35, False, ["tid",
-                               "op_seq"])
 # replica osd queue transactions
-j6 = e28.join_all(e40, False, ["tid",
-                               "op_seq"])
-j7 = e28.join_all(e45, False, ["tid",
+j5 = e28.join_all(e40, False, ["tid",
                                "op_seq"])
 
 # main osd send reply
-j8 = e5.join_one(e15, True, ["tid",
+j6 = e5.join_one(e15, True, ["tid",
                              "msg_op",
                              ("target_t", "target_a"),
                              ("target_a", "target_s")])
@@ -204,6 +174,8 @@ def filter_logline(line, var_dict):
     elif comp == "python":
         comp = client
     elif comp == "fio":
+        comp = client
+    elif comp == "qemu-system-x86":
         comp = client
     else:
         raise RuntimeError("Unknown component: %s" % comp)

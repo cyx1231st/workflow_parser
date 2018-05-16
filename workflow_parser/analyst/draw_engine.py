@@ -691,7 +691,6 @@ class DrawEngine(object):
             _interact((x_start_default, x_end_default),
                       (y_start_default, y_end_default),
                       [],
-                      None,
                       None)
         else:
             from ipywidgets import widgets, interactive_output, fixed, Layout

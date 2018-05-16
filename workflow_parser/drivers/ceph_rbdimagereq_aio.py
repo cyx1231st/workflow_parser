@@ -12,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+#TODO: remove imagerequestwq_fail
+
 from workflow_parser.driver import init
 from workflow_parser.driver import register_driver
 
@@ -25,92 +27,107 @@ client.color = "#54c0e8"
 
 
 #### functions ####
-# function oreq send
-e0 , n1 , f_osend = graph.build_func(
+# function comp_fail
+e  , n1 , f_fail = graph.build_func(
+                       1, "ireqcomp_fail_entry", "fail")
+e  , n2  =  n1.build(  2, "ireqcomp_complete")
+e30, n3  =  n2.build_endf("ireqcomp_fail_exit")
+_  , _   =  n1.build_endf(e30)
+
+end1 = n2
+
+# function oreq dispatch
+e0 , n1 , f_odisp = graph.build_func(
                        1, "imagerequest_sendoreq_entry", "osend")
-e  , _   =  n1.build_endf("imagerequest_sendoreq_exit")
+## writex
+e20, n2  =  n1.build(  2, "dispatch_writex_entry")
+e24, n3  =  n2.build(  3, "dispatch_writex_exit")
+e  , n8  =  n2.build(  8, "dispatch_write_entry")
+e  , n9  =  n8.build(  9, "dispatch_write_exit")
+_  , _   =  n9.build( n3, e24)
+e21, _   =  n3.build_endf("imagerequest_sendoreq_exit")
+## journal
+e22, n4  =  n1.build(  4, "dispatch_journal_entry")
+e  , n5  =  n4.build(  5, "dispatch_journal_exit")
+_  , _   =  n5.build_endf(e21)
+## write
+e23, n6  =  n1.build(  6, "dispatch_write_entry")
+e  , n7  =  n6.build(  7, "dispatch_write_exit")
+_  , _   =  n7.build_endf(e21)
 
 # function imagereq send
 e  , n1 , f_isend = graph.build_func(
-                       1, "imagerequest_send_entry", "isend")
+                       1, "imagerequest_entry", "isend")
 ## fail
-e  , n2  =  n1.build(  2, "ireqcomp_fail_entry")
-e  , n3  =  n2.build(  3, "ireqcomp_complete")
-e  , n4  =  n3.build(  4, "ireqcomp_fail_exit")
-e1 , _   =  n4.build_endf("imagerequest_send_exit")
-## not fail
+e  , n2  =  n1.build(  2, f_fail)
+e1 , _   =  n2.build_endf("imagerequest_exit")
+## without imagecache
 e  , n5  =  n1.build(  5, "imagerequest_toextents")
-### send oreqs
-e2 , n6  =  n5.build(  6, f_osend)
+e2 , n6  =  n5.build(  6, f_odisp)
 _  , _   =  n6.build( n6, e2)
 _  , _   =  n6.build_endf(e1)
-### journal
-e3 , n7  =  n5.build(  7, "rbdjournal_enqueue")
-_  , _   =  n7.build_endf(e1)
-### objectcacher
-e12, n8  =  n5.build(  8, "imagectx_writex_entry")
-e13, n9  =  n8.build(  9, "imagectx_writex_exit")
-_  , _   =  n9.build( n8, e12)
-_  , _   =  n9.build_endf(e1)
-
-end1 = n3
+## with imagecache
+e  , n7  =  n1.build(  7, "imagerequest_icache_entry")
+e  , n8  =  n7.build(  8, "imagerequest_icache_exit")
+_  , _   =  n8.build_endf(e1)
 
 #### request imagereq ####
+
 # receive aio_write
-e14, n1  = graph.build_thread(client,
+e  , n1  = graph.build_thread(client,
                        1, "imagerequestwq_entry", "imagereq")
 ## enqueue ireq
-e4 , n2  =  n1.build(  2, "imagerequestwq_enqueue")
-e5 , n3  =  n2.build(  3, "imagerequestwq_exit")
+e4 , n2  =  n1.build(  2, "imagerequestwq_enqueue_entry")
+e  , n3  =  n2.build(  3, "imagerequestwq_enqueue_exit")
+e5 , n4  =  n3.build(  4, "imagerequestwq_exit")
 ## send ireq directly
-e  , n4  =  n1.build(  4, f_isend)
-_  , _   =  n4.build( n3, e5)
+e  , n5  =  n1.build(  5, f_isend)
+_  , _   =  n5.build( n4, e5)
+## fail
+e  , n6  =  n1.build(  6, f_fail)
+_  , _   =  n6.build( n4, e5)
 
 # dequeue ireq
-e6 , n5  = graph.build_thread(client,
-                       5, "imagerequestwq_dequeue_entry")
-e  , n6  =  n5.build(  6, f_isend)
-e  , n7  =  n6.build(  7, "imagerequestwq_dequeue_exit")
-
-# dequeue journal
-e7 , n10 = graph.build_thread(client,
-                      10, "rbdjournal_dequeue_entry")
-## oreq fail
-e  , n11 = n10.build( 11, "rbdjournal_failoreq")
-e  , n12 = n11.build( 12, "ireqcomp_finish_entry")
-e  , n13 = n12.build( 13, "ireqcomp_complete")
-e9 , _   = n13.build(n10, "ireqcomp_finish_exit")
-_  , _   = n12.build(n10, e9)
-## send oreqs
-e  , _   = n10.build(n10, f_osend)
-e  , n14 = n10.build( 14, "rbdjournal_dequeue_exit")
+e6 , n7  = graph.build_thread(client,
+                       7, "imagerequestwq_dequeue_entry")
+e  , n8  =  n7.build(  8, f_isend)
+e  , n9  =  n8.build(  9, "imagerequestwq_dequeue_exit")
 
 # aio complete
 e10, n15 = graph.build_thread(client,
-                      15, "ireqcomp_finish_entry")
-e  , n16 = n15.build( 16, "ireqcomp_complete")
-e  , n17 = n16.build( 17, "ireqcomp_finish_exit")
+                      15, "dispatch_comp_entry")
+## dispatch failed
+e  , n16 = n15.build( 16, "dispatch_comp_fail")
+e25, n17 = n16.build( 17, "ireqcomp_finish_entry")
+e  , n18 = n17.build( 18, "ireqcomp_complete")
+e26, n19 = n18.build( 19, "ireqcomp_finish_exit")
+_  , _   = n17.build(n19, e26)
+e27, n20 = n19.build( 20, "dispatch_comp_exit")
+## dispatch finish
+e  , n21 = n15.build( 21, "dispatch_comp_fin")
+_  , _   = n21.build(n17, e25)
+## dispatch continue
+e28, n22 = n15.build( 22, "dispatch_write_entry")
+e  , n23 = n22.build( 23, "dispatch_write_exit")
+_  , _   = n23.build(n20, e27)
 
 #### request imagereq states ####
 end1.set_state("FAIL")
-n13.set_state("FAIL_JOURNAL")
-n16.set_state("SUCCESS")
-e0.refresh_var("comp")
-e12.refresh_var("comp")
-e4.refresh_var("ireq")
+n18.set_state("SUCCESS")
+#e0.refresh_var("comp")
+e20.refresh_var("spec_comp")
+e22.refresh_var("spec_comp")
+e23.refresh_var("spec_comp")
+e4.refresh_var("ireq_spec")
 
 #### relationship ####
-# oreq completes
-j1 =  e0.join_one(e10, False, ["comp"])
+# oreq dispatch
+j1 = e20.join_one(e10, False, ["spec_comp"])
+j2 = e22.join_one(e10, False, ["spec_comp"])
+j3 = e23.join_one(e10, False, ["spec_comp"])
 
-# journal enqueue
-j2 =  e3.join_one( e7, False, ["jtid"])
-
-# writex completes
-j3 = e12.join_one(e10, False, ["comp"])
-
-# ireq enqueue
-j4 =  e4.join_one( e6, False, ["ireq"])
+# ireq enqueue/dequeue
+j4 =  e4.join_one( e6, False, ["ireq_spec"])
 
 
 def filter_logfile(f_dir, f_name, var_dict):
@@ -142,6 +159,8 @@ def filter_logline(line, var_dict):
     if comp == "python":
         comp = client
     elif comp == "fio":
+        comp = client
+    elif comp == "qemu-system-x86":
         comp = client
     else:
         raise RuntimeError("Unknown component: %s" % comp)

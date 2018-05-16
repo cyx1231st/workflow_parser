@@ -63,7 +63,8 @@ def generate_reports(name, master_graph,
                      workflow_byrtype,
                      start_end,
                      join_intervals_df, td_intervals_df,
-                     request_df, targets_df):
+                     request_df, targets_df,
+                     request_vars_df):
     assert isinstance(name, str)
     assert isinstance(master_graph, Master)
 
@@ -251,6 +252,150 @@ def generate_reports(name, master_graph,
     return report_r, report_i
 
 
+def generate_graph(d_engine,
+                   requestinss_byrtype,
+                   targetobjs_by_target,
+                   workflow_byrtype,
+                   start_end,
+                   join_intervals_df, td_intervals_df,
+                   request_df, targets_df,
+                   request_vars_df):
+    alljoins_df = join_intervals_df[join_intervals_df["int_type"]!=RequestjoinActivity.__name__]
+    all_intervals_df = pd.concat([td_intervals_df, join_intervals_df],
+                                 join="inner", ignore_index=True)
+    main_intervals_df = all_intervals_df[all_intervals_df["is_main"]==True]
+    # 1. host remote relations heatmap
+    crosshost_relations_df = alljoins_df\
+            .loc[alljoins_df["remote_type"] != "local"]\
+            .groupby(["from_host", "to_host"])\
+            .size()\
+            .unstack()\
+            .fillna(0)\
+            .astype("int")
+    crosshost_relations_df.index.name = "from_host"
+    crosshost_relations_df.columns.name = "to_host"
+    d_engine.draw_relation_heatmap(crosshost_relations_df,
+            "host_remote_relations")
+
+    # 2. component local relations per target heatmap
+    componentlocal_relations_df = alljoins_df\
+            [alljoins_df["remote_type"]=="local"]\
+            .groupby(["from_target", "to_target"])\
+            .size()\
+            .reset_index()\
+            .join(targets_df, on="from_target")\
+            .join(targets_df, on="to_target",
+                  lsuffix="_from", rsuffix="_to")\
+            .groupby(["component_from", "component_to"])\
+            .mean()\
+            .unstack()
+    componentlocal_relations_df.index.name = "from_component"
+    componentlocal_relations_df.columns =\
+            componentlocal_relations_df.columns.droplevel()
+    componentlocal_relations_df.columns.name = "to_component"
+    d_engine.draw_relation_heatmap(componentlocal_relations_df,
+            "component_localrelations_pertarget", "f")
+
+    # 3. component remote relations per target heatmap
+    componentremote_relations_df = alljoins_df\
+            [alljoins_df["remote_type"]!="locol"]\
+            .groupby(["from_target", "to_target"])\
+            .size()\
+            .reset_index()\
+            .join(targets_df, on="from_target")\
+            .join(targets_df, on="to_target",
+                    lsuffix="_from", rsuffix="_to")\
+            .groupby(["component_from", "component_to"])\
+            .mean()\
+            .unstack()
+    componentremote_relations_df.index.name = "from_component"
+    componentremote_relations_df.columns =\
+            componentremote_relations_df.columns.droplevel()
+    componentremote_relations_df.columns.name = "to_component"
+    d_engine.draw_relation_heatmap(componentremote_relations_df,
+            "component_remoterelations_pertarget", "f")
+
+    if len(request_df) > 1:
+        # 4. lapse distplot
+        d_engine.draw_distplot(request_df["lapse"],
+                "request_lapse")
+
+        # 5. paces distplot
+        d_engine.draw_distplot(request_df["len_paces"],
+                "request_paces")
+
+        # 6. hosts distplot
+        d_engine.draw_distplot(request_df["len_hosts"],
+                "request_hosts")
+
+        # 7. threadinss distplot
+        d_engine.draw_distplot(request_df["len_threadinss"],
+                "request_threadinss")
+
+    # 8. longest lapse requestins plot
+    longestlapse_req = request_df\
+            .loc[request_df["lapse"].idxmax()]\
+            ["_entity"]
+    d_engine.draw_requestins(longestlapse_req,
+            "longest_lapse_requestins", start_end)
+
+    # 9. longest paces requestins plot
+    longestpaces_req = request_df\
+            .loc[request_df["len_paces"].idxmax()]\
+            ["_entity"]
+    d_engine.draw_requestins(longestpaces_req,
+            "longest_paces_requestins", start_end)
+
+    palette = {"remote": REMOTE_C,
+               "local_remote": LOCALREMOTE_C,
+               "local": LOCAL_C}
+    # 10. join intervals lapse by remote type box/violinplot
+    if not len(alljoins_df):
+        print("No joins to print")
+    else:
+        d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
+                "path", "lapse", hue="remote_type", palette=palette)
+
+    # 11. top 5 slowest thread intervals by host boxplot
+    ordered_x = td_intervals_df.groupby("path")["lapse"].median()
+    ordered_x.sort_values(ascending=False, inplace=True)
+    ordered_x = ordered_x.keys()
+    lim = min(len(ordered_x), 5)
+    for i in range(lim):
+        to_draw = td_intervals_df[td_intervals_df["path"]==ordered_x[i]]
+        d_engine.draw_boxplot(to_draw, "tdint_%s_byhost" % ordered_x[i],
+                              x="host", y="lapse",
+                              color=to_draw.iloc[0]["component"].color)
+
+    palette_path = {}
+    for r in chain(td_intervals_df.iterrows(),
+                   join_intervals_df.iterrows()):
+        r = r[1]
+        palette_path[r["path"]] = getcolor_byint(r["_entity"],
+                ignore_lr=True)
+    # 12. thread intervals lapse by path box/violinplot
+    d_engine.draw_boxplot(td_intervals_df, "tdints_lapse_bypath",
+            "path", "lapse", palette=palette_path)
+
+    # 13. all intervals lapse by path box/violinplot
+    d_engine.draw_boxplot(all_intervals_df, "allints_lapse_bypath",
+                          "path", "lapse", palette=palette_path)
+
+    # 14. main intervals lapse by path box/violinplot
+    d_engine.draw_boxplot(main_intervals_df, "mainints_lapse_bypath",
+                          "path", "lapse", palette=palette_path)
+
+    for r_type in requestinss_byrtype.keys():
+        # 15. workflow plot
+        d_engine.draw_workflow(start_end,
+                workflow_byrtype[r_type],
+                r_type)
+        # 16. stacked intervals plot
+        d_engine.draw_profiling(start_end,
+                requestinss_byrtype[r_type],
+                r_type)
+
+
 def do_statistics(name, master_graph, requestinss, d_engine, out_file):
     if not requestinss:
         print("No requests available, abort!")
@@ -274,142 +419,4 @@ def do_statistics(name, master_graph, requestinss, d_engine, out_file):
 
     #####  visualization  #####
     if d_engine:
-        alljoins_df = join_intervals_df[join_intervals_df["int_type"]!=RequestjoinActivity.__name__]
-        # 1. host remote relations heatmap
-        crosshost_relations_df = alljoins_df\
-                .loc[alljoins_df["remote_type"] != "local"]\
-                .groupby(["from_host", "to_host"])\
-                .size()\
-                .unstack()\
-                .fillna(0)\
-                .astype("int")
-        crosshost_relations_df.index.name = "from_host"
-        crosshost_relations_df.columns.name = "to_host"
-        d_engine.draw_relation_heatmap(crosshost_relations_df,
-                "host_remote_relations")
-
-        # 2. component local relations per target heatmap
-        componentlocal_relations_df = alljoins_df\
-                [alljoins_df["remote_type"]=="local"]\
-                .groupby(["from_target", "to_target"])\
-                .size()\
-                .reset_index()\
-                .join(targets_df, on="from_target")\
-                .join(targets_df, on="to_target",
-                      lsuffix="_from", rsuffix="_to")\
-                .groupby(["component_from", "component_to"])\
-                .mean()\
-                .unstack()
-        componentlocal_relations_df.index.name = "from_component"
-        componentlocal_relations_df.columns =\
-                componentlocal_relations_df.columns.droplevel()
-        componentlocal_relations_df.columns.name = "to_component"
-        d_engine.draw_relation_heatmap(componentlocal_relations_df,
-                "component_localrelations_pertarget", "f")
-
-        # 3. component remote relations per target heatmap
-        componentremote_relations_df = alljoins_df\
-                [alljoins_df["remote_type"]!="locol"]\
-                .groupby(["from_target", "to_target"])\
-                .size()\
-                .reset_index()\
-                .join(targets_df, on="from_target")\
-                .join(targets_df, on="to_target",
-                        lsuffix="_from", rsuffix="_to")\
-                .groupby(["component_from", "component_to"])\
-                .mean()\
-                .unstack()
-        componentremote_relations_df.index.name = "from_component"
-        componentremote_relations_df.columns =\
-                componentremote_relations_df.columns.droplevel()
-        componentremote_relations_df.columns.name = "to_component"
-        d_engine.draw_relation_heatmap(componentremote_relations_df,
-                "component_remoterelations_pertarget", "f")
-
-        if len(request_df) > 1:
-            # 4. lapse distplot
-            d_engine.draw_distplot(request_df["lapse"],
-                    "request_lapse")
-
-            # 5. paces distplot
-            d_engine.draw_distplot(request_df["len_paces"],
-                    "request_paces")
-
-            # 6. hosts distplot
-            d_engine.draw_distplot(request_df["len_hosts"],
-                    "request_hosts")
-
-            # 7. threadinss distplot
-            d_engine.draw_distplot(request_df["len_threadinss"],
-                    "request_threadinss")
-
-        # 8. longest lapse requestins plot
-        longestlapse_req = request_df\
-                .loc[request_df["lapse"].idxmax()]\
-                ["_entity"]
-        d_engine.draw_requestins(longestlapse_req,
-                "longest_lapse_requestins", start_end)
-
-        # 9. longest paces requestins plot
-        longestpaces_req = request_df\
-                .loc[request_df["len_paces"].idxmax()]\
-                ["_entity"]
-        d_engine.draw_requestins(longestpaces_req,
-                "longest_paces_requestins", start_end)
-
-        palette = {"remote": REMOTE_C,
-                   "local_remote": LOCALREMOTE_C,
-                   "local": LOCAL_C}
-        # 10. join intervals lapse by remote type box/violinplot
-        if not len(alljoins_df):
-            print("No joins to print")
-        else:
-            d_engine.draw_boxplot(alljoins_df, "joinintervals_lapse_bytype",
-                    "path", "lapse", hue="remote_type", palette=palette)
-            d_engine.draw_violinplot(alljoins_df, "joinintervals_lapse_bytype",
-                    "path", "lapse", hue="remote_type", palette=palette)
-
-        # 11. top 5 slowest thread intervals by host boxplot
-        ordered_x = td_intervals_df.groupby("path")["lapse"].median()
-        ordered_x.sort_values(ascending=False, inplace=True)
-        ordered_x = ordered_x.keys()
-        lim = min(len(ordered_x), 5)
-        for i in range(lim):
-            to_draw = td_intervals_df[td_intervals_df["path"]==ordered_x[i]]
-            d_engine.draw_boxplot(to_draw, "tdint_%s_byhost" % ordered_x[i],
-                                  x="host", y="lapse",
-                                  color=to_draw.iloc[0]["component"].color)
-
-        palette_path = {}
-        for r in chain(td_intervals_df.iterrows(),
-                       join_intervals_df.iterrows()):
-            r = r[1]
-            palette_path[r["path"]] = getcolor_byint(r["_entity"],
-                    ignore_lr=True)
-        # 12. thread intervals lapse by path box/violinplot
-        d_engine.draw_boxplot(td_intervals_df, "tdints_lapse_bypath",
-                "path", "lapse", palette=palette_path)
-        d_engine.draw_violinplot(td_intervals_df, "tdints_lapse_bypath",
-                "path", "lapse", palette=palette_path)
-
-        # 13. all intervals lapse by path box/violinplot
-        d_engine.draw_boxplot(all_intervals_df, "allints_lapse_bypath",
-                              "path", "lapse", palette=palette_path, nth=20)
-        d_engine.draw_violinplot(all_intervals_df, "allints_lapse_bypath",
-                                 "path", "lapse", palette=palette_path, nth=20)
-
-        # 14. main intervals lapse by path box/violinplot
-        d_engine.draw_boxplot(main_intervals_df, "mainints_lapse_bypath",
-                              "path", "lapse", palette=palette_path)
-        d_engine.draw_violinplot(main_intervals_df, "mainints_lapse_bypath",
-                              "path", "lapse", palette=palette_path)
-
-        for r_type in requestinss_byrtype.keys():
-            # 15. workflow plot
-            d_engine.draw_workflow(start_end,
-                    workflow_byrtype[r_type],
-                    r_type)
-            # 16. stacked intervals plot
-            d_engine.draw_profiling(start_end,
-                    requestinss_byrtype[r_type],
-                    r_type)
+        generate_graph(d_engine, *ret)

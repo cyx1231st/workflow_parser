@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from ipywidgets import interact
 from ipywidgets import fixed
@@ -56,11 +57,14 @@ class Requests_D(object):
          # *"target",
          # "component",
          # "host"
-         self.df_targets) = ret
+         self.df_targets,
+         self.df_request_vars) = ret
         df_ints_join = df_ints_join_all[df_ints_join_all["int_type"]!=RequestjoinActivity.__name__]
         self._intervals_d = Intervals_D(
                 "Ints<<"+self.name, self, None, df_ints_thread, df_ints_join)
         (self._report_r, self._report_i) = generate_reports(name, graph, *ret)
+        (self._report_r, self._report_i) = generate_reports(
+                name, graph, *ret[0:-1])
 
     @property
     def Intervals(self):
@@ -127,6 +131,30 @@ class Requests_D(object):
                 self.df_requests["len_threads"],
                 "request_threads")
 
+    def display_dist_bykey(self, key):
+        if key not in self.list_req_keys():
+            print("key %s doesn't exist!" % key)
+            return
+
+        len_vals = len(self.list_req_vars(key))
+        if len_vals <= 20:
+            self._draw_engine.draw_countplot(
+                    self.df_request_vars[key],
+                    "request_key(%s)" % key)
+        else:
+            if np.issubdtype(self.df_request_vars[key].dtype, np.number):
+                self._draw_engine.draw_distplot(
+                        self.df_request_vars[key],
+                        "request_key(%s)" % key)
+            else:
+                print("%d request -> %d kinds of %s"
+                        % (len(self.df_requests),
+                           len(self.df_request_vars[key].unique()),
+                           key))
+
+    def filter_bykv(self, k, v):
+        pass
+
     def find_req_byname(self, name):
         try:
             req = self.df_requests.loc[name]["_entity"]
@@ -160,6 +188,17 @@ class Requests_D(object):
 
     def list_req_names(self):
         return self.df_requests.index
+
+    def list_req_keys(self):
+        ret = set(self.df_request_vars.columns)
+        ret.discard("_entity")
+        return ret
+
+    def list_req_vars(self, key):
+        if key not in self.list_req_keys():
+            print("key %s doesn't exist!" % key)
+            return
+        return sorted(self.df_request_vars[key].unique())
 
 
 class Request_D(object):
