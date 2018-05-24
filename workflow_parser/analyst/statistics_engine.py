@@ -82,7 +82,7 @@ def _convert_to_dataframe(objs, index, columns):
         index_vals = None
     else:
         objs = [obj for obj in objs]
-        index_vals = (getattr(obj, index) for obj in objs)
+        index_vals = [getattr(obj, index) for obj in objs]
     f_getvals = []
     cols = []
     for col in columns:
