@@ -63,8 +63,6 @@ class Requests_D(object):
         self._intervals_d = Intervals_D(
                 "Ints<<"+self.name, self, None, df_ints_thread, df_ints_join)
         (self._report_r, self._report_i) = generate_reports(name, graph, *ret)
-        (self._report_r, self._report_i) = generate_reports(
-                name, graph, *ret[0:-1])
 
     @property
     def Intervals(self):
